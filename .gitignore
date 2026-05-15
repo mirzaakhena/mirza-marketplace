@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Bot credentials (jangan commit token!)
+.env
+.env.local
+.env.*.local
+
+# Runtime state (dibuat user di ~/.claude/channels/telegram/)
+access.json
+approved/
+inbox/
+bot.pid
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

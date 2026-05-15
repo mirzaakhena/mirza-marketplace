@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "mirza-marketplace",
+  "description": "Mirza's custom Claude Code plugins. Fork of selected plugins from claude-plugins-official with personal modifications.",
+  "owner": {
+    "name": "Mirza"
+  },
+  "plugins": [
+    {
+      "name": "telegram",
+      "description": "Custom Telegram channel for Claude Code with a /hello command. Forked from the official Telegram plugin.",
+      "category": "productivity",
+      "source": "./plugins/telegram"
+    }
+  ]
+}
