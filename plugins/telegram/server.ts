@@ -62,6 +62,9 @@ const MESSAGES_DB = join(STATE_DIR, 'messages.db')
 mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })
 const messagesStore = createMessagesStore({ dbPath: MESSAGES_DB })
 messagesStore.init()
+// Spec D1: messages.db sensitivity matches access.json — enforce 0o600
+// after init creates the file. No-op on Windows where chmod is meaningless.
+try { chmodSync(MESSAGES_DB, 0o600) } catch {}
 try {
   const stale = parseInt(readFileSync(PID_FILE, 'utf8'), 10)
   if (stale > 1 && stale !== process.pid) {
