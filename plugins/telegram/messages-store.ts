@@ -72,8 +72,24 @@ export function createMessagesStore(opts: { dbPath: string }): MessagesStore {
       db.exec('PRAGMA synchronous = NORMAL')
       db.exec(SCHEMA_SQL)
     },
-    logInbound(_input: InboundLogInput): void {
-      // Implemented in Task 2.
+    logInbound(input: InboundLogInput): void {
+      if (!db) return
+      const stmt = db.prepare(
+        `INSERT INTO messages
+          (ts, chat_id, message_id, source, user_id, user_name, text, attachments, reply_to, metadata)
+         VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?)`,
+      )
+      stmt.run(
+        input.ts,
+        input.chat_id,
+        input.message_id ?? null,
+        input.user_id ?? null,
+        input.user_name ?? null,
+        input.text ?? null,
+        input.attachments ? JSON.stringify(input.attachments) : null,
+        input.reply_to ?? null,
+        input.metadata ? JSON.stringify(input.metadata) : null,
+      )
     },
     logOutbound(_input: OutboundLogInput): void {
       // Implemented in Task 4.

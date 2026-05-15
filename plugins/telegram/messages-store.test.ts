@@ -38,3 +38,35 @@ describe('messages-store: init', () => {
     store.close()
   })
 })
+
+describe('messages-store: logInbound text-only', () => {
+  test('persists text inbound with required fields', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    store.logInbound({
+      ts: 1700000000000,
+      chat_id: '12345',
+      message_id: '99',
+      user_id: '777',
+      user_name: 'mirza',
+      text: 'halo',
+    })
+
+    const rows = store._dbForTest().query('SELECT * FROM messages').all() as any[]
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      ts: 1700000000000,
+      chat_id: '12345',
+      message_id: '99',
+      source: 'user',
+      user_id: '777',
+      user_name: 'mirza',
+      text: 'halo',
+      attachments: null,
+      reply_to: null,
+      metadata: null,
+    })
+    store.close()
+  })
+})
