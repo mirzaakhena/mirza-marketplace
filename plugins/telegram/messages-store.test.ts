@@ -143,3 +143,26 @@ describe('messages-store: logOutbound', () => {
     store.close()
   })
 })
+
+describe('messages-store: logOutbound system source', () => {
+  test('persists system source with triggered_by metadata', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    store.logOutbound({
+      ts: 1700000002000,
+      chat_id: '12345',
+      message_id: '102',
+      source: 'system',
+      text: 'reminder: minum air',
+      metadata: { triggered_by: 'cron:hydration' },
+    })
+
+    const row = store._dbForTest()
+      .query('SELECT source, metadata FROM messages WHERE message_id = ?')
+      .get('102') as any
+    expect(row.source).toBe('system')
+    expect(JSON.parse(row.metadata)).toEqual({ triggered_by: 'cron:hydration' })
+    store.close()
+  })
+})
