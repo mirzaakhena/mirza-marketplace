@@ -91,8 +91,23 @@ export function createMessagesStore(opts: { dbPath: string }): MessagesStore {
         input.metadata ? JSON.stringify(input.metadata) : null,
       )
     },
-    logOutbound(_input: OutboundLogInput): void {
-      // Implemented in Task 4.
+    logOutbound(input: OutboundLogInput): void {
+      if (!db) return
+      const stmt = db.prepare(
+        `INSERT INTO messages
+          (ts, chat_id, message_id, source, text, attachments, reply_to, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      stmt.run(
+        input.ts,
+        input.chat_id,
+        input.message_id ?? null,
+        input.source,
+        input.text ?? null,
+        input.attachments ? JSON.stringify(input.attachments) : null,
+        input.reply_to ?? null,
+        input.metadata ? JSON.stringify(input.metadata) : null,
+      )
     },
     logEdit(_input: EditLogInput): void {
       // Implemented in Task 6.

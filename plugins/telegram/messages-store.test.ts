@@ -116,3 +116,30 @@ describe('messages-store: logInbound full payload', () => {
     store.close()
   })
 })
+
+describe('messages-store: logOutbound', () => {
+  test('persists outbound with source=assistant', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    store.logOutbound({
+      ts: 1700000001000,
+      chat_id: '12345',
+      message_id: '101',
+      source: 'assistant',
+      text: 'oke siap',
+    })
+
+    const row = store._dbForTest()
+      .query('SELECT * FROM messages WHERE message_id = ?')
+      .get('101') as any
+    expect(row).toMatchObject({
+      source: 'assistant',
+      chat_id: '12345',
+      text: 'oke siap',
+      user_id: null,
+      user_name: null,
+    })
+    store.close()
+  })
+})
