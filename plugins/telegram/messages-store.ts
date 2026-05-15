@@ -63,70 +63,95 @@ CREATE INDEX IF NOT EXISTS idx_messages_source  ON messages(source, ts DESC);
 
 export function createMessagesStore(opts: { dbPath: string }): MessagesStore {
   let db: Database | null = null
+  let disabled = false
+
+  function warn(stage: string, err: unknown): void {
+    const msg = err instanceof Error ? err.message : String(err)
+    process.stderr.write(`telegram channel: messages-store ${stage} failed: ${msg}\n`)
+  }
 
   return {
     init(): void {
-      if (db != null) return
-      db = new Database(opts.dbPath, { create: true })
-      db.exec('PRAGMA journal_mode = WAL')
-      db.exec('PRAGMA synchronous = NORMAL')
-      db.exec(SCHEMA_SQL)
+      if (db != null || disabled) return
+      try {
+        db = new Database(opts.dbPath, { create: true })
+        db.exec('PRAGMA journal_mode = WAL')
+        db.exec('PRAGMA synchronous = NORMAL')
+        db.exec(SCHEMA_SQL)
+      } catch (err) {
+        warn('init', err)
+        disabled = true
+        try { db?.close() } catch {}
+        db = null
+      }
     },
     logInbound(input: InboundLogInput): void {
       if (!db) return
-      const stmt = db.prepare(
-        `INSERT INTO messages
-          (ts, chat_id, message_id, source, user_id, user_name, text, attachments, reply_to, metadata)
-         VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?)`,
-      )
-      stmt.run(
-        input.ts,
-        input.chat_id,
-        input.message_id ?? null,
-        input.user_id ?? null,
-        input.user_name ?? null,
-        input.text ?? null,
-        input.attachments ? JSON.stringify(input.attachments) : null,
-        input.reply_to ?? null,
-        input.metadata ? JSON.stringify(input.metadata) : null,
-      )
+      try {
+        const stmt = db.prepare(
+          `INSERT INTO messages
+            (ts, chat_id, message_id, source, user_id, user_name, text, attachments, reply_to, metadata)
+           VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?)`,
+        )
+        stmt.run(
+          input.ts,
+          input.chat_id,
+          input.message_id ?? null,
+          input.user_id ?? null,
+          input.user_name ?? null,
+          input.text ?? null,
+          input.attachments ? JSON.stringify(input.attachments) : null,
+          input.reply_to ?? null,
+          input.metadata ? JSON.stringify(input.metadata) : null,
+        )
+      } catch (err) {
+        warn('write', err)
+      }
     },
     logOutbound(input: OutboundLogInput): void {
       if (!db) return
-      const stmt = db.prepare(
-        `INSERT INTO messages
-          (ts, chat_id, message_id, source, text, attachments, reply_to, metadata)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      stmt.run(
-        input.ts,
-        input.chat_id,
-        input.message_id ?? null,
-        input.source,
-        input.text ?? null,
-        input.attachments ? JSON.stringify(input.attachments) : null,
-        input.reply_to ?? null,
-        input.metadata ? JSON.stringify(input.metadata) : null,
-      )
+      try {
+        const stmt = db.prepare(
+          `INSERT INTO messages
+            (ts, chat_id, message_id, source, text, attachments, reply_to, metadata)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        stmt.run(
+          input.ts,
+          input.chat_id,
+          input.message_id ?? null,
+          input.source,
+          input.text ?? null,
+          input.attachments ? JSON.stringify(input.attachments) : null,
+          input.reply_to ?? null,
+          input.metadata ? JSON.stringify(input.metadata) : null,
+        )
+      } catch (err) {
+        warn('write', err)
+      }
     },
     logEdit(input: EditLogInput): void {
       if (!db) return
-      const merged = { ...(input.metadata ?? {}), edited_of: input.edited_of }
-      const stmt = db.prepare(
-        `INSERT INTO messages
-          (ts, chat_id, message_id, source, text, metadata)
-         VALUES (?, ?, ?, 'assistant', ?, ?)`,
-      )
-      stmt.run(
-        input.ts,
-        input.chat_id,
-        input.message_id,
-        input.text ?? null,
-        JSON.stringify(merged),
-      )
+      try {
+        const merged = { ...(input.metadata ?? {}), edited_of: input.edited_of }
+        const stmt = db.prepare(
+          `INSERT INTO messages
+            (ts, chat_id, message_id, source, text, metadata)
+           VALUES (?, ?, ?, 'assistant', ?, ?)`,
+        )
+        stmt.run(
+          input.ts,
+          input.chat_id,
+          input.message_id,
+          input.text ?? null,
+          JSON.stringify(merged),
+        )
+      } catch (err) {
+        warn('write', err)
+      }
     },
     close(): void {
-      db?.close()
+      try { db?.close() } catch {}
       db = null
     },
     _dbForTest(): Database {

@@ -1,4 +1,4 @@
-import { test, expect, describe } from 'bun:test'
+import { test, expect, describe, spyOn } from 'bun:test'
 import { createMessagesStore } from './messages-store'
 
 describe('messages-store: init', () => {
@@ -220,6 +220,44 @@ describe('messages-store: logEdit', () => {
       format: 'markdown',
       edited_of: '201',
     })
+    store.close()
+  })
+})
+
+describe('messages-store: failure isolation', () => {
+  test('init failure → store falls back to no-op, methods do not throw', () => {
+    // Force init failure with a path that's invalid on both OSes:
+    // - Windows: 'CON' is a reserved device name, can't create file
+    // - POSIX: /dev/null is a character device, can't have subdirectory
+    const badPath = process.platform === 'win32' ? 'CON' : '/dev/null/x.db'
+    const store = createMessagesStore({ dbPath: badPath })
+    const stderrSpy = spyOn(process.stderr, 'write').mockImplementation(() => true)
+    expect(() => store.init()).not.toThrow()
+
+    // All methods should be silent no-op after failed init
+    expect(() => store.logInbound({ ts: 1, chat_id: 'x' })).not.toThrow()
+    expect(() => store.logOutbound({ ts: 1, chat_id: 'x', source: 'assistant' })).not.toThrow()
+    expect(() => store.logEdit({ ts: 1, chat_id: 'x', message_id: 'y', edited_of: 'y' })).not.toThrow()
+    expect(() => store.close()).not.toThrow()
+
+    // Init failure should be logged once to stderr
+    expect(stderrSpy).toHaveBeenCalled()
+    const writes = stderrSpy.mock.calls.map(c => String(c[0]))
+    expect(writes.some(w => w.includes('messages-store') && w.includes('init failed'))).toBe(true)
+    stderrSpy.mockRestore()
+  })
+
+  test('write failure → stderr warning, no throw, normal flow continues', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+    // Drop the table to force write failure
+    store._dbForTest().exec('DROP TABLE messages')
+
+    const stderrSpy = spyOn(process.stderr, 'write').mockImplementation(() => true)
+    expect(() => store.logInbound({ ts: 1, chat_id: 'x', text: 'hi' })).not.toThrow()
+    const writes = stderrSpy.mock.calls.map(c => String(c[0]))
+    expect(writes.some(w => w.includes('messages-store') && w.includes('write failed'))).toBe(true)
+    stderrSpy.mockRestore()
     store.close()
   })
 })
