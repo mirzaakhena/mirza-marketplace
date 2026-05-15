@@ -109,8 +109,21 @@ export function createMessagesStore(opts: { dbPath: string }): MessagesStore {
         input.metadata ? JSON.stringify(input.metadata) : null,
       )
     },
-    logEdit(_input: EditLogInput): void {
-      // Implemented in Task 6.
+    logEdit(input: EditLogInput): void {
+      if (!db) return
+      const merged = { ...(input.metadata ?? {}), edited_of: input.edited_of }
+      const stmt = db.prepare(
+        `INSERT INTO messages
+          (ts, chat_id, message_id, source, text, metadata)
+         VALUES (?, ?, ?, 'assistant', ?, ?)`,
+      )
+      stmt.run(
+        input.ts,
+        input.chat_id,
+        input.message_id,
+        input.text ?? null,
+        JSON.stringify(merged),
+      )
     },
     close(): void {
       db?.close()

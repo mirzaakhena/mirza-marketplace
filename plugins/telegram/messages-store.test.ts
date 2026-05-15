@@ -166,3 +166,60 @@ describe('messages-store: logOutbound system source', () => {
     store.close()
   })
 })
+
+describe('messages-store: logEdit', () => {
+  test('appends new row with metadata.edited_of, original untouched', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    // Original outbound
+    store.logOutbound({
+      ts: 1700000003000,
+      chat_id: '12345',
+      message_id: '200',
+      source: 'assistant',
+      text: 'masih proses...',
+    })
+
+    // Edit (Telegram returns same message_id for edits)
+    store.logEdit({
+      ts: 1700000003500,
+      chat_id: '12345',
+      message_id: '200',
+      edited_of: '200',
+      text: 'selesai!',
+    })
+
+    const rows = store._dbForTest()
+      .query('SELECT * FROM messages WHERE message_id = ? ORDER BY ts')
+      .all('200') as any[]
+    expect(rows).toHaveLength(2)
+    expect(rows[0].text).toBe('masih proses...')
+    expect(rows[0].metadata).toBeNull()
+    expect(rows[1].text).toBe('selesai!')
+    expect(JSON.parse(rows[1].metadata)).toMatchObject({ edited_of: '200' })
+    expect(rows[1].source).toBe('assistant') // default for edit
+    store.close()
+  })
+
+  test('logEdit preserves caller-supplied metadata + adds edited_of', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+    store.logEdit({
+      ts: 1700000004000,
+      chat_id: '12345',
+      message_id: '201',
+      edited_of: '201',
+      text: 'updated',
+      metadata: { format: 'markdown' },
+    })
+    const row = store._dbForTest()
+      .query('SELECT metadata FROM messages WHERE ts = 1700000004000')
+      .get() as any
+    expect(JSON.parse(row.metadata)).toEqual({
+      format: 'markdown',
+      edited_of: '201',
+    })
+    store.close()
+  })
+})
