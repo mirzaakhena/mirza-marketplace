@@ -73,6 +73,11 @@ export function createMessagesStore(opts: { dbPath: string }): MessagesStore {
   return {
     init(): void {
       if (db != null || disabled) return
+      if (process.env.TELEGRAM_DISABLE_MESSAGES_STORE === '1') {
+        disabled = true
+        process.stderr.write('telegram channel: messages-store disabled via TELEGRAM_DISABLE_MESSAGES_STORE\n')
+        return
+      }
       try {
         db = new Database(opts.dbPath, { create: true })
         db.exec('PRAGMA journal_mode = WAL')

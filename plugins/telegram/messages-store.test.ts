@@ -261,3 +261,20 @@ describe('messages-store: failure isolation', () => {
     store.close()
   })
 })
+
+describe('messages-store: disable via env var', () => {
+  test('TELEGRAM_DISABLE_MESSAGES_STORE=1 → init is no-op, methods silent', () => {
+    const original = process.env.TELEGRAM_DISABLE_MESSAGES_STORE
+    process.env.TELEGRAM_DISABLE_MESSAGES_STORE = '1'
+    try {
+      const store = createMessagesStore({ dbPath: ':memory:' })
+      store.init()
+      expect(() => store.logInbound({ ts: 1, chat_id: 'x', text: 'hi' })).not.toThrow()
+      // _dbForTest should throw because db was never opened
+      expect(() => store._dbForTest()).toThrow()
+    } finally {
+      if (original === undefined) delete process.env.TELEGRAM_DISABLE_MESSAGES_STORE
+      else process.env.TELEGRAM_DISABLE_MESSAGES_STORE = original
+    }
+  })
+})
