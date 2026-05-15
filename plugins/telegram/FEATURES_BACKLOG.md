@@ -83,7 +83,7 @@ Fitur-fitur yang langsung relevan untuk plugin channel adapter dan tidak duplika
 
 ### Persistence & State
 
-- [ ] **T1.11 — Raw conversation logging** (catat semua percakapan user/assistant/system ke storage lokal — fondasi untuk recall lintas sesi)
+- [x] **T1.11 — Raw conversation logging** (catat semua percakapan user/assistant/system ke storage lokal — fondasi untuk recall lintas sesi)
 
 ---
 
@@ -261,3 +261,4 @@ Section ini berisi referensi ke implementasi lama + opsi implementasi untuk plug
 - **2026-05-15** — Initial backlog dari hasil eksplorasi `personal-ai-assistant`. Belum ada item yang dimulai.
 - **2026-05-15** — Tambah T1.10 (album/media group batching) dan T1.11 (raw conversation logging) berdasarkan input user. T3.7 (search messages) di-revise: storage layer dipindah ke T1.11, mekanisme search di-defer ke pembahasan terpisah.
 - **2026-05-15** — Tambah section "Recommended Development Order (by Impact)". Mode kerja disepakati: 1 fitur per session, focus deep. Saran titik mulai: T1.11.
+- **2026-05-15** — T1.11 selesai. Module `plugins/telegram/messages-store.ts` + integrasi di `server.ts` (handleInbound, reply tool, edit_message tool). `reply` tool gain optional `source` param. Disable via `TELEGRAM_DISABLE_MESSAGES_STORE=1`. Spec: `docs/superpowers/specs/2026-05-15-t111-conversation-logging-design.md`.

@@ -97,3 +97,25 @@ assistant needs earlier context, it will ask you to paste or summarize.
 This also means there's no `download_attachment` tool for historical messages
 — photos are downloaded eagerly on arrival since there's no way to fetch them
 later.
+
+## Conversation Logging
+
+Plugin mencatat semua percakapan ke `~/.claude/channels/telegram/messages.db` (SQLite). Tabel `messages` menyimpan inbound user, outbound assistant/system, dan edit history. Tujuan: recall lintas sesi.
+
+### `source` parameter convention
+
+`reply` tool menerima optional param `source: 'assistant' | 'system'`, default `'assistant'`.
+
+- **`assistant`** — reply langsung ke pesan user (default, tidak perlu eksplisit).
+- **`system`** — reply yang dipicu non-user event: cronjob, scheduler, external webhook, scheduled task. Caller (skill, MCP server, cronjob handler) **harus** set ini eksplisit agar log akurat.
+
+### Disable
+
+Set env var `TELEGRAM_DISABLE_MESSAGES_STORE=1` untuk menjalankan plugin tanpa logger (mis. saat debugging atau testing).
+
+### Inspect
+
+```bash
+sqlite3 ~/.claude/channels/telegram/messages.db \
+  "SELECT id,ts,source,user_name,substr(text,1,80) FROM messages ORDER BY ts DESC LIMIT 20"
+```
