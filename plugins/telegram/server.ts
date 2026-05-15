@@ -907,6 +907,24 @@ function safeName(s: string | undefined): string | undefined {
   return s?.replace(/[<>\[\]\r\n;]/g, '_')
 }
 
+function buildAttachmentsForLog(
+  imagePath: string | undefined,
+  attachment: AttachmentMeta | undefined,
+): unknown[] | undefined {
+  const out: unknown[] = []
+  if (imagePath) out.push({ type: 'photo', path: imagePath })
+  if (attachment) {
+    out.push({
+      type: attachment.kind,
+      file_id: attachment.file_id,
+      ...(attachment.size != null ? { size: attachment.size } : {}),
+      ...(attachment.mime ? { mime: attachment.mime } : {}),
+      ...(attachment.name ? { name: attachment.name } : {}),
+    })
+  }
+  return out.length > 0 ? out : undefined
+}
+
 async function handleInbound(
   ctx: Context,
   text: string,
@@ -967,6 +985,19 @@ async function handleInbound(
   }
 
   const imagePath = downloadImage ? await downloadImage() : undefined
+
+  messagesStore.logInbound({
+    ts: Date.now(),
+    chat_id,
+    message_id: msgId != null ? String(msgId) : undefined,
+    user_id: String(from.id),
+    user_name: from.username ?? from.first_name ?? String(from.id),
+    text: text || undefined,
+    attachments: buildAttachmentsForLog(imagePath, attachment),
+    reply_to: ctx.message?.reply_to_message?.message_id != null
+      ? String(ctx.message.reply_to_message.message_id)
+      : undefined,
+  })
 
   // image_path goes in meta only — an in-content "[image attached — read: PATH]"
   // annotation is forgeable by any allowlisted sender typing that string.
