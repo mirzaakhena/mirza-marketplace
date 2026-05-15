@@ -471,6 +471,11 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             enum: ['text', 'markdownv2'],
             description: "Rendering mode. 'markdownv2' enables Telegram formatting (bold, italic, code, links). Caller must escape special chars per MarkdownV2 rules. Default: 'text' (plain, no escaping needed).",
           },
+          source: {
+            type: 'string',
+            enum: ['assistant', 'system'],
+            description: "Origin of this reply. Default 'assistant' for direct user replies. Use 'system' when triggered by cronjob/scheduler/API event (not in response to a user message). Logged to messages-store.",
+          },
         },
         required: ['chat_id', 'text'],
       },
@@ -531,6 +536,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const files = (args.files as string[] | undefined) ?? []
         const format = (args.format as string | undefined) ?? 'text'
         const parseMode = format === 'markdownv2' ? 'MarkdownV2' as const : undefined
+        const source = (args.source as 'assistant' | 'system' | undefined) ?? 'assistant'
 
         assertAllowedChat(chat_id)
 
@@ -583,6 +589,42 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
             const sent = await bot.api.sendDocument(chat_id, input, opts)
             sentIds.push(sent.message_id)
           }
+        }
+
+        // Log all sent messages to the store. One row per chunk + one row per file
+        // attachment (each is a distinct Telegram message with its own message_id).
+        const ts = Date.now()
+        for (let i = 0; i < chunks.length; i++) {
+          // Mirror shouldReplyTo logic from the send loop above:
+          // record reply_to only on chunks that actually got threaded.
+          const chunkReplyTo =
+            reply_to != null &&
+            replyMode !== 'off' &&
+            (replyMode === 'all' || i === 0)
+              ? String(reply_to)
+              : undefined
+          messagesStore.logOutbound({
+            ts: ts + i,
+            chat_id,
+            message_id: String(sentIds[i]),
+            source,
+            text: chunks[i],
+            reply_to: chunkReplyTo,
+            metadata: format !== 'text' ? { format } : undefined,
+          })
+        }
+        // Files start at index `chunks.length` in sentIds (set by the second loop above).
+        for (let j = 0; j < files.length; j++) {
+          const f = files[j]
+          const ext = extname(f).toLowerCase()
+          const type = PHOTO_EXTS.has(ext) ? 'photo' : 'document'
+          messagesStore.logOutbound({
+            ts: ts + chunks.length + j,
+            chat_id,
+            message_id: String(sentIds[chunks.length + j]),
+            source,
+            attachments: [{ type, path: f }],
+          })
         }
 
         const result =
