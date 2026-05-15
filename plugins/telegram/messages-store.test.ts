@@ -70,3 +70,49 @@ describe('messages-store: logInbound text-only', () => {
     store.close()
   })
 })
+
+describe('messages-store: logInbound full payload', () => {
+  test('persists attachments JSON and reply_to', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    store.logInbound({
+      ts: 1700000000000,
+      chat_id: '12345',
+      message_id: '100',
+      user_id: '777',
+      user_name: 'mirza',
+      text: 'lihat ini',
+      attachments: [
+        { type: 'photo', path: '/inbox/abc.jpg', file_id: 'AgAC' },
+      ],
+      reply_to: '88',
+      metadata: { format: 'plain' },
+    })
+
+    const row = store._dbForTest()
+      .query('SELECT * FROM messages WHERE message_id = ?')
+      .get('100') as any
+    expect(row.reply_to).toBe('88')
+    expect(JSON.parse(row.attachments)).toEqual([
+      { type: 'photo', path: '/inbox/abc.jpg', file_id: 'AgAC' },
+    ])
+    expect(JSON.parse(row.metadata)).toEqual({ format: 'plain' })
+    store.close()
+  })
+
+  test('attachments empty array stored as JSON not NULL', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+    store.logInbound({
+      ts: 1700000000001,
+      chat_id: '12345',
+      attachments: [],
+    })
+    const row = store._dbForTest()
+      .query('SELECT attachments FROM messages WHERE ts = 1700000000001')
+      .get() as any
+    expect(row.attachments).toBe('[]')
+    store.close()
+  })
+})
