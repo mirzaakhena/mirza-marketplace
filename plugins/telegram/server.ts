@@ -669,6 +669,14 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
           ...(editParseMode ? [{ parse_mode: editParseMode }] : []),
         )
         const id = typeof edited === 'object' ? edited.message_id : args.message_id
+        messagesStore.logEdit({
+          ts: Date.now(),
+          chat_id: args.chat_id as string,
+          message_id: String(id),
+          edited_of: String(args.message_id),
+          text: args.text as string,
+          metadata: editFormat !== 'text' ? { format: editFormat } : undefined,
+        })
         return { content: [{ type: 'text', text: `edited (id: ${id})` }] }
       }
       default:
