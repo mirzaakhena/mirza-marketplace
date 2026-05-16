@@ -35,6 +35,9 @@ export function createAlbumBuffer<T>(opts: AlbumBufferOpts<T>): AlbumBuffer<T> {
       existing.items.push(item)
       clearTimeout(existing.debounceTimer)
       existing.debounceTimer = setTimeout(() => flush(key), opts.debounceMs)
+      if (existing.items.length >= opts.maxItems) {
+        flush(key)
+      }
       return
     }
     const bucket: Bucket<T> = {
@@ -43,6 +46,9 @@ export function createAlbumBuffer<T>(opts: AlbumBufferOpts<T>): AlbumBuffer<T> {
       hardTimer: setTimeout(() => flush(key), opts.hardCapMs),
     }
     buckets.set(key, bucket)
+    if (bucket.items.length >= opts.maxItems) {
+      flush(key)
+    }
   }
 
   function size(): number {

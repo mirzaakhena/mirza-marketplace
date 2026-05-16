@@ -72,3 +72,47 @@ describe('album-buffer: hard cap', () => {
     expect(buf.size()).toBe(0)
   })
 })
+
+describe('album-buffer: max items', () => {
+  test('reaching maxItems flushes immediately without waiting debounce', async () => {
+    const flushed: Array<{ key: string; items: number[] }> = []
+    const buf = createAlbumBuffer<number>({
+      debounceMs: 1000,  // intentionally long
+      hardCapMs: 5000,   // intentionally long
+      maxItems: 3,
+      onFlush: (key, items) => { flushed.push({ key, items }) },
+    })
+
+    const t0 = Date.now()
+    buf.add('A', 1)
+    buf.add('A', 2)
+    buf.add('A', 3)
+    // Should flush before any timer fires.
+    await wait(20)
+    const elapsed = Date.now() - t0
+
+    expect(flushed).toEqual([{ key: 'A', items: [1, 2, 3] }])
+    expect(elapsed).toBeLessThan(100)  // way under debounceMs
+  })
+
+  test('item N+1 after max-flush starts a fresh bucket', async () => {
+    const flushed: Array<{ key: string; items: number[] }> = []
+    const buf = createAlbumBuffer<number>({
+      debounceMs: 40,
+      hardCapMs: 200,
+      maxItems: 2,
+      onFlush: (key, items) => { flushed.push({ key, items }) },
+    })
+
+    buf.add('A', 1)
+    buf.add('A', 2)  // triggers max-flush
+    await wait(10)
+    buf.add('A', 3)  // fresh bucket
+    await wait(80)
+
+    expect(flushed).toEqual([
+      { key: 'A', items: [1, 2] },
+      { key: 'A', items: [3] },
+    ])
+  })
+})
