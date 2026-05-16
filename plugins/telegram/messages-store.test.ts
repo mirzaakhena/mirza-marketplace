@@ -262,6 +262,67 @@ describe('messages-store: failure isolation', () => {
   })
 })
 
+describe('messages-store: album logging shape', () => {
+  test('logInbound with multi-attachment + media_group_id metadata roundtrips', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    store.logInbound({
+      ts: 1700000000000,
+      chat_id: 'CHAT1',
+      message_id: '101',
+      user_id: 'U1',
+      user_name: 'alice',
+      text: 'check this',
+      attachments: [
+        { type: 'photo', path: '/inbox/a.jpg' },
+        { type: 'photo', path: '/inbox/b.jpg' },
+        { type: 'document', file_id: 'DOC1', name: 'foo.pdf', mime: 'application/pdf', size: 12345 },
+      ],
+      metadata: {
+        media_group_id: 'MG_ABC',
+        message_ids: ['101', '102', '103'],
+      },
+    })
+
+    const db = store._dbForTest()
+    const rows = db.query('SELECT attachments, metadata FROM messages WHERE chat_id = ?').all('CHAT1') as Array<{ attachments: string; metadata: string }>
+    expect(rows).toHaveLength(1)
+
+    const att = JSON.parse(rows[0].attachments)
+    expect(att).toHaveLength(3)
+    expect(att[0]).toEqual({ type: 'photo', path: '/inbox/a.jpg' })
+    expect(att[2]).toEqual({ type: 'document', file_id: 'DOC1', name: 'foo.pdf', mime: 'application/pdf', size: 12345 })
+
+    const meta = JSON.parse(rows[0].metadata)
+    expect(meta.media_group_id).toBe('MG_ABC')
+    expect(meta.message_ids).toEqual(['101', '102', '103'])
+
+    store.close()
+  })
+
+  test('logInbound with empty attachments array stores null (no rows lost)', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    store.logInbound({
+      ts: 1700000000001,
+      chat_id: 'CHAT2',
+      message_id: '201',
+      user_id: 'U2',
+      user_name: 'bob',
+      text: 'no attachments',
+    })
+
+    const db = store._dbForTest()
+    const rows = db.query('SELECT attachments FROM messages WHERE chat_id = ?').all('CHAT2') as Array<{ attachments: string | null }>
+    expect(rows).toHaveLength(1)
+    expect(rows[0].attachments).toBeNull()
+
+    store.close()
+  })
+})
+
 describe('messages-store: disable via env var', () => {
   test('TELEGRAM_DISABLE_MESSAGES_STORE=1 → init is no-op, methods silent', () => {
     const original = process.env.TELEGRAM_DISABLE_MESSAGES_STORE
