@@ -116,3 +116,28 @@ describe('album-buffer: max items', () => {
     ])
   })
 })
+
+describe('album-buffer: multi-key isolation', () => {
+  test('interleaved keys flush separately with correct items', async () => {
+    const flushed: Array<{ key: string; items: number[] }> = []
+    const buf = createAlbumBuffer<number>({
+      debounceMs: 40,
+      hardCapMs: 1000,
+      maxItems: 100,
+      onFlush: (key, items) => { flushed.push({ key, items }) },
+    })
+
+    buf.add('A', 1)
+    buf.add('B', 10)
+    buf.add('A', 2)
+    buf.add('B', 20)
+    buf.add('A', 3)
+    await wait(80)
+
+    expect(flushed).toHaveLength(2)
+    const a = flushed.find(f => f.key === 'A')!
+    const b = flushed.find(f => f.key === 'B')!
+    expect(a.items).toEqual([1, 2, 3])
+    expect(b.items).toEqual([10, 20])
+  })
+})
