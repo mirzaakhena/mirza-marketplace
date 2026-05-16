@@ -15,10 +15,13 @@ Bridge Telegram ke sesi Claude Code via MCP server, dengan kontrol akses bawaan 
 | Perubahan | Detail |
 |---|---|
 | Command `/hello` | Saat user kirim `/hello` di Telegram DM, bot membalas `"Hello, Mirza!"`. Command ini juga muncul di autocomplete Telegram (`setMyCommands`). |
-| Version | `0.0.6` → `0.0.6-mirza.1` (penanda fork agar tidak bentrok dengan upstream) |
+| State per-project | Token, db, pairing, dst. disimpan di `<project>/.claude/channels/telegram/` (bukan `~/.claude/channels/telegram/` global). Multi-folder paralel dengan token berbeda. Lihat [plugin README](plugins/telegram/README.md#install-scope-guidance) untuk install scope. |
+| Strict resolution | Server exit kalau `CLAUDE_PROJECT_DIR` tidak set. No cwd fallback. `/context` ikut layout yang sama. |
+| Gitignore self-managed | Auto-tulis `<project>/.claude/channels/.gitignore` (cover semua channel — telegram, future whatsapp, dst.) saat configure pertama. Tidak menyentuh `.gitignore` user di project root. |
+| Version | `0.0.6` → `0.0.7-mirza.1` (penanda fork agar tidak bentrok dengan upstream) |
 | Author | Mirza |
 
-File yang diubah: `plugins/telegram/server.ts` (tambah `bot.command('hello', ...)` dan satu entry di `setMyCommands`) serta `plugins/telegram/.claude-plugin/plugin.json`.
+File yang diubah utama: `plugins/telegram/server.ts`, `plugins/telegram/scripts/context-bridge.sh`, kedua SKILL.md, plus modul baru `state-path.ts` + `channels-gitignore.ts` + bash helpers di `scripts/`.
 
 ---
 
@@ -47,19 +50,21 @@ Marketplace `mirza-marketplace` harus muncul di daftar.
 /reload-plugins
 ```
 
+Saat ditanya scope, pilih **`user`** untuk plugin Telegram — itu memberikan satu install global, tapi state (token, db, pairing) tetap per-folder otomatis. Detail di [README plugin Telegram](plugins/telegram/README.md#install-scope-guidance).
+
 Sintaks `@mirza-marketplace` penting kalau Anda juga punya plugin official dengan nama yang sama — ini memastikan Claude Code mengambil versi dari marketplace ini, bukan dari `claude-plugins-official`.
 
 ### Langkah 3 (khusus channel plugin) — Setup token & restart dengan dev flag
 
 Plugin `telegram` adalah **channel plugin**, jadi butuh dua langkah ekstra.
 
-**A. Konfigurasi token bot.** Buat bot dulu via [@BotFather](https://t.me/BotFather) di Telegram (kirim `/newbot`), salin token-nya, lalu di Claude Code:
+**A. Konfigurasi token bot.** Buat bot dulu via [@BotFather](https://t.me/BotFather) di Telegram (kirim `/newbot`), salin token-nya, **buka CC session di folder project Anda**, lalu:
 
 ```
 /telegram:configure 123456789:AAH...
 ```
 
-Token disimpan di `~/.claude/channels/telegram/.env`.
+Token disimpan di `<your-project>/.claude/channels/telegram/.env` (chmod 600, otomatis ter-`.gitignore`). Token terikat ke project tersebut saja — untuk project lain, configure ulang dengan token bot berbeda.
 
 **B. Restart Claude Code dengan dev flag.** Karena plugin di marketplace pribadi **tidak ada di Anthropic-maintained allowlist** (channels masih research preview), `--channels` biasa akan menolak. Pakai flag development:
 
