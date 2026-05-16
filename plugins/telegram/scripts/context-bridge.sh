@@ -5,20 +5,25 @@
 #
 # Installed automatically by plugins/telegram on first /context call.
 #
-# Layout under <project>/.telegram-state/:
+# Layout under <project>/.claude/channels/telegram/:
 #   last-status.json   { "captured_at_ms": <epoch>, "payload": <stdin JSON> }
 #   chained-statusline single line: command to delegate to (may be empty)
 
 set -u
 
-INPUT="$(cat)"
+if [ -z "${CLAUDE_PROJECT_DIR:-}" ]; then
+  # Don't break the statusLine chain — silent fail (return 0).
+  echo "context-bridge: CLAUDE_PROJECT_DIR not set; skipping capture" >&2
+  exit 0
+fi
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
-STATE_DIR="$PROJECT_DIR/.telegram-state"
+STATE_DIR="$CLAUDE_PROJECT_DIR/.claude/channels/telegram"
 STATE_FILE="$STATE_DIR/last-status.json"
 CHAIN_FILE="$STATE_DIR/chained-statusline"
 
 mkdir -p "$STATE_DIR" 2>/dev/null
+
+INPUT="$(cat)"
 
 NOW_MS=$(( $(date +%s) * 1000 ))
 
