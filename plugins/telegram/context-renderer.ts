@@ -57,6 +57,19 @@ export function formatResetRemain(resetsAtSec: number, nowMs: number = Date.now(
   return `${minutes}m`
 }
 
+export function shortCwd(path: string): string {
+  if (!path) return ''
+  const trimmed = path.endsWith('/') ? path.slice(0, -1) : path
+  const segments = trimmed.split('/').filter(s => s.length > 0)
+  if (segments.length < 2) return trimmed
+  const tail = segments.slice(-2).join('/')
+  return `…/${tail}`
+}
+
+export function shortSession(id: string): string {
+  return id.slice(0, 8)
+}
+
 export function renderContextReply(status: LastStatus, nowMs: number = Date.now()): string {
   const ctx = status.payload.context_window?.used_percentage
   const five = status.payload.rate_limits?.five_hour

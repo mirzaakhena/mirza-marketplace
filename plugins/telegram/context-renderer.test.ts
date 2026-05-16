@@ -6,6 +6,8 @@ import {
   renderContextReply,
   formatTokens,
   formatResetRemain,
+  shortCwd,
+  shortSession,
   type LastStatus,
 } from './context-renderer'
 
@@ -105,6 +107,37 @@ describe('formatResetRemain', () => {
   })
   test('seconds only (under 1 minute) → 0m', () => {
     expect(formatResetRemain(nowSec + 30, nowMs)).toBe('0m')
+  })
+})
+
+describe('shortCwd', () => {
+  test('long path → last 2 segments with ellipsis prefix', () => {
+    expect(shortCwd('/Users/mirza/Workspace/mirza-marketplace/sandbox/folder_two'))
+      .toBe('…/sandbox/folder_two')
+  })
+  test('exactly 2 segments → returns with ellipsis prefix', () => {
+    expect(shortCwd('/foo/bar')).toBe('…/foo/bar')
+  })
+  test('single segment → returns as-is', () => {
+    expect(shortCwd('/foo')).toBe('/foo')
+  })
+  test('trailing slash stripped', () => {
+    expect(shortCwd('/a/b/c/d/')).toBe('…/c/d')
+  })
+  test('empty string → empty string', () => {
+    expect(shortCwd('')).toBe('')
+  })
+})
+
+describe('shortSession', () => {
+  test('takes first 8 chars', () => {
+    expect(shortSession('8a16303d-4706-4ee2-a54b-782a3e4000eb')).toBe('8a16303d')
+  })
+  test('shorter than 8 → returns as-is', () => {
+    expect(shortSession('abc123')).toBe('abc123')
+  })
+  test('empty → empty', () => {
+    expect(shortSession('')).toBe('')
   })
 })
 
