@@ -26,6 +26,7 @@ import { createMessagesStore } from './messages-store.ts'
 import { createAlbumBuffer } from './album-buffer'
 import { resolveStateDir } from './state-path.ts'
 import { ensureChannelsGitignore } from './channels-gitignore.ts'
+import { renderContextReply, type LastStatus } from './context-renderer.ts'
 
 const STATE_DIR = (() => {
   const resolved = resolveStateDir(process.env)
@@ -821,39 +822,6 @@ const CONTEXT_BRIDGE_PATH = join(import.meta.dir, 'scripts', 'context-bridge.sh'
 
 const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR?.trim() || null
 
-function progressBar(pct: number, width = 10): string {
-  const filled = Math.max(0, Math.min(width, Math.round((pct * width) / 100)))
-  return '●'.repeat(filled) + '○'.repeat(width - filled)
-}
-
-function formatRelativeMs(ageMs: number): string {
-  if (ageMs < 0) return 'baru'
-  const sec = Math.floor(ageMs / 1000)
-  if (sec < 60) return `${sec}s lalu`
-  const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}m lalu`
-  const hr = Math.floor(min / 60)
-  const rm = min % 60
-  return rm ? `${hr}h ${rm}m lalu` : `${hr}h lalu`
-}
-
-// Asia/Jakarta is UTC+7 year-round, no DST — compute directly to avoid Intl.
-function formatJakartaHM(epochMs: number): string {
-  const d = new Date(epochMs + 7 * 3600 * 1000)
-  const hh = String(d.getUTCHours()).padStart(2, '0')
-  const mm = String(d.getUTCMinutes()).padStart(2, '0')
-  return `${hh}:${mm} WIB`
-}
-
-type StatusLinePayload = {
-  context_window?: { used_percentage?: number }
-  rate_limits?: {
-    five_hour?: { used_percentage?: number; resets_at?: number }
-  }
-}
-
-type LastStatus = { captured_at_ms: number; payload: StatusLinePayload }
-
 function loadLastStatus(): LastStatus | null {
   const path = join(STATE_DIR, 'last-status.json')
   try {
@@ -932,48 +900,6 @@ function ensureContextBridgeInstalled(): InstallResult {
   }
 
   return { kind: 'installed', backupPath, previousCommand }
-}
-
-function renderContextReply(status: LastStatus): string {
-  const ctx = status.payload.context_window?.used_percentage
-  const five = status.payload.rate_limits?.five_hour
-  const fivePct = five?.used_percentage
-  const resetsAt = five?.resets_at
-
-  const ctxLine = typeof ctx === 'number'
-    ? `${progressBar(ctx)} ${Math.round(ctx)}%`
-    : '(tidak tersedia)'
-  const usageLine = typeof fivePct === 'number'
-    ? `${progressBar(fivePct)} ${Math.round(fivePct)}%`
-    : '(tidak tersedia — butuh Pro/Max & 1 request dulu)'
-
-  let resetLine = '(tidak tersedia)'
-  if (typeof resetsAt === 'number') {
-    const remain = resetsAt - Math.floor(Date.now() / 1000)
-    if (remain > 0) {
-      const h = Math.floor(remain / 3600)
-      const m = Math.floor((remain % 3600) / 60)
-      resetLine = `(${h}h ${m}m / 5h)`
-    } else {
-      resetLine = '(reset baru saja)'
-    }
-  }
-
-  const age = Date.now() - status.captured_at_ms
-  const lastLine = `Last update: ${formatJakartaHM(status.captured_at_ms)} (${formatRelativeMs(age)})`
-
-  return [
-    `Context`,
-    ctxLine,
-    ``,
-    `Usage`,
-    usageLine,
-    ``,
-    `Reset`,
-    resetLine,
-    ``,
-    lastLine,
-  ].join('\n')
 }
 
 bot.command('context', async ctx => {
