@@ -20,12 +20,25 @@ import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from 'gramm
 import type { ReactionTypeEmoji } from 'grammy/types'
 import { randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
-import { homedir } from 'os'
 import { join, extname, sep } from 'path'
 import { createMessagesStore } from './messages-store.ts'
 import { createAlbumBuffer } from './album-buffer'
+import { resolveStateDir } from './state-path.ts'
+import { ensureChannelsGitignore } from './channels-gitignore.ts'
 
-const STATE_DIR = process.env.TELEGRAM_STATE_DIR ?? join(homedir(), '.claude', 'channels', 'telegram')
+const STATE_DIR = (() => {
+  const resolved = resolveStateDir(process.env)
+  if (!resolved) {
+    process.stderr.write(
+      `telegram channel: cannot determine state directory.\n` +
+      `  CLAUDE_PROJECT_DIR is not set (Claude Code sets this automatically when you start a session in a project).\n` +
+      `  Or set TELEGRAM_STATE_DIR explicitly.\n`
+    )
+    process.exit(1)
+  }
+  return resolved
+})()
+process.stderr.write(`telegram channel: state dir = ${STATE_DIR}\n`)
 const ACCESS_FILE = join(STATE_DIR, 'access.json')
 const APPROVED_DIR = join(STATE_DIR, 'approved')
 const ENV_FILE = join(STATE_DIR, '.env')
@@ -47,8 +60,9 @@ const STATIC = process.env.TELEGRAM_ACCESS_MODE === 'static'
 if (!TOKEN) {
   process.stderr.write(
     `telegram channel: TELEGRAM_BOT_TOKEN required\n` +
-    `  set in ${ENV_FILE}\n` +
-    `  format: TELEGRAM_BOT_TOKEN=123456789:AAH...\n`,
+    `  state dir: ${STATE_DIR}\n` +
+    `  set in:    ${ENV_FILE}\n` +
+    `  format:    TELEGRAM_BOT_TOKEN=123456789:AAH...\n`,
   )
   process.exit(1)
 }
