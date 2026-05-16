@@ -25,3 +25,7 @@ desktop.ini
 .idea/
 *.swp
 *.swo
+
+# Claude Code session exports (dari /export)
+2026-*-*.txt
+2027-*-*.txt

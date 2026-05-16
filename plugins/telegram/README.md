@@ -1,4 +1,10 @@
-# Telegram
+# Telegram (Mirza fork)
+
+> 🔀 **Fork notice.** Ini fork pribadi Mirza dari [plugin Telegram resmi Anthropic](https://github.com/anthropics/claude-plugins-official/tree/main/external_plugins/telegram). Lihat [root README marketplace](../../README.md) untuk konteks lengkap + daftar perubahan vs upstream.
+>
+> **Perubahan utama:** command `/hello` di Telegram membalas `"Hello, Mirza!"` (lihat detail di [README marketplace](../../README.md#telegram--telegram-channel-fork)).
+>
+> Lisensi tetap Apache-2.0 dari upstream — lihat [LICENSE](./LICENSE).
 
 Connect a Telegram bot to your Claude Code with an MCP server.
 
@@ -24,9 +30,14 @@ BotFather replies with a token that looks like `123456789:AAHfiqksKZ8...` — th
 
 These are Claude Code commands — run `claude` to start a session first.
 
+Add the marketplace (sekali setup saja per mesin):
+```
+/plugin marketplace add mirzaakhena/mirza-marketplace
+```
+
 Install the plugin:
 ```
-/plugin install telegram@claude-plugins-official
+/plugin install telegram@mirza-marketplace
 /reload-plugins
 ```
 
@@ -42,11 +53,15 @@ Writes `TELEGRAM_BOT_TOKEN=...` to `~/.claude/channels/telegram/.env`. You can a
 
 **4. Relaunch with the channel flag.**
 
-The server won't connect without this — exit your session and start a new one:
+The server won't connect without this — exit your session and start a new one.
+
+> ⚠️ Karena fork ini **bukan** plugin yang ada di Anthropic-maintained channel allowlist, `--channels` biasa akan menolak. Pakai flag development sebagai gantinya:
 
 ```sh
-claude --channels plugin:telegram@claude-plugins-official
+claude --dangerously-load-development-channels plugin:telegram@mirza-marketplace
 ```
+
+Claude Code akan minta konfirmasi pertama kali — terima.
 
 **5. Pair.**
 
