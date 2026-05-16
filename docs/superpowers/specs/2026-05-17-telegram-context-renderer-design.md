@@ -76,6 +76,24 @@ Concretely:
 - `session_id` missing → omit `Session:` line.
 - `cwd` missing → omit `CWD:` line.
 
+## Install Flow UX (auto-retry)
+
+Saat ini, kalau user menjalankan `/context` pertama kali dan bridge belum terinstall, bot membalas pesan instalasi panjang dan mengharuskan user kirim `/context` lagi secara manual. Akan diganti dengan auto-retry via message-edit.
+
+**New behavior pada path `install.kind === 'installed'`:**
+
+1. Bot kirim ack singkat: `⏳ Menyiapkan bridge, mohon tunggu...` — capture `message_id`.
+2. `setTimeout(5000)` — setelah 5 detik, panggil `loadLastStatus()`:
+   - **Jika data ada:** edit message tadi via `ctx.api.editMessageText` jadi hasil `renderContextReply(status)`.
+   - **Jika data masih kosong:** edit message tadi jadi `⚠️ Statusline Claude Code belum trigger. Aktif sebentar di Claude Code lalu kirim /context lagi.`
+
+**Tidak berubah:**
+- Path `install.kind === 'error'` — tetap kirim pesan error apa adanya.
+- Path `install.kind === 'already-installed'` — tetap langsung render (load status & reply).
+- Edge case `loadLastStatus()` null saat already-installed — tetap pakai pesan existing.
+
+**Catatan teknis:** `editMessageText` di grammy butuh `chat_id` + `message_id`. Capture dari return value `ctx.reply(...)` yang resolve ke `Message` object. Tidak perlu state-store antar handler — `setTimeout` di closure cukup.
+
 ## Non-Goals
 
 - Tidak menambah Markdown formatting (sudah ditolak user).
