@@ -21,11 +21,16 @@ if (unset TELEGRAM_STATE_DIR; unset CLAUDE_PROJECT_DIR; resolve_state_dir) 2>/de
   fail "should error when both unset"
 fi
 
-# Test 4: resolve_channels_dir derive
-out=$(unset TELEGRAM_STATE_DIR; CLAUDE_PROJECT_DIR=/repo resolve_channels_dir)
+# Test 4: empty string treated as unset → error
+if (TELEGRAM_STATE_DIR='' CLAUDE_PROJECT_DIR='' resolve_state_dir) 2>/dev/null; then
+  fail "test4: empty strings should error like unset"
+fi
+
+# Test 5: resolve_channels_dir derive
+out=$(CLAUDE_PROJECT_DIR=/repo resolve_channels_dir)
 [ "$out" = "/repo/.claude/channels" ] || fail "channels derive, got: '$out'"
 
-# Test 5: resolve_channels_dir error when unset
+# Test 6: resolve_channels_dir error when unset
 if (unset CLAUDE_PROJECT_DIR; resolve_channels_dir) 2>/dev/null; then
   fail "channels_dir should error when unset"
 fi
@@ -34,4 +39,4 @@ if [ $FAILED -gt 0 ]; then
   echo "FAILED: $FAILED test(s)"
   exit 1
 fi
-echo "OK: 5 tests passed"
+echo "OK: 6 tests passed"
