@@ -712,6 +712,9 @@ function shutdown(): void {
   try {
     if (parseInt(readFileSync(PID_FILE, 'utf8'), 10) === process.pid) rmSync(PID_FILE)
   } catch {}
+  void albumBuffer.drainAll().catch(err => {
+    process.stderr.write(`telegram channel: album drainAll failed: ${err}\n`)
+  })
   // bot.stop() signals the poll loop to end; the current getUpdates request
   // may take up to its long-poll timeout to return. Force-exit after 2s.
   setTimeout(() => process.exit(0), 2000)
