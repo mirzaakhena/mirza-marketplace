@@ -68,7 +68,7 @@ Fitur-fitur yang langsung relevan untuk plugin channel adapter dan tidak duplika
 - [ ] **T1.2 — Document/PDF inbound handling** (saat ini hanya text + photo)
 - [ ] **T1.3 — Quoted message context extraction** (kalau user reply ke pesan lain, sertakan konteksnya)
 - [ ] **T1.4 — Inbound message dedup cache** (LRU 1000-entry, hindari double-process saat polling overlap)
-- [~] **T1.10 — Album / media group batching** (user kirim multiple image sekaligus → diproses sebagai 1 batch, bukan satu-satu) — design spec ready: `docs/superpowers/specs/2026-05-16-t110-album-batching-design.md`
+- [x] **T1.10 — Album / media group batching** (user kirim multiple image sekaligus → diproses sebagai 1 batch, bukan satu-satu) — implemented. Spec: `docs/superpowers/specs/2026-05-16-t110-album-batching-design.md`. Plan: `docs/superpowers/plans/2026-05-16-t110-album-batching.md`.
 
 ### Outbound Message Quality
 
@@ -281,3 +281,4 @@ Section ini berisi referensi ke implementasi lama + opsi implementasi untuk plug
 - **2026-05-15** — Tambah section "Recommended Development Order (by Impact)". Mode kerja disepakati: 1 fitur per session, focus deep. Saran titik mulai: T1.11.
 - **2026-05-15** — T1.11 selesai. Module `plugins/telegram/messages-store.ts` + integrasi di `server.ts` (handleInbound, reply tool, edit_message tool). `reply` tool gain optional `source` param. Disable via `TELEGRAM_DISABLE_MESSAGES_STORE=1`. Spec: `docs/superpowers/specs/2026-05-15-t111-conversation-logging-design.md`.
 - **2026-05-16** — T1.10 design spec ready: `docs/superpowers/specs/2026-05-16-t110-album-batching-design.md`. Keputusan: Opsi A (plugin buffer), 400ms debounce / 3000ms hard cap / 10 max items, photo + document only, 1 row per album. Tambah T1.12 (outbound media group via `sendMediaGroup`) sebagai item baru — out of plan T1.10.
+- **2026-05-16** — T1.10 selesai. Module `plugins/telegram/album-buffer.ts` (generic, 8 unit tests) + integration di `server.ts` (photo & document handler routing, handleInboundAlbum, shutdown drain). Album = 1 row di messages.db dengan `metadata.media_group_id` + `metadata.message_ids[]`. MCP meta tambahan: `image_paths[]`, `attachments[]`, `media_group_id`. Manual smoke pending user verification.
