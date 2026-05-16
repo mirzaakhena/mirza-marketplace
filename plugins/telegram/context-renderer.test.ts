@@ -5,6 +5,7 @@ import {
   formatJakartaHM,
   renderContextReply,
   formatTokens,
+  formatResetRemain,
   type LastStatus,
 } from './context-renderer'
 
@@ -75,6 +76,35 @@ describe('formatTokens', () => {
   })
   test('exact integer millions render without decimal', () => {
     expect(formatTokens(3_000_000)).toBe('3M')
+  })
+})
+
+describe('formatResetRemain', () => {
+  // Use nowMs = epoch 1_000_000 (in ms = 1_000_000_000)
+  const nowMs = 1_000_000_000
+  const nowSec = nowMs / 1000
+
+  test('past or zero → "reset baru saja"', () => {
+    expect(formatResetRemain(nowSec, nowMs)).toBe('reset baru saja')
+    expect(formatResetRemain(nowSec - 10, nowMs)).toBe('reset baru saja')
+  })
+  test('minutes only', () => {
+    expect(formatResetRemain(nowSec + 5 * 60, nowMs)).toBe('5m')
+  })
+  test('hours + minutes', () => {
+    expect(formatResetRemain(nowSec + 1 * 3600 + 57 * 60, nowMs)).toBe('1h 57m')
+  })
+  test('exact hours', () => {
+    expect(formatResetRemain(nowSec + 3 * 3600, nowMs)).toBe('3h')
+  })
+  test('days + hours', () => {
+    expect(formatResetRemain(nowSec + 6 * 86400 + 10 * 3600, nowMs)).toBe('6d 10h')
+  })
+  test('exact days', () => {
+    expect(formatResetRemain(nowSec + 2 * 86400, nowMs)).toBe('2d')
+  })
+  test('seconds only (under 1 minute) → 0m', () => {
+    expect(formatResetRemain(nowSec + 30, nowMs)).toBe('0m')
   })
 })
 

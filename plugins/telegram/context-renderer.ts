@@ -42,6 +42,21 @@ export function formatJakartaHM(epochMs: number): string {
   return `${hh}:${mm} WIB`
 }
 
+export function formatResetRemain(resetsAtSec: number, nowMs: number = Date.now()): string {
+  const remainSec = resetsAtSec - Math.floor(nowMs / 1000)
+  if (remainSec <= 0) return 'reset baru saja'
+  const days = Math.floor(remainSec / 86400)
+  const hours = Math.floor((remainSec % 86400) / 3600)
+  const minutes = Math.floor((remainSec % 3600) / 60)
+  if (days > 0) {
+    return hours ? `${days}d ${hours}h` : `${days}d`
+  }
+  if (hours > 0) {
+    return minutes ? `${hours}h ${minutes}m` : `${hours}h`
+  }
+  return `${minutes}m`
+}
+
 export function renderContextReply(status: LastStatus, nowMs: number = Date.now()): string {
   const ctx = status.payload.context_window?.used_percentage
   const five = status.payload.rate_limits?.five_hour
