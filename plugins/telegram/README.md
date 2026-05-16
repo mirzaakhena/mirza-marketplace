@@ -141,6 +141,73 @@ Pairing is for capturing IDs. Once you're in, switch to `allowlist` so strangers
 
 Hapus `<project>/.claude/channels/telegram/` untuk reset state di project itu (tanpa mempengaruhi project lain).
 
+## Troubleshooting
+
+### `/mcp` shows `telegram` as **failed** / `Failed to reconnect to plugin:telegram:telegram: -32000`
+
+**Penyebab paling umum: tidak ada token (`.env`) di project tempat CC session ini dibuka.**
+
+Plugin install scope `user` berarti CC akan coba spawn MCP server `telegram` di **setiap** session di setiap project. Tapi dengan strict mode, server **harus** punya `<project>/.claude/channels/telegram/.env` untuk start. Tanpa itu, server exit 1 dan CC mark "failed".
+
+Ini **bukan plugin rusak** — ini desain by-design (per-project isolation). Pilih sesuai konteks Anda:
+
+1. **Anda memang mau pakai bot di project ini** → run `/telegram:configure <token>` lalu `/reload-plugins`. Bot akan hidup setelah `/mcp` toggle on.
+2. **Anda tidak butuh bot di project ini** → biarkan "failed" status (harmless), atau disable plugin per-project via `/plugin` → toggle off untuk repo ini.
+3. **Verifikasi token tersimpan**: jalankan `/telegram:configure` (tanpa argumen) untuk lihat status state dir current project.
+
+Manual debug:
+```bash
+ls "$PWD/.claude/channels/telegram/" 2>&1   # cari .env
+CLAUDE_PROJECT_DIR=$PWD bun run ~/.claude/plugins/cache/mirza-marketplace/telegram/*/server.ts 2>&1 | head -5
+```
+Stderr server akan kasih clue eksplisit (state dir path + missing file).
+
+### Bot tidak respons saat di-DM (no reply, no pairing code)
+
+Checklist berurutan:
+
+1. **CC session aktif dengan flag dev?** Banner di top harus muncul: `Listening for channel messages from: plugin:telegram@mirza-marketplace`. Kalau tidak ada, exit dan restart dengan `claude --dangerously-load-development-channels plugin:telegram@mirza-marketplace`.
+2. **`/mcp` toggle telegram on?** Channel plugin MCP **disabled by default per session**. Run `/mcp`, find `telegram`, enable. (Ini lazim terlewat — lihat step 5 di Quick Setup.)
+3. **Token configured di project ini?** Run `/telegram:configure` (no args) untuk status. Kalau "no token", run `/telegram:configure <token>`.
+4. **Server actually running?** `ps aux | grep "bun.*server.ts" | grep -v grep`. Harus ada minimal 1 process.
+5. **Pernah pakai token yang sama di project lain?** Telegram API: 1 token = 1 poller. Project lain dengan token sama akan men-depak yang ini. Solusi: **pakai bot/token berbeda per project**.
+
+### Multi-folder paralel: 409 Conflict di stderr
+
+Berarti **dua project pakai token yang sama**. Telegram API hanya izinkan 1 poller per token — keduanya saling depak.
+
+Fix: buat bot kedua di [@BotFather](https://t.me/BotFather) (`/newbot`), pakai token baru di project kedua.
+
+### Reset state 1 project ke clean slate
+
+```bash
+# Stop poller (kalau jalan)
+kill $(cat <project>/.claude/channels/telegram/bot.pid) 2>/dev/null
+
+# Hapus seluruh state dir
+rm -rf <project>/.claude/channels/telegram/
+```
+
+Project lain tidak terpengaruh. Untuk re-configure: `/telegram:configure <token>` lagi.
+
+### Uninstall plugin sepenuhnya
+
+```
+/plugin uninstall telegram@mirza-marketplace
+/plugin marketplace remove mirza-marketplace
+/reload-plugins
+```
+
+Lalu cleanup filesystem:
+```bash
+rm -rf ~/.claude/plugins/cache/mirza-marketplace/
+rm -rf ~/.claude/plugins/marketplaces/mirza-marketplace/
+# Loop hapus state di setiap project (opsional):
+find ~/Workspace -type d -path "*/.claude/channels/telegram" -prune -exec rm -rf {} +
+```
+
+Revoke bot token di [@BotFather](https://t.me/BotFather) (`/mybots` → pilih bot → API Token → Revoke) kalau Anda khawatir token sempat ter-expose.
+
 ## Access control
 
 See **[ACCESS.md](./ACCESS.md)** for DM policies, groups, mention detection, delivery config, skill commands, and the `access.json` schema.
