@@ -816,9 +816,7 @@ bot.command('hello', async ctx => {
 
 const CONTEXT_BRIDGE_PATH = join(import.meta.dir, 'scripts', 'context-bridge.sh')
 
-function projectDir(): string {
-  return process.env.CLAUDE_PROJECT_DIR ?? process.cwd()
-}
+const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR?.trim() || null
 
 function progressBar(pct: number, width = 10): string {
   const filled = Math.max(0, Math.min(width, Math.round((pct * width) / 100)))
@@ -854,7 +852,7 @@ type StatusLinePayload = {
 type LastStatus = { captured_at_ms: number; payload: StatusLinePayload }
 
 function loadLastStatus(): LastStatus | null {
-  const path = join(projectDir(), '.telegram-state', 'last-status.json')
+  const path = join(STATE_DIR, 'last-status.json')
   try {
     return JSON.parse(readFileSync(path, 'utf8')) as LastStatus
   } catch {
@@ -868,7 +866,14 @@ type InstallResult =
   | { kind: 'error'; message: string }
 
 function ensureContextBridgeInstalled(): InstallResult {
-  const settingsPath = join(projectDir(), '.claude', 'settings.json')
+  if (!PROJECT_DIR) {
+    return {
+      kind: 'error',
+      message: 'CLAUDE_PROJECT_DIR is not set; /context needs a project context. Run Claude Code from your project root.'
+    }
+  }
+  const channelsDir = join(PROJECT_DIR, '.claude', 'channels')
+  const settingsPath = join(PROJECT_DIR, '.claude', 'settings.json')
   let settings: Record<string, unknown> = {}
   let rawExisted = false
   let raw: string | null = null
@@ -902,18 +907,22 @@ function ensureContextBridgeInstalled(): InstallResult {
     }
   }
 
-  const stateDir = join(projectDir(), '.telegram-state')
+  // Ensure the channels-level .gitignore exists before writing any state.
+  const giResult = ensureChannelsGitignore(channelsDir)
+  if (!giResult.changed && giResult.reason && (giResult.reason.startsWith('mkdir failed') || giResult.reason.startsWith('write failed'))) {
+    return { kind: 'error', message: `gagal menyiapkan channels dir: ${giResult.reason}` }
+  }
+
   try {
-    mkdirSync(stateDir, { recursive: true })
-    writeFileSync(join(stateDir, 'chained-statusline'), previousCommand ?? '')
-    writeFileSync(join(stateDir, '.gitignore'), '*\n')
+    mkdirSync(STATE_DIR, { recursive: true })
+    writeFileSync(join(STATE_DIR, 'chained-statusline'), previousCommand ?? '')
   } catch (err) {
-    return { kind: 'error', message: `gagal menulis ${stateDir}: ${(err as Error).message}` }
+    return { kind: 'error', message: `gagal menulis ${STATE_DIR}: ${(err as Error).message}` }
   }
 
   settings.statusLine = { type: 'command', command: CONTEXT_BRIDGE_PATH }
   try {
-    mkdirSync(join(projectDir(), '.claude'), { recursive: true })
+    mkdirSync(join(PROJECT_DIR, '.claude'), { recursive: true })
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n')
   } catch (err) {
     return { kind: 'error', message: `gagal menulis ${settingsPath}: ${(err as Error).message}` }
@@ -976,7 +985,7 @@ bot.command('context', async ctx => {
     const lines = [
       `Bridge /context terpasang ✅`,
       ``,
-      `Patched: ${join(projectDir(), '.claude', 'settings.json')}`,
+      `Patched: ${join(PROJECT_DIR!, '.claude', 'settings.json')}`,
     ]
     if (install.backupPath) lines.push(`Backup: ${install.backupPath}`)
     if (install.previousCommand) lines.push(`Chain ke statusline lama: aktif`)
