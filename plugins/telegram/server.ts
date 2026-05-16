@@ -1058,6 +1058,10 @@ async function handleInboundAlbum(
   const chat_id = String(firstCtx.chat!.id)
   const firstMsgId = items[0]!.msgId
 
+  // Permission-reply intercept (PERMISSION_REPLY_RE) deliberately NOT run in
+  // the album path — album captions never carry "yes XXXXX" syntax, and the
+  // explicit skip closes a potential forge surface. See spec T1.10.
+
   // Typing indicator (fire-and-forget) + ack reaction on first item only.
   void bot.api.sendChatAction(chat_id, 'typing').catch(() => {})
   if (access.ackReaction) {
@@ -1106,6 +1110,14 @@ async function handleInboundAlbum(
       }
       logAttachments.push(docEntry)
       notifAttachments.push(docEntry)
+    } else {
+      // Defensive: item shape did not match any expected branch (e.g. document
+      // without meta). Today this is unreachable — bot.on('message:document')
+      // always builds a complete meta object. Future handlers (e.g. video
+      // albums) may add new AlbumItem variants; this guard ensures missing
+      // shape never silently disappears from the user-visible flow.
+      failedCount++
+      process.stderr.write(`telegram channel: album item ${idx + 1}/${items.length} has unexpected shape\n`)
     }
   })
 
