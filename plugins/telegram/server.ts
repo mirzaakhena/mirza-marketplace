@@ -792,6 +792,197 @@ bot.command('hello', async ctx => {
   await ctx.reply(`Hello, Mirza!`)
 })
 
+// ---------------------------------------------------------------------------
+// /context — surface Claude Code's context window & 5-hour rate-limit usage
+// in the chat. Data is captured by scripts/context-bridge.sh which Claude
+// Code runs as statusLine; on first /context we patch <project>/.claude/
+// settings.json so the bridge becomes the statusLine command (chained to the
+// previous one so the terminal display is preserved).
+// ---------------------------------------------------------------------------
+
+const CONTEXT_BRIDGE_PATH = join(import.meta.dir, 'scripts', 'context-bridge.sh')
+
+function projectDir(): string {
+  return process.env.CLAUDE_PROJECT_DIR ?? process.cwd()
+}
+
+function progressBar(pct: number, width = 10): string {
+  const filled = Math.max(0, Math.min(width, Math.round((pct * width) / 100)))
+  return '●'.repeat(filled) + '○'.repeat(width - filled)
+}
+
+function formatRelativeMs(ageMs: number): string {
+  if (ageMs < 0) return 'baru'
+  const sec = Math.floor(ageMs / 1000)
+  if (sec < 60) return `${sec}s lalu`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m lalu`
+  const hr = Math.floor(min / 60)
+  const rm = min % 60
+  return rm ? `${hr}h ${rm}m lalu` : `${hr}h lalu`
+}
+
+// Asia/Jakarta is UTC+7 year-round, no DST — compute directly to avoid Intl.
+function formatJakartaHM(epochMs: number): string {
+  const d = new Date(epochMs + 7 * 3600 * 1000)
+  const hh = String(d.getUTCHours()).padStart(2, '0')
+  const mm = String(d.getUTCMinutes()).padStart(2, '0')
+  return `${hh}:${mm} WIB`
+}
+
+type StatusLinePayload = {
+  context_window?: { used_percentage?: number }
+  rate_limits?: {
+    five_hour?: { used_percentage?: number; resets_at?: number }
+  }
+}
+
+type LastStatus = { captured_at_ms: number; payload: StatusLinePayload }
+
+function loadLastStatus(): LastStatus | null {
+  const path = join(projectDir(), '.telegram-state', 'last-status.json')
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as LastStatus
+  } catch {
+    return null
+  }
+}
+
+type InstallResult =
+  | { kind: 'already-installed' }
+  | { kind: 'installed'; backupPath: string | null; previousCommand: string | null }
+  | { kind: 'error'; message: string }
+
+function ensureContextBridgeInstalled(): InstallResult {
+  const settingsPath = join(projectDir(), '.claude', 'settings.json')
+  let settings: Record<string, unknown> = {}
+  let rawExisted = false
+  let raw: string | null = null
+  try {
+    raw = readFileSync(settingsPath, 'utf8')
+    rawExisted = true
+  } catch {}
+
+  if (rawExisted && raw !== null) {
+    try {
+      settings = JSON.parse(raw)
+    } catch (err) {
+      return { kind: 'error', message: `${settingsPath} bukan JSON valid (mungkin ada komentar?). Perbaiki manual lalu coba lagi. (${(err as Error).message})` }
+    }
+  }
+
+  const current = (settings.statusLine ?? {}) as { type?: string; command?: string }
+  if (current.command === CONTEXT_BRIDGE_PATH) {
+    return { kind: 'already-installed' }
+  }
+
+  const previousCommand = typeof current.command === 'string' ? current.command : null
+
+  let backupPath: string | null = null
+  if (rawExisted && raw !== null) {
+    backupPath = `${settingsPath}.backup-${Date.now()}`
+    try {
+      writeFileSync(backupPath, raw)
+    } catch {
+      backupPath = null
+    }
+  }
+
+  const stateDir = join(projectDir(), '.telegram-state')
+  try {
+    mkdirSync(stateDir, { recursive: true })
+    writeFileSync(join(stateDir, 'chained-statusline'), previousCommand ?? '')
+    writeFileSync(join(stateDir, '.gitignore'), '*\n')
+  } catch (err) {
+    return { kind: 'error', message: `gagal menulis ${stateDir}: ${(err as Error).message}` }
+  }
+
+  settings.statusLine = { type: 'command', command: CONTEXT_BRIDGE_PATH }
+  try {
+    mkdirSync(join(projectDir(), '.claude'), { recursive: true })
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n')
+  } catch (err) {
+    return { kind: 'error', message: `gagal menulis ${settingsPath}: ${(err as Error).message}` }
+  }
+
+  return { kind: 'installed', backupPath, previousCommand }
+}
+
+function renderContextReply(status: LastStatus): string {
+  const ctx = status.payload.context_window?.used_percentage
+  const five = status.payload.rate_limits?.five_hour
+  const fivePct = five?.used_percentage
+  const resetsAt = five?.resets_at
+
+  const ctxLine = typeof ctx === 'number'
+    ? `${progressBar(ctx)} ${Math.round(ctx)}%`
+    : '(tidak tersedia)'
+  const usageLine = typeof fivePct === 'number'
+    ? `${progressBar(fivePct)} ${Math.round(fivePct)}%`
+    : '(tidak tersedia — butuh Pro/Max & 1 request dulu)'
+
+  let resetLine = '(tidak tersedia)'
+  if (typeof resetsAt === 'number') {
+    const remain = resetsAt - Math.floor(Date.now() / 1000)
+    if (remain > 0) {
+      const h = Math.floor(remain / 3600)
+      const m = Math.floor((remain % 3600) / 60)
+      resetLine = `(${h}h ${m}m / 5h)`
+    } else {
+      resetLine = '(reset baru saja)'
+    }
+  }
+
+  const age = Date.now() - status.captured_at_ms
+  const lastLine = `Last update: ${formatJakartaHM(status.captured_at_ms)} (${formatRelativeMs(age)})`
+
+  return [
+    `Context`,
+    ctxLine,
+    ``,
+    `Usage`,
+    usageLine,
+    ``,
+    `Reset`,
+    resetLine,
+    ``,
+    lastLine,
+  ].join('\n')
+}
+
+bot.command('context', async ctx => {
+  if (!dmCommandGate(ctx)) return
+
+  const install = ensureContextBridgeInstalled()
+  if (install.kind === 'error') {
+    await ctx.reply(`Gagal pasang bridge:\n${install.message}`)
+    return
+  }
+  if (install.kind === 'installed') {
+    const lines = [
+      `Bridge /context terpasang ✅`,
+      ``,
+      `Patched: ${join(projectDir(), '.claude', 'settings.json')}`,
+    ]
+    if (install.backupPath) lines.push(`Backup: ${install.backupPath}`)
+    if (install.previousCommand) lines.push(`Chain ke statusline lama: aktif`)
+    lines.push(``, `Tunggu statusline Claude Code refresh 1-2 detik (atau restart Claude Code), lalu kirim /context lagi.`)
+    await ctx.reply(lines.join('\n'))
+    return
+  }
+
+  const status = loadLastStatus()
+  if (!status) {
+    await ctx.reply(
+      `Bridge terpasang tapi belum ada data.\n\n` +
+      `Statusline Claude Code belum sempat trigger. Aktif di Claude Code sebentar lalu kirim /context lagi.`,
+    )
+    return
+  }
+
+  await ctx.reply(renderContextReply(status))
+})
+
 // Inline-button handler for permission requests. Callback data is
 // `perm:allow:<id>`, `perm:deny:<id>`, or `perm:more:<id>`.
 // Security mirrors the text-reply path: allowFrom must contain the sender.
@@ -1304,6 +1495,7 @@ void (async () => {
               { command: 'help', description: 'What this bot can do' },
               { command: 'status', description: 'Check your pairing status' },
               { command: 'hello', description: 'Say hello to Mirza' },
+              { command: 'context', description: 'Show context & 5h usage' },
             ],
             { scope: { type: 'all_private_chats' } },
           ).catch(() => {})
