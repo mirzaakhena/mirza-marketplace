@@ -1,0 +1,55 @@
+export interface AlbumBufferOpts<T> {
+  debounceMs: number
+  hardCapMs: number
+  maxItems: number
+  onFlush: (key: string, items: T[]) => Promise<void> | void
+}
+
+export interface AlbumBuffer<T> {
+  add: (key: string, item: T) => void
+  size: () => number
+  drainAll: () => Promise<void>
+}
+
+interface Bucket<T> {
+  items: T[]
+  debounceTimer: ReturnType<typeof setTimeout>
+  hardTimer: ReturnType<typeof setTimeout>
+}
+
+export function createAlbumBuffer<T>(opts: AlbumBufferOpts<T>): AlbumBuffer<T> {
+  const buckets = new Map<string, Bucket<T>>()
+
+  function flush(key: string): void {
+    const bucket = buckets.get(key)
+    if (!bucket) return
+    buckets.delete(key)
+    clearTimeout(bucket.debounceTimer)
+    clearTimeout(bucket.hardTimer)
+    void Promise.resolve(opts.onFlush(key, bucket.items))
+  }
+
+  function add(key: string, item: T): void {
+    const existing = buckets.get(key)
+    if (existing) {
+      existing.items.push(item)
+      return
+    }
+    const bucket: Bucket<T> = {
+      items: [item],
+      debounceTimer: setTimeout(() => flush(key), opts.debounceMs),
+      hardTimer: setTimeout(() => flush(key), opts.hardCapMs),
+    }
+    buckets.set(key, bucket)
+  }
+
+  function size(): number {
+    return buckets.size
+  }
+
+  async function drainAll(): Promise<void> {
+    // Implemented in Task 7
+  }
+
+  return { add, size, drainAll }
+}
