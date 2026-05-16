@@ -5,7 +5,7 @@
 # Idempotent: safe to call on every plugin operation.
 
 ensure_channels_gitignore() {
-  local channels_dir="$1"
+  local channels_dir="${1:?ensure_channels_gitignore: channels_dir argument required}"
   local ignore_file="$channels_dir/.gitignore"
 
   mkdir -p "$channels_dir" 2>/dev/null || return 1
