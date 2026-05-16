@@ -422,6 +422,8 @@ const mcp = new Server(
       '',
       'Messages from Telegram arrive as <channel source="telegram" chat_id="..." message_id="..." user="..." ts="...">. If the tag has an image_path attribute, Read that file — it is a photo the sender attached. If the tag has attachment_file_id, call download_attachment with that file_id to fetch the file, then Read the returned path. Reply with the reply tool — pass chat_id back. Use reply_to (set to a message_id) only when replying to an earlier message; the latest message doesn\'t need a quote-reply, omit reply_to for normal responses.',
       '',
+      'Albums (multiple photos/files sent together) arrive with a media_group_id attribute and message_ids (comma-separated list of all parts). The reply_to/message_id fields point to the first part. image_paths (plural, newline-separated) holds every photo path — Read each one. attachments (a JSON array string) holds every non-photo file in the album — JSON.parse it, then call download_attachment with each entry\'s file_id.',
+      '',
       'reply accepts file paths (files: ["/abs/path.png"]) for attachments. Use react to add emoji reactions, and edit_message for interim progress updates. Edits don\'t trigger push notifications — when a long task completes, send a new reply so the user\'s device pings.',
       '',
       "Telegram's Bot API exposes no history or search — you only see messages as they arrive. If you need earlier context, ask the user to paste it or summarize.",
@@ -1071,6 +1073,10 @@ const albumBuffer = createAlbumBuffer<{ firstCtx: Context; item: AlbumItem }>({
   hardCapMs: 3000,
   maxItems: 10,
   onFlush: async (key, entries) => {
+    // Telegram doesn't guarantee album updates arrive in send order — sort by
+    // msgId ASC so image_paths and Photo-N caption labels match what the user
+    // sees in Telegram. message_id is monotonic per chat.
+    entries.sort((a, b) => a.item.msgId - b.item.msgId)
     const firstCtx = entries[0]!.firstCtx
     // key format: `${chat_id}:${media_group_id}` — split on first ':'
     const colonIdx = key.indexOf(':')
@@ -1342,9 +1348,23 @@ async function handleInboundAlbum(
     return
   }
 
-  // Combine captions; fallback if all empty.
-  const captions = items.map(i => i.caption).filter((c): c is string => Boolean(c && c.trim()))
-  let combinedCaption = captions.length > 0 ? captions.join(' ').trim() : `(album of ${items.length} items)`
+  // Combine captions. With ≥2 non-empty captions, label each with its album
+  // position ("Photo N:") so Claude can map each caption to the matching
+  // image_paths entry (same order). Single-caption albums (the common case in
+  // Telegram) skip the label to stay terse.
+  const captionsWithIndex = items
+    .map((i, idx) => ({ idx, caption: i.caption?.trim() ?? '' }))
+    .filter(c => c.caption.length > 0)
+  let combinedCaption: string
+  if (captionsWithIndex.length === 0) {
+    combinedCaption = `(album of ${items.length} items)`
+  } else if (captionsWithIndex.length === 1) {
+    combinedCaption = captionsWithIndex[0]!.caption
+  } else {
+    combinedCaption = captionsWithIndex
+      .map(c => `Photo ${c.idx + 1}: ${c.caption}`)
+      .join('\n')
+  }
   if (failedCount > 0) {
     combinedCaption = `${combinedCaption}\n\n[⚠️ ${failedCount} of ${items.length} items failed to load]`
   }
@@ -1372,6 +1392,11 @@ async function handleInboundAlbum(
     process.stderr.write(`telegram channel: album logInbound failed: ${err}\n`)
   }
 
+  // Claude Code's notifications/claude/channel schema enforces
+  // meta: Record<string, string>. Array/object values fail Zod parse and the
+  // whole notification is silently dropped — so Claude never sees the album.
+  // Serialize multi-value fields as strings: newline-joined paths, comma-joined
+  // IDs, JSON for attachment objects.
   mcp.notification({
     method: 'notifications/claude/channel',
     params: {
@@ -1379,13 +1404,13 @@ async function handleInboundAlbum(
       meta: {
         chat_id,
         message_id: String(firstMsgId),
-        message_ids: items.map(i => String(i.msgId)),
+        message_ids: items.map(i => String(i.msgId)).join(','),
         media_group_id: mediaGroupId,
         user: from.username ?? String(from.id),
         user_id: String(from.id),
         ts: new Date((firstCtx.message?.date ?? 0) * 1000).toISOString(),
-        ...(imagePaths.length > 0 ? { image_paths: imagePaths } : {}),
-        ...(notifAttachments.length > 0 ? { attachments: notifAttachments } : {}),
+        ...(imagePaths.length > 0 ? { image_paths: imagePaths.join('\n') } : {}),
+        ...(notifAttachments.length > 0 ? { attachments: JSON.stringify(notifAttachments) } : {}),
       },
     },
   }).catch(err => {
