@@ -142,6 +142,43 @@ describe('album-buffer: multi-key isolation', () => {
   })
 })
 
+describe('album-buffer: drainAll', () => {
+  test('drainAll flushes all pending buckets and resolves', async () => {
+    const flushed: Array<{ key: string; items: number[] }> = []
+    const buf = createAlbumBuffer<number>({
+      debounceMs: 1000,  // long enough that nothing flushes naturally
+      hardCapMs: 5000,
+      maxItems: 100,
+      onFlush: async (key, items) => {
+        await wait(10)
+        flushed.push({ key, items })
+      },
+    })
+
+    buf.add('A', 1)
+    buf.add('B', 2)
+    buf.add('A', 3)
+    expect(buf.size()).toBe(2)
+
+    await buf.drainAll()
+
+    expect(buf.size()).toBe(0)
+    expect(flushed).toHaveLength(2)
+    expect(flushed.find(f => f.key === 'A')!.items).toEqual([1, 3])
+    expect(flushed.find(f => f.key === 'B')!.items).toEqual([2])
+  })
+
+  test('drainAll on empty buffer is no-op', async () => {
+    const buf = createAlbumBuffer<number>({
+      debounceMs: 40,
+      hardCapMs: 1000,
+      maxItems: 10,
+      onFlush: () => {},
+    })
+    await expect(buf.drainAll()).resolves.toBeUndefined()
+  })
+})
+
 describe('album-buffer: error isolation', () => {
   test('onFlush throw does not corrupt buffer state', async () => {
     const errors: unknown[] = []

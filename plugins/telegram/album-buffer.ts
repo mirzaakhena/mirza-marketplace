@@ -65,7 +65,26 @@ export function createAlbumBuffer<T>(opts: AlbumBufferOpts<T>): AlbumBuffer<T> {
   }
 
   async function drainAll(): Promise<void> {
-    // Implemented in Task 7
+    const pendingKeys = [...buckets.keys()]
+    const pendingPromises: Array<Promise<unknown>> = []
+    for (const key of pendingKeys) {
+      const bucket = buckets.get(key)
+      if (!bucket) continue
+      buckets.delete(key)
+      clearTimeout(bucket.debounceTimer)
+      clearTimeout(bucket.hardTimer)
+      try {
+        const ret = opts.onFlush(key, bucket.items)
+        if (ret && typeof (ret as Promise<void>).then === 'function') {
+          pendingPromises.push((ret as Promise<unknown>).catch(err => {
+            console.error(`[album-buffer] drainAll onFlush rejected key=${key}:`, err)
+          }))
+        }
+      } catch (err) {
+        console.error(`[album-buffer] drainAll onFlush threw key=${key}:`, err)
+      }
+    }
+    await Promise.all(pendingPromises)
   }
 
   return { add, size, drainAll }
