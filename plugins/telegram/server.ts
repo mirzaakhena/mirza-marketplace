@@ -23,6 +23,7 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, 
 import { homedir } from 'os'
 import { join, extname, sep } from 'path'
 import { createMessagesStore } from './messages-store.ts'
+import { createAlbumBuffer } from './album-buffer'
 
 const STATE_DIR = process.env.TELEGRAM_STATE_DIR ?? join(homedir(), '.claude', 'channels', 'telegram')
 const ACCESS_FILE = join(STATE_DIR, 'access.json')
@@ -847,14 +848,41 @@ bot.on('callback_query:data', async ctx => {
   }
 })
 
+const albumBuffer = createAlbumBuffer<{ firstCtx: Context; item: AlbumItem }>({
+  debounceMs: 400,
+  hardCapMs: 3000,
+  maxItems: 10,
+  onFlush: async (key, entries) => {
+    const firstCtx = entries[0]!.firstCtx
+    // key format: `${chat_id}:${media_group_id}` — split on first ':'
+    const colonIdx = key.indexOf(':')
+    const mediaGroupId = colonIdx >= 0 ? key.slice(colonIdx + 1) : key
+    const items = entries.map(e => e.item)
+    await handleInboundAlbum(firstCtx, mediaGroupId, items)
+  },
+})
+
 bot.on('message:text', async ctx => {
   await handleInbound(ctx, ctx.message.text, undefined)
 })
 
 bot.on('message:photo', async ctx => {
+  const mgId = ctx.message.media_group_id
+  if (mgId) {
+    const key = `${ctx.chat!.id}:${mgId}`
+    albumBuffer.add(key, {
+      firstCtx: ctx,
+      item: {
+        msgId: ctx.message.message_id,
+        caption: ctx.message.caption,
+        kind: 'photo',
+        download: makePhotoDownloader(ctx),
+      },
+    })
+    return
+  }
+  // Single-photo path (existing behavior preserved)
   const caption = ctx.message.caption ?? '(photo)'
-  // Defer download until after the gate approves — any user can send photos,
-  // and we don't want to burn API quota or fill the inbox for dropped messages.
   await handleInbound(ctx, caption, makePhotoDownloader(ctx))
 })
 
