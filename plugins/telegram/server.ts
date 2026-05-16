@@ -890,13 +890,30 @@ bot.on('message:document', async ctx => {
   const doc = ctx.message.document
   const name = safeName(doc.file_name)
   const text = ctx.message.caption ?? `(document: ${name ?? 'file'})`
-  await handleInbound(ctx, text, undefined, {
+  const meta: AttachmentMeta = {
     kind: 'document',
     file_id: doc.file_id,
     size: doc.file_size,
     mime: doc.mime_type,
     name,
-  })
+  }
+
+  const mgId = ctx.message.media_group_id
+  if (mgId) {
+    const key = `${ctx.chat!.id}:${mgId}`
+    albumBuffer.add(key, {
+      firstCtx: ctx,
+      item: {
+        msgId: ctx.message.message_id,
+        caption: ctx.message.caption,
+        kind: 'document',
+        meta,
+      },
+    })
+    return
+  }
+  // Single-document path (existing behavior preserved)
+  await handleInbound(ctx, text, undefined, meta)
 })
 
 bot.on('message:voice', async ctx => {
