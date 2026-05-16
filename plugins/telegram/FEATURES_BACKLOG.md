@@ -68,7 +68,7 @@ Fitur-fitur yang langsung relevan untuk plugin channel adapter dan tidak duplika
 - [ ] **T1.2 — Document/PDF inbound handling** (saat ini hanya text + photo)
 - [ ] **T1.3 — Quoted message context extraction** (kalau user reply ke pesan lain, sertakan konteksnya)
 - [ ] **T1.4 — Inbound message dedup cache** (LRU 1000-entry, hindari double-process saat polling overlap)
-- [ ] **T1.10 — Album / media group batching** (user kirim multiple image sekaligus → diproses sebagai 1 batch, bukan satu-satu)
+- [~] **T1.10 — Album / media group batching** (user kirim multiple image sekaligus → diproses sebagai 1 batch, bukan satu-satu) — design spec ready: `docs/superpowers/specs/2026-05-16-t110-album-batching-design.md`
 
 ### Outbound Message Quality
 
@@ -76,6 +76,7 @@ Fitur-fitur yang langsung relevan untuk plugin channel adapter dan tidak duplika
 - [ ] **T1.6 — Per-user FIFO message queue** (cegah race condition saat dua pesan datang berdekatan)
 - [ ] **T1.7 — Multi-message array delivery** (Claude bisa kirim 2-3 pesan terpisah dengan jeda alami, bukan satu wall of text)
 - [ ] **T1.8 — Pause-before-typing** (delay diam sebelum typing indicator muncul, untuk pesan reflektif/thoughtful)
+- [ ] **T1.12 — Outbound media group / album** (Claude balas dengan multiple file → kirim sebagai 1 album visual via `sendMediaGroup`, bukan N pesan terpisah)
 
 ### Reactions
 
@@ -191,6 +192,23 @@ Section ini berisi referensi ke implementasi lama + opsi implementasi untuk plug
 - **Rekomendasi**: Opsi A — semantic batching idealnya transparan untuk Claude.
 - **Catatan**: Format `<channel>` tag perlu support `image_paths` (plural). Backward compat: tetap kirim `image_path` (singular) untuk single image.
 
+### T1.12 — Outbound media group / album
+
+- **Konteks plugin**: `reply` tool saat ini menerima `files: string[]` dan mengirim **per file** lewat `sendPhoto`/`sendDocument` di `server.ts:582-595`. Akibatnya, kalau Claude balas dengan 3 gambar, user lihat 3 pesan terpisah di Telegram (bukan 1 album visual).
+- **Tujuan**: gabungkan multiple file outbound jadi 1 album via `bot.api.sendMediaGroup()` dengan `InputMediaPhoto[]` / `InputMediaDocument[]`.
+- **Konstrain Telegram**:
+  - Album cap = 10 item.
+  - Mixed photo + document **tidak diizinkan** dalam 1 `sendMediaGroup` — harus dipecah per tipe.
+  - Caption hanya bisa attached di **item pertama** dari group; sisanya caption diabaikan oleh client.
+  - Reply threading (`reply_parameters`) berlaku untuk seluruh album, bukan per item.
+- **Trade-off**:
+  - 1 file → tetap pakai `sendPhoto`/`sendDocument` (sendMediaGroup overkill).
+  - 2+ photo → sendMediaGroup.
+  - 2+ document → sendMediaGroup.
+  - Photo + document mixed → 2 panggilan terpisah (1 album photo + 1 album document), atau fall-back ke per-file delivery existing.
+- **Logging impact** (interaksi T1.11): `sendMediaGroup` return array message_id. Logging 1 row per album (mirror inbound T1.10) atau N row per file? Sebaiknya 1 row per album, attachments[] sesuai isi, message_id = pertama, metadata.message_ids[].
+- **Out of plan T1.10**: dipisah ke T1.12 supaya inbound bisa di-ship tanpa menunggu desain outbound.
+
 ### T1.11 — Raw conversation logging
 
 - **Referensi old project**: `src/db/message.ts` (better-sqlite3 + FTS5). Skema: timestamp, sender (user/assistant/system), gateway, chat_id, message_id, text, media flag, raw payload.
@@ -262,3 +280,4 @@ Section ini berisi referensi ke implementasi lama + opsi implementasi untuk plug
 - **2026-05-15** — Tambah T1.10 (album/media group batching) dan T1.11 (raw conversation logging) berdasarkan input user. T3.7 (search messages) di-revise: storage layer dipindah ke T1.11, mekanisme search di-defer ke pembahasan terpisah.
 - **2026-05-15** — Tambah section "Recommended Development Order (by Impact)". Mode kerja disepakati: 1 fitur per session, focus deep. Saran titik mulai: T1.11.
 - **2026-05-15** — T1.11 selesai. Module `plugins/telegram/messages-store.ts` + integrasi di `server.ts` (handleInbound, reply tool, edit_message tool). `reply` tool gain optional `source` param. Disable via `TELEGRAM_DISABLE_MESSAGES_STORE=1`. Spec: `docs/superpowers/specs/2026-05-15-t111-conversation-logging-design.md`.
+- **2026-05-16** — T1.10 design spec ready: `docs/superpowers/specs/2026-05-16-t110-album-batching-design.md`. Keputusan: Opsi A (plugin buffer), 400ms debounce / 3000ms hard cap / 10 max items, photo + document only, 1 row per album. Tambah T1.12 (outbound media group via `sendMediaGroup`) sebagai item baru — out of plan T1.10.
