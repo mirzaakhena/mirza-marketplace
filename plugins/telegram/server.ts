@@ -855,26 +855,7 @@ bot.on('message:photo', async ctx => {
   const caption = ctx.message.caption ?? '(photo)'
   // Defer download until after the gate approves — any user can send photos,
   // and we don't want to burn API quota or fill the inbox for dropped messages.
-  await handleInbound(ctx, caption, async () => {
-    // Largest size is last in the array.
-    const photos = ctx.message.photo
-    const best = photos[photos.length - 1]
-    try {
-      const file = await ctx.api.getFile(best.file_id)
-      if (!file.file_path) return undefined
-      const url = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`
-      const res = await fetch(url)
-      const buf = Buffer.from(await res.arrayBuffer())
-      const ext = file.file_path.split('.').pop() ?? 'jpg'
-      const path = join(INBOX_DIR, `${Date.now()}-${best.file_unique_id}.${ext}`)
-      mkdirSync(INBOX_DIR, { recursive: true })
-      writeFileSync(path, buf)
-      return path
-    } catch (err) {
-      process.stderr.write(`telegram channel: photo download failed: ${err}\n`)
-      return undefined
-    }
-  })
+  await handleInbound(ctx, caption, makePhotoDownloader(ctx))
 })
 
 bot.on('message:document', async ctx => {
@@ -958,6 +939,29 @@ type AttachmentMeta = {
 // or forge a second meta entry.
 function safeName(s: string | undefined): string | undefined {
   return s?.replace(/[<>\[\]\r\n;]/g, '_')
+}
+
+function makePhotoDownloader(ctx: Context): () => Promise<string | undefined> {
+  return async () => {
+    const photos = ctx.message?.photo
+    if (!photos || photos.length === 0) return undefined
+    const best = photos[photos.length - 1]!
+    try {
+      const file = await ctx.api.getFile(best.file_id)
+      if (!file.file_path) return undefined
+      const url = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`
+      const res = await fetch(url)
+      const buf = Buffer.from(await res.arrayBuffer())
+      const ext = file.file_path.split('.').pop() ?? 'jpg'
+      const path = join(INBOX_DIR, `${Date.now()}-${best.file_unique_id}.${ext}`)
+      mkdirSync(INBOX_DIR, { recursive: true })
+      writeFileSync(path, buf)
+      return path
+    } catch (err) {
+      process.stderr.write(`telegram channel: photo download failed: ${err}\n`)
+      return undefined
+    }
+  }
 }
 
 function buildAttachmentsForLog(
