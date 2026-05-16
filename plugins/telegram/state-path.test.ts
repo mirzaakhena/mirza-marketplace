@@ -1,7 +1,7 @@
 import { test, expect, describe } from 'bun:test'
 import { resolveStateDir, resolveChannelsDir } from './state-path'
 
-describe('resolveStateDir', () => {
+describe('state-path: resolveStateDir', () => {
   test('returns null when both env unset', () => {
     expect(resolveStateDir({})).toBe(null)
   })
@@ -31,9 +31,13 @@ describe('resolveStateDir', () => {
   test('trims whitespace from env values', () => {
     expect(resolveStateDir({ TELEGRAM_STATE_DIR: '  /tmp/foo  ' })).toBe('/tmp/foo')
   })
+
+  test('treats whitespace-only env as unset', () => {
+    expect(resolveStateDir({ TELEGRAM_STATE_DIR: '   ', CLAUDE_PROJECT_DIR: '   ' })).toBe(null)
+  })
 })
 
-describe('resolveChannelsDir', () => {
+describe('state-path: resolveChannelsDir', () => {
   test('returns null when CLAUDE_PROJECT_DIR unset', () => {
     expect(resolveChannelsDir({})).toBe(null)
   })
@@ -44,5 +48,9 @@ describe('resolveChannelsDir', () => {
 
   test('derives channels dir from CLAUDE_PROJECT_DIR', () => {
     expect(resolveChannelsDir({ CLAUDE_PROJECT_DIR: '/repo' })).toBe('/repo/.claude/channels')
+  })
+
+  test('trims whitespace from CLAUDE_PROJECT_DIR', () => {
+    expect(resolveChannelsDir({ CLAUDE_PROJECT_DIR: '  /repo  ' })).toBe('/repo/.claude/channels')
   })
 })
