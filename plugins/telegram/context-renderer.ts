@@ -11,6 +11,13 @@ export type StatusLinePayload = {
 
 export type LastStatus = { captured_at_ms: number; payload: StatusLinePayload }
 
+export function formatTokens(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
+  const millions = n / 1_000_000
+  return Number.isInteger(millions) ? `${millions}M` : `${millions.toFixed(1)}M`
+}
+
 export function progressBar(pct: number, width = 10): string {
   const filled = Math.max(0, Math.min(width, Math.round((pct * width) / 100)))
   return '●'.repeat(filled) + '○'.repeat(width - filled)

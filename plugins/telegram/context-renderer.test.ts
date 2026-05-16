@@ -4,6 +4,7 @@ import {
   formatRelativeMs,
   formatJakartaHM,
   renderContextReply,
+  formatTokens,
   type LastStatus,
 } from './context-renderer'
 
@@ -49,6 +50,31 @@ describe('formatJakartaHM', () => {
   })
   test('UTC 10:42 → 17:42 WIB', () => {
     expect(formatJakartaHM(Date.UTC(2026, 4, 17, 10, 42, 0))).toBe('17:42 WIB')
+  })
+})
+
+describe('formatTokens', () => {
+  test('0 → "0"', () => {
+    expect(formatTokens(0)).toBe('0')
+  })
+  test('under 1000 → raw number', () => {
+    expect(formatTokens(42)).toBe('42')
+    expect(formatTokens(999)).toBe('999')
+  })
+  test('thousands with 1 decimal', () => {
+    expect(formatTokens(1234)).toBe('1.2k')
+    expect(formatTokens(46747)).toBe('46.7k')
+    expect(formatTokens(999_999)).toBe('1000.0k')
+  })
+  test('exact 1M', () => {
+    expect(formatTokens(1_000_000)).toBe('1M')
+  })
+  test('millions with 1 decimal', () => {
+    expect(formatTokens(1_500_000)).toBe('1.5M')
+    expect(formatTokens(2_300_000)).toBe('2.3M')
+  })
+  test('exact integer millions render without decimal', () => {
+    expect(formatTokens(3_000_000)).toBe('3M')
   })
 })
 
