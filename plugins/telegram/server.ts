@@ -934,6 +934,14 @@ type AttachmentMeta = {
   name?: string
 }
 
+interface AlbumItem {
+  msgId: number
+  caption: string | undefined
+  kind: 'photo' | 'document'
+  download?: () => Promise<string | undefined>  // photo only
+  meta?: AttachmentMeta                          // document only
+}
+
 // Filenames and titles are uploader-controlled. They land inside the <channel>
 // notification — delimiter chars would let the uploader break out of the tag
 // or forge a second meta entry.
@@ -980,6 +988,134 @@ function buildAttachmentsForLog(
     })
   }
   return out.length > 0 ? out : undefined
+}
+
+async function handleInboundAlbum(
+  firstCtx: Context,
+  mediaGroupId: string,
+  items: AlbumItem[],
+): Promise<void> {
+  const result = gate(firstCtx)
+
+  if (result.action === 'drop') return
+
+  if (result.action === 'pair') {
+    const lead = result.isResend ? 'Still pending' : 'Pairing required'
+    await firstCtx.reply(`${lead} — run in Claude Code:\n\n/telegram:access pair ${result.code}`)
+    return
+  }
+
+  const access = result.access
+  const from = firstCtx.from!
+  const chat_id = String(firstCtx.chat!.id)
+  const firstMsgId = items[0]!.msgId
+
+  // Typing indicator (fire-and-forget) + ack reaction on first item only.
+  void bot.api.sendChatAction(chat_id, 'typing').catch(() => {})
+  if (access.ackReaction) {
+    void bot.api.setMessageReaction(chat_id, firstMsgId, [
+      { type: 'emoji', emoji: access.ackReaction as ReactionTypeEmoji['emoji'] },
+    ]).catch(() => {})
+  }
+
+  // Parallel download. Documents are meta-only (no actual download here —
+  // file_id is the deliverable, Claude calls download_attachment when needed).
+  const settled = await Promise.allSettled(
+    items.map(async i => {
+      if (i.kind === 'photo' && i.download) {
+        return { kind: 'photo' as const, path: await i.download() }
+      }
+      return { kind: 'document' as const, meta: i.meta }
+    }),
+  )
+
+  const imagePaths: string[] = []
+  const logAttachments: Array<Record<string, unknown>> = []
+  const notifAttachments: Array<Record<string, unknown>> = []
+  let failedCount = 0
+
+  settled.forEach((s, idx) => {
+    if (s.status === 'rejected') {
+      failedCount++
+      process.stderr.write(`telegram channel: album item ${idx + 1}/${items.length} failed: ${s.reason}\n`)
+      return
+    }
+    const v = s.value
+    if (v.kind === 'photo') {
+      if (!v.path) {
+        failedCount++
+        return
+      }
+      imagePaths.push(v.path)
+      logAttachments.push({ type: 'photo', path: v.path })
+    } else if (v.kind === 'document' && v.meta) {
+      const docEntry: Record<string, unknown> = {
+        type: v.meta.kind,
+        file_id: v.meta.file_id,
+        ...(v.meta.size != null ? { size: v.meta.size } : {}),
+        ...(v.meta.mime ? { mime: v.meta.mime } : {}),
+        ...(v.meta.name ? { name: v.meta.name } : {}),
+      }
+      logAttachments.push(docEntry)
+      notifAttachments.push(docEntry)
+    }
+  })
+
+  const successCount = imagePaths.length + notifAttachments.length
+  if (successCount === 0) {
+    await firstCtx.reply('⚠️ Gagal memuat foto-foto album. Coba kirim ulang.')
+    return
+  }
+
+  // Combine captions; fallback if all empty.
+  const captions = items.map(i => i.caption).filter((c): c is string => Boolean(c && c.trim()))
+  let combinedCaption = captions.length > 0 ? captions.join(' ').trim() : `(album of ${items.length} items)`
+  if (failedCount > 0) {
+    combinedCaption = `${combinedCaption}\n\n[⚠️ ${failedCount} of ${items.length} items failed to load]`
+  }
+
+  // Best-effort log — must not block notification.
+  try {
+    messagesStore.logInbound({
+      ts: Date.now(),
+      chat_id,
+      message_id: String(firstMsgId),
+      user_id: String(from.id),
+      user_name: from.username ?? from.first_name ?? String(from.id),
+      text: combinedCaption,
+      attachments: logAttachments.length > 0 ? logAttachments : undefined,
+      reply_to: firstCtx.message?.reply_to_message?.message_id != null
+        ? String(firstCtx.message.reply_to_message.message_id)
+        : undefined,
+      metadata: {
+        media_group_id: mediaGroupId,
+        message_ids: items.map(i => String(i.msgId)),
+        ...(failedCount > 0 ? { failed_count: failedCount, total_count: items.length } : {}),
+      },
+    })
+  } catch (err) {
+    process.stderr.write(`telegram channel: album logInbound failed: ${err}\n`)
+  }
+
+  mcp.notification({
+    method: 'notifications/claude/channel',
+    params: {
+      content: combinedCaption,
+      meta: {
+        chat_id,
+        message_id: String(firstMsgId),
+        message_ids: items.map(i => String(i.msgId)),
+        media_group_id: mediaGroupId,
+        user: from.username ?? String(from.id),
+        user_id: String(from.id),
+        ts: new Date((firstCtx.message?.date ?? 0) * 1000).toISOString(),
+        ...(imagePaths.length > 0 ? { image_paths: imagePaths } : {}),
+        ...(notifAttachments.length > 0 ? { attachments: notifAttachments } : {}),
+      },
+    },
+  }).catch(err => {
+    process.stderr.write(`telegram channel: album mcp.notification failed: ${err}\n`)
+  })
 }
 
 async function handleInbound(
