@@ -88,9 +88,28 @@ claude --dangerously-load-development-channels plugin:telegram@mirza-marketplace
 
 Claude Code akan minta konfirmasi pertama kali — terima.
 
-**5. Pair.**
+**5. Enable MCP server `telegram` di session ini.**
 
-With Claude Code running from the previous step, DM your bot on Telegram — it replies with a 6-character pairing code. If the bot doesn't respond, make sure your session is running with `--dangerously-load-development-channels`. In your Claude Code session:
+> ⚠️ Channel plugins di Claude Code di-mark **Experimental** dan **MCP-nya disabled by default** per session — meski plugin sudah ter-install dan di-load. Kalau Anda skip langkah ini, bot **tidak akan polling Telegram** dan DM tidak akan sampai ke session.
+
+Di CC session, jalankan:
+
+```
+/mcp
+```
+
+Cari `telegram` di daftar, lalu **enable** toggle-nya. Setelah enable, server MCP `telegram` akan spawn dan bot mulai polling Telegram.
+
+> Kenapa default off? Channel plugin terima inbound dari external (Telegram) — itu sumber prompt injection. CC mensyaratkan opt-in eksplisit per session sebagai safety nudge. Anda harus lakukan ini setiap session baru (state-nya tidak persistent).
+
+**6. Pair.**
+
+With the MCP enabled, DM your bot on Telegram — it replies with a 6-character pairing code. If the bot doesn't respond, double-check:
+1. CC session running dengan `--dangerously-load-development-channels`
+2. `/mcp` toggle telegram **on**
+3. Token tersimpan di `<project>/.claude/channels/telegram/.env` (lihat status via `/telegram:configure` tanpa argumen)
+
+In your Claude Code session:
 
 ```
 /telegram:access pair <code>
@@ -100,7 +119,7 @@ Your next DM reaches the assistant.
 
 > Unlike Discord, there's no server invite step — Telegram bots accept DMs immediately. Pairing handles the user-ID lookup so you never touch numeric IDs.
 
-**6. Lock it down.**
+**7. Lock it down.**
 
 Pairing is for capturing IDs. Once you're in, switch to `allowlist` so strangers don't get pairing-code replies. Ask Claude to do it, or `/telegram:access policy allowlist` directly.
 

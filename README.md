@@ -74,7 +74,9 @@ claude --dangerously-load-development-channels plugin:telegram@mirza-marketplace
 
 Claude Code akan minta konfirmasi pertama kali — terima.
 
-**C. Pair akun Anda.** DM bot Anda di Telegram — bot akan balas dengan pairing code 6 karakter. Di Claude Code:
+**C. Enable MCP server di session ini.** Channel plugin MCP-nya **disabled by default per session** (safety nudge dari CC untuk experimental channel plugins). Jalankan `/mcp` di Claude Code, lalu enable toggle `telegram`. Tanpa langkah ini, bot tidak akan polling dan DM Anda tidak sampai. Detail di [README plugin Telegram](plugins/telegram/README.md#quick-setup).
+
+**D. Pair akun Anda.** DM bot Anda di Telegram — bot akan balas dengan pairing code 6 karakter. Di Claude Code:
 
 ```
 /telegram:access pair <code>
