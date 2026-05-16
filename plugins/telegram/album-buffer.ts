@@ -26,7 +26,16 @@ export function createAlbumBuffer<T>(opts: AlbumBufferOpts<T>): AlbumBuffer<T> {
     buckets.delete(key)
     clearTimeout(bucket.debounceTimer)
     clearTimeout(bucket.hardTimer)
-    void Promise.resolve(opts.onFlush(key, bucket.items))
+    try {
+      const ret = opts.onFlush(key, bucket.items)
+      if (ret && typeof (ret as Promise<void>).then === 'function') {
+        (ret as Promise<void>).catch(err => {
+          console.error(`[album-buffer] onFlush rejected for key=${key}:`, err)
+        })
+      }
+    } catch (err) {
+      console.error(`[album-buffer] onFlush threw for key=${key}:`, err)
+    }
   }
 
   function add(key: string, item: T): void {

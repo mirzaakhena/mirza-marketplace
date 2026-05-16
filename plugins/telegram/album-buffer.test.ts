@@ -141,3 +141,65 @@ describe('album-buffer: multi-key isolation', () => {
     expect(b.items).toEqual([10, 20])
   })
 })
+
+describe('album-buffer: error isolation', () => {
+  test('onFlush throw does not corrupt buffer state', async () => {
+    const errors: unknown[] = []
+    const onError = console.error
+    console.error = (...args: unknown[]) => { errors.push(args) }
+
+    try {
+      const buf = createAlbumBuffer<number>({
+        debounceMs: 40,
+        hardCapMs: 1000,
+        maxItems: 10,
+        onFlush: () => { throw new Error('boom') },
+      })
+
+      buf.add('A', 1)
+      await wait(80)
+
+      expect(buf.size()).toBe(0)
+      expect(errors.length).toBeGreaterThan(0)
+
+      // Buffer still functional after error.
+      let secondCalled = false
+      const buf2 = createAlbumBuffer<number>({
+        debounceMs: 40,
+        hardCapMs: 1000,
+        maxItems: 10,
+        onFlush: () => { secondCalled = true },
+      })
+      buf2.add('B', 2)
+      await wait(80)
+      expect(secondCalled).toBe(true)
+    } finally {
+      console.error = onError
+    }
+  })
+
+  test('onFlush rejection (async throw) does not crash', async () => {
+    const errors: unknown[] = []
+    const onError = console.error
+    console.error = (...args: unknown[]) => { errors.push(args) }
+
+    try {
+      const buf = createAlbumBuffer<number>({
+        debounceMs: 40,
+        hardCapMs: 1000,
+        maxItems: 10,
+        onFlush: async () => { throw new Error('async boom') },
+      })
+
+      buf.add('A', 1)
+      await wait(80)
+      // Give the rejected promise a tick to surface.
+      await wait(20)
+
+      expect(buf.size()).toBe(0)
+      expect(errors.length).toBeGreaterThan(0)
+    } finally {
+      console.error = onError
+    }
+  })
+})
