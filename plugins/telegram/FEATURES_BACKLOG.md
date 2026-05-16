@@ -232,16 +232,16 @@ Section ini berisi referensi ke implementasi lama + opsi implementasi untuk plug
   ```
 - **Opsi storage**:
   - **A**: SQLite (better-sqlite3 atau Bun's built-in `bun:sqlite`). Future-proof untuk FTS5.
-  - **B**: JSONL append-only di `~/.claude/channels/telegram/messages.jsonl`. Simpel, tapi search nanti perlu load all.
+  - **B**: JSONL append-only di `<project>/.claude/channels/telegram/messages.jsonl`. Simpel, tapi search nanti perlu load all.
 - **Rekomendasi**: SQLite via `bun:sqlite` (nol dependency, native di Bun). Schema-less mode dulu (text + JSON metadata), tambah index/FTS belakangan.
-- **Lokasi file**: `~/.claude/channels/telegram/messages.db` (atau per-chat: `messages/<chatId>.db` kalau ingin per-chat isolation).
+- **Lokasi file**: `<project>/.claude/channels/telegram/messages.db` (atau per-chat: `messages/<chatId>.db` kalau ingin per-chat isolation).
 - **Scope eksplisit yang DI-DEFER**: search/recall mechanism (MCP tool `search_messages`, dashboard query, dll). Item ini **storage saja dulu** sesuai instruksi user.
 - **Decision pending**: per-chat DB vs single DB. Per-chat lebih clean (mudah delete per user, no cross-leak), single DB lebih mudah cross-chat search nanti.
 
 ### T2.1 — Per-channel lightweight state
 
 - **Referensi old project**: `src/db/profile.ts` (7 attributes), `src/core/wake-up.ts` (auto-inject).
-- **Konteks plugin**: Bisa simpan di `~/.claude/channels/telegram/state/<userId>.json` (timezone, nickname, language hint). Auto-attach sebagai attribute di `<channel>` tag, biar Claude punya konteks tanpa harus tanya tiap kali.
+- **Konteks plugin**: Bisa simpan di `<project>/.claude/channels/telegram/state/<userId>.json` (timezone, nickname, language hint). Auto-attach sebagai attribute di `<channel>` tag, biar Claude punya konteks tanpa harus tanya tiap kali.
 - **Trade-off**: Mulai overlap dengan "memory system" (T3.1). Batasi ketat: hanya hint kontekstual, bukan history/knowledge.
 
 ### T2.2 — Read-only monitoring dashboard
