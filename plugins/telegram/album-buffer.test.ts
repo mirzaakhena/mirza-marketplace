@@ -67,7 +67,8 @@ describe('album-buffer: hard cap', () => {
 
     expect(flushed.length).toBe(1)
     expect(flushed[0].key).toBe('A')
-    expect(flushed[0].items.length).toBeGreaterThanOrEqual(4)  // 4 or 5 depending on exact timing
+    expect(flushed[0].items.length).toBe(5)
     expect(elapsed).toBeLessThan(400)  // sanity: didn't wait debounce
+    expect(buf.size()).toBe(0)
   })
 })
