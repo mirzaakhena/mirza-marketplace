@@ -909,8 +909,8 @@ function ensureContextBridgeInstalled(): InstallResult {
 
   // Ensure the channels-level .gitignore exists before writing any state.
   const giResult = ensureChannelsGitignore(channelsDir)
-  if (!giResult.changed && giResult.reason && (giResult.reason.startsWith('mkdir failed') || giResult.reason.startsWith('write failed'))) {
-    return { kind: 'error', message: `gagal menyiapkan channels dir: ${giResult.reason}` }
+  if (!giResult.ok) {
+    return { kind: 'error', message: `gagal menyiapkan channels dir: ${giResult.reason ?? 'unknown error'}` }
   }
 
   try {

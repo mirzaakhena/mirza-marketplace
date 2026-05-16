@@ -11,13 +11,13 @@ const GITIGNORE_CONTENT = `# Auto-managed by Claude Code channel plugins.
 const STAR_LINE = /^\*$/m
 const BANG_LINE = /^!\.gitignore$/m
 
-export type EnsureResult = { changed: boolean; reason?: string }
+export type EnsureResult = { changed: boolean; ok: boolean; reason?: string }
 
 export function ensureChannelsGitignore(channelsDir: string): EnsureResult {
   try {
     mkdirSync(channelsDir, { recursive: true })
   } catch (err) {
-    return { changed: false, reason: `mkdir failed: ${(err as Error).message}` }
+    return { changed: false, ok: false, reason: `mkdir failed: ${(err as Error).message}` }
   }
 
   const gitignorePath = join(channelsDir, '.gitignore')
@@ -25,7 +25,7 @@ export function ensureChannelsGitignore(channelsDir: string): EnsureResult {
     try {
       const existing = readFileSync(gitignorePath, 'utf8')
       if (STAR_LINE.test(existing) && BANG_LINE.test(existing)) {
-        return { changed: false, reason: 'already has correct pattern' }
+        return { changed: false, ok: true, reason: 'already has correct pattern' }
       }
     } catch {
       // fall through to write
@@ -34,8 +34,8 @@ export function ensureChannelsGitignore(channelsDir: string): EnsureResult {
 
   try {
     writeFileSync(gitignorePath, GITIGNORE_CONTENT)
-    return { changed: true }
+    return { changed: true, ok: true }
   } catch (err) {
-    return { changed: false, reason: `write failed: ${(err as Error).message}` }
+    return { changed: false, ok: false, reason: `write failed: ${(err as Error).message}` }
   }
 }

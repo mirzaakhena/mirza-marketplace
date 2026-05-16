@@ -55,4 +55,27 @@ describe('channels-gitignore: ensureChannelsGitignore', () => {
     expect(result.changed).toBe(false)
     expect(result.reason).toBeDefined()
   })
+
+  test('returns ok:true on success and ok:false on error', () => {
+    const channels = join(tmpDir, 'channels')
+
+    // Created
+    const r1 = ensureChannelsGitignore(channels)
+    expect(r1.ok).toBe(true)
+    expect(r1.changed).toBe(true)
+
+    // Idempotent
+    const r2 = ensureChannelsGitignore(channels)
+    expect(r2.ok).toBe(true)
+    expect(r2.changed).toBe(false)
+
+    // Failure (write-protected dir, no prior .gitignore so a write is attempted)
+    const channels2 = join(tmpDir, 'channels2')
+    mkdirSync(channels2, { recursive: true })
+    chmodSync(channels2, 0o555)
+    const r3 = ensureChannelsGitignore(channels2)
+    expect(r3.ok).toBe(false)
+    expect(r3.changed).toBe(false)
+    expect(r3.reason).toBeDefined()
+  })
 })
