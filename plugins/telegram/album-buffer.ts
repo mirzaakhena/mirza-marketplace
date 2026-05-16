@@ -33,6 +33,8 @@ export function createAlbumBuffer<T>(opts: AlbumBufferOpts<T>): AlbumBuffer<T> {
     const existing = buckets.get(key)
     if (existing) {
       existing.items.push(item)
+      clearTimeout(existing.debounceTimer)
+      existing.debounceTimer = setTimeout(() => flush(key), opts.debounceMs)
       return
     }
     const bucket: Bucket<T> = {
