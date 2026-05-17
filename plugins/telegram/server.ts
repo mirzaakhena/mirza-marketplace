@@ -28,6 +28,7 @@ import { resolveStateDir } from './state-path.ts'
 import { ensureChannelsGitignore } from './channels-gitignore.ts'
 import { renderContextReply, type LastStatus } from './context-renderer.ts'
 import { isOurOwnBridge } from './server-helpers.ts'
+import { validateButtons, parseAiCallbackData, buildKeyboard, findButtonLabel } from './buttons.ts'
 
 const STATE_DIR = (() => {
   const resolved = resolveStateDir(process.env)
@@ -474,7 +475,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'reply',
       description:
-        'Reply on Telegram. Pass chat_id from the inbound message. Optionally pass reply_to (message_id) for threading, and files (absolute paths) to attach images or documents.',
+        'Reply on Telegram. Pass chat_id from the inbound message. Optionally pass reply_to (message_id) for threading, files (absolute paths) to attach images or documents, and buttons to render an inline keyboard for the user to tap (one tap fires a callback that arrives as a new <channel> message). buttons cannot be combined with files in a single call.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -498,6 +499,21 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: 'string',
             enum: ['assistant', 'system'],
             description: "Origin of this reply. Default 'assistant' for direct user replies. Use 'system' when triggered by cronjob/scheduler/API event (not in response to a user message). Logged to messages-store.",
+          },
+          buttons: {
+            type: 'array',
+            description: 'Optional inline keyboard. Shape: rows of buttons, where each row is an array. Each button has {label, callback_id}. callback_id must match /^[a-z0-9_]{1,32}$/ and be unique across the call. Max 8 rows × 8 buttons. When tapped, a new <channel> message arrives with content "[button tapped: <label>]" and meta.callback_id.',
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string', description: 'Visible button text. Max 64 chars.' },
+                  callback_id: { type: 'string', description: 'Identifier echoed back to the AI when the user taps. Matches /^[a-z0-9_]{1,32}$/.' },
+                },
+                required: ['label', 'callback_id'],
+              },
+            },
           },
         },
         required: ['chat_id', 'text'],
@@ -529,7 +545,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'edit_message',
-      description: 'Edit a message the bot previously sent. Useful for interim progress updates. Edits don\'t trigger push notifications — send a new reply when a long task completes so the user\'s device pings.',
+      description: 'Edit a message the bot previously sent. Useful for interim progress updates. Edits don\'t trigger push notifications — send a new reply when a long task completes so the user\'s device pings. Passing buttons replaces the inline keyboard; omitting buttons clears the existing keyboard (Telegram default behavior).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -540,6 +556,21 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: 'string',
             enum: ['text', 'markdownv2'],
             description: "Rendering mode. 'markdownv2' enables Telegram formatting (bold, italic, code, links). Caller must escape special chars per MarkdownV2 rules. Default: 'text' (plain, no escaping needed).",
+          },
+          buttons: {
+            type: 'array',
+            description: 'Optional inline keyboard. Same shape as reply.buttons. Omitting this field clears any existing keyboard on the edited message.',
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string', description: 'Visible button text. Max 64 chars.' },
+                  callback_id: { type: 'string', description: 'Identifier echoed back to the AI when the user taps. Matches /^[a-z0-9_]{1,32}$/.' },
+                },
+                required: ['label', 'callback_id'],
+              },
+            },
           },
         },
         required: ['chat_id', 'message_id', 'text'],
@@ -560,6 +591,21 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const format = (args.format as string | undefined) ?? 'text'
         const parseMode = format === 'markdownv2' ? 'MarkdownV2' as const : undefined
         const source = (args.source as 'assistant' | 'system' | undefined) ?? 'assistant'
+
+        // Optional inline keyboard. Validated at the boundary; mutually
+        // exclusive with files for Phase 1 to keep delivery semantics simple
+        // (a keyboard would have to be attached to either the last text chunk
+        // or the last file message, and mixing both adds edge cases without a
+        // clear use case yet).
+        let keyboard: ReturnType<typeof buildKeyboard> | undefined
+        if (args.buttons !== undefined) {
+          const v = validateButtons(args.buttons)
+          if (!v.ok) throw new Error(`invalid buttons: ${v.error}`)
+          if (files.length > 0) {
+            throw new Error('buttons and files cannot be combined in a single reply call')
+          }
+          keyboard = buildKeyboard(v.rows)
+        }
 
         assertAllowedChat(chat_id)
 
@@ -584,9 +630,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
               reply_to != null &&
               replyMode !== 'off' &&
               (replyMode === 'all' || i === 0)
+            // Buttons attach to the LAST chunk only — if attached to earlier
+            // chunks, the keyboard sits orphaned above continuation text.
+            const isLastChunk = i === chunks.length - 1
             const sent = await bot.api.sendMessage(chat_id, chunks[i], {
               ...(shouldReplyTo ? { reply_parameters: { message_id: reply_to } } : {}),
               ...(parseMode ? { parse_mode: parseMode } : {}),
+              ...(keyboard && isLastChunk ? { reply_markup: keyboard } : {}),
             })
             sentIds.push(sent.message_id)
           }
@@ -685,11 +735,27 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         assertAllowedChat(args.chat_id as string)
         const editFormat = (args.format as string | undefined) ?? 'text'
         const editParseMode = editFormat === 'markdownv2' ? 'MarkdownV2' as const : undefined
+
+        let editKeyboard: ReturnType<typeof buildKeyboard> | undefined
+        if (args.buttons !== undefined) {
+          const v = validateButtons(args.buttons)
+          if (!v.ok) throw new Error(`invalid buttons: ${v.error}`)
+          editKeyboard = buildKeyboard(v.rows)
+        }
+
+        // editMessageText accepts an options object as the 4th positional arg.
+        // Always pass it when we have any option to set (parse_mode or
+        // reply_markup); otherwise omit to preserve the existing 3-arg call
+        // signature and Telegram's default keyboard-clearing behavior.
+        const editOpts: Record<string, unknown> = {}
+        if (editParseMode) editOpts.parse_mode = editParseMode
+        if (editKeyboard) editOpts.reply_markup = editKeyboard
+        const hasOpts = Object.keys(editOpts).length > 0
         const edited = await bot.api.editMessageText(
           args.chat_id as string,
           Number(args.message_id),
           args.text as string,
-          ...(editParseMode ? [{ parse_mode: editParseMode }] : []),
+          ...(hasOpts ? [editOpts] : []),
         )
         const id = typeof edited === 'object' ? edited.message_id : args.message_id
         messagesStore.logEdit({
@@ -944,11 +1010,78 @@ bot.command('context', async ctx => {
   await ctx.reply(renderContextReply(status))
 })
 
-// Inline-button handler for permission requests. Callback data is
-// `perm:allow:<id>`, `perm:deny:<id>`, or `perm:more:<id>`.
-// Security mirrors the text-reply path: allowFrom must contain the sender.
+// Inline-button handlers. Two namespaces:
+//   - `ai:<callback_id>` — buttons rendered by the AI via reply/edit_message
+//     tools. Tap arrives at the AI session as a notifications/claude/channel
+//     message (same shape as a regular inbound text message).
+//   - `perm:(allow|deny|more):<id>` — permission flow buttons (legacy).
+// Both branches gate on allowFrom (same security as the text-reply path).
 bot.on('callback_query:data', async ctx => {
   const data = ctx.callbackQuery.data
+
+  // ai:* branch — AI-issued buttons. Check first so a malformed callback_id
+  // that happens to share a prefix doesn't fall through to perm regex.
+  const aiParsed = parseAiCallbackData(data)
+  if (aiParsed) {
+    const access = loadAccess()
+    const senderId = String(ctx.from.id)
+    if (!access.allowFrom.includes(senderId)) {
+      await ctx.answerCallbackQuery({ text: 'Not authorized.' }).catch(() => {})
+      return
+    }
+
+    const chat_id = String(ctx.chat?.id ?? '')
+    const msg = ctx.callbackQuery.message
+    const sourceMessageId =
+      msg && typeof msg === 'object' && 'message_id' in msg ? msg.message_id : undefined
+
+    // Resolve the human label from the current inline_keyboard so the AI sees
+    // what the user actually saw, not just the opaque callback_id.
+    const kb =
+      msg && typeof msg === 'object' && 'reply_markup' in msg && msg.reply_markup
+        ? msg.reply_markup
+        : undefined
+    const inlineKeyboard =
+      kb && typeof kb === 'object' && 'inline_keyboard' in kb
+        ? (kb as { inline_keyboard: ReadonlyArray<ReadonlyArray<{ text?: string; callback_data?: string }>> })
+            .inline_keyboard
+        : undefined
+    const tappedLabel = findButtonLabel(inlineKeyboard, data)
+
+    // Emit a channel notification so the AI session sees the tap as a new
+    // user message. content is human-readable; meta carries the structured
+    // callback_id for skill logic that wants to switch on the choice.
+    void mcp.notification({
+      method: 'notifications/claude/channel',
+      params: {
+        content: tappedLabel ? `[button tapped: ${tappedLabel}]` : `[button tapped]`,
+        meta: {
+          chat_id,
+          callback_id: aiParsed.callback_id,
+          ...(tappedLabel ? { button_label: tappedLabel } : {}),
+          ...(sourceMessageId != null ? { source_message_id: String(sourceMessageId) } : {}),
+          user: ctx.from.username ?? String(ctx.from.id),
+          user_id: String(ctx.from.id),
+          ts: new Date().toISOString(),
+        },
+      },
+    })
+
+    // Acknowledge tap (clears the loading spinner on the button).
+    await ctx
+      .answerCallbackQuery({ text: tappedLabel ? `Selected: ${tappedLabel}` : 'Selected' })
+      .catch(() => {})
+
+    // Replace buttons with the chosen label so the same prompt can't be
+    // answered twice and the chat history reflects what was picked.
+    if (msg && typeof msg === 'object' && 'text' in msg && typeof msg.text === 'string') {
+      const newText = `${msg.text}\n\n→ ${tappedLabel ?? aiParsed.callback_id}`
+      await ctx.editMessageText(newText).catch(() => {})
+    }
+    return
+  }
+
+  // perm:* branch (existing permission flow).
   const m = /^perm:(allow|deny|more):([a-km-z]{5})$/.exec(data)
   if (!m) {
     await ctx.answerCallbackQuery().catch(() => {})
