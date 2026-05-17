@@ -911,15 +911,19 @@ bot.command('context', async ctx => {
     return
   }
   if (install.kind === 'installed') {
-    const lines = [
-      `Bridge /context terpasang ✅`,
-      ``,
-      `Patched: ${join(PROJECT_DIR!, '.claude', 'settings.json')}`,
-    ]
-    if (install.backupPath) lines.push(`Backup: ${install.backupPath}`)
-    if (install.previousCommand) lines.push(`Chain ke statusline lama: aktif`)
-    lines.push(``, `Tunggu statusline Claude Code refresh 1-2 detik (atau restart Claude Code), lalu kirim /context lagi.`)
-    await ctx.reply(lines.join('\n'))
+    const ack = await ctx.reply('⏳ Menyiapkan bridge, mohon tunggu...')
+    setTimeout(async () => {
+      const status = loadLastStatus()
+      const text = status
+        ? renderContextReply(status)
+        : '⚠️ Statusline Claude Code belum trigger. Aktif sebentar di Claude Code lalu kirim /context lagi.'
+      try {
+        await ctx.api.editMessageText(ack.chat.id, ack.message_id, text)
+      } catch (err) {
+        // Edit can fail if message was deleted or too old; fall back to a new reply.
+        await ctx.reply(text)
+      }
+    }, 5000)
     return
   }
 
