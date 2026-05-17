@@ -276,3 +276,49 @@ describe('renderContextReply (new layout)', () => {
     expect(out).not.toContain('tokens')
   })
 })
+
+describe('renderContextReply (real fixture)', () => {
+  // Inline copy of sandbox/folder_two/.claude/channels/telegram/last-status.json
+  // captured at 1778972545000 (2026-05-16 17:42 UTC+7, i.e. 10:42 UTC).
+  // Self-contained — does not depend on files outside plugins/telegram.
+  const fixture: LastStatus = {
+    captured_at_ms: 1778972545000,
+    payload: {
+      session_id: '8a16303d-4706-4ee2-a54b-782a3e4000eb',
+      cwd: '/Users/mirza/Workspace/mirza-marketplace/sandbox/folder_two',
+      model: {
+        display_name: 'Opus 4.7 (1M context)',
+      },
+      context_window: {
+        used_percentage: 5,
+        total_input_tokens: 46747,
+        context_window_size: 1_000_000,
+      },
+      rate_limits: {
+        five_hour: { used_percentage: 40, resets_at: 1778979600 },
+        seven_day: { used_percentage: 9, resets_at: 1779530400 },
+      },
+      cost: { total_cost_usd: 0.8023515 },
+      thinking: { enabled: true },
+      fast_mode: false,
+    },
+  }
+
+  test('matches spec mockup against captured payload', () => {
+    // Pin "now" to 3 minutes after capture for deterministic relative time.
+    const nowMs = fixture.captured_at_ms + 3 * 60_000
+    const out = renderContextReply(fixture, nowMs)
+    // Sanity-check key lines from the spec mockup.
+    expect(out).toContain('Context')
+    expect(out).toContain('46.7k / 1M tokens')
+    expect(out).toContain('Rate Limit 5h')
+    expect(out).toContain('Rate Limit 7d')
+    expect(out).toContain('Opus 4.7 (1M context)')
+    expect(out).toContain('Session: 8a16303d')
+    expect(out).toContain('CWD: …/sandbox/folder_two')
+    expect(out).toContain('Cost: $0.80')
+    expect(out).toContain('Thinking: on')
+    expect(out).toContain('Fast: off')
+    expect(out).toContain('(3m lalu)')
+  })
+})
