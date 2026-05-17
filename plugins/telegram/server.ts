@@ -29,6 +29,7 @@ import { ensureChannelsGitignore } from './channels-gitignore.ts'
 import { renderContextReply, type LastStatus } from './context-renderer.ts'
 import { isOurOwnBridge } from './server-helpers.ts'
 import { validateButtons, parseAiCallbackData, buildKeyboard, findButtonLabel } from './buttons.ts'
+import { commonMarkToMarkdownV2 } from './markdown.ts'
 
 const STATE_DIR = (() => {
   const resolved = resolveStateDir(process.env)
@@ -492,8 +493,8 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           format: {
             type: 'string',
-            enum: ['text', 'markdownv2'],
-            description: "Rendering mode. 'markdownv2' enables Telegram formatting (bold, italic, code, links). Caller must escape special chars per MarkdownV2 rules. Default: 'text' (plain, no escaping needed).",
+            enum: ['text', 'markdown', 'markdownv2'],
+            description: "Rendering mode. 'markdown' (recommended) accepts standard CommonMark (`**bold**`, `*italic*`, `` ` ``inline``,  ```` ```fenced blocks```` ````, `[links](url)`) and auto-converts to Telegram MarkdownV2 — server handles all special-char escaping for you. 'markdownv2' is a raw passthrough; caller must escape `_*[]()~\\`>#+-=|{}.!` themselves (legacy). 'text' (default) sends plain text with no parsing.",
           },
           source: {
             type: 'string',
@@ -554,8 +555,8 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           text: { type: 'string' },
           format: {
             type: 'string',
-            enum: ['text', 'markdownv2'],
-            description: "Rendering mode. 'markdownv2' enables Telegram formatting (bold, italic, code, links). Caller must escape special chars per MarkdownV2 rules. Default: 'text' (plain, no escaping needed).",
+            enum: ['text', 'markdown', 'markdownv2'],
+            description: "Rendering mode. 'markdown' (recommended) accepts standard CommonMark and auto-converts to Telegram MarkdownV2 with proper escaping. 'markdownv2' is raw passthrough (legacy). 'text' (default) sends plain text.",
           },
           buttons: {
             type: 'array',
@@ -585,11 +586,19 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
     switch (req.params.name) {
       case 'reply': {
         const chat_id = args.chat_id as string
-        const text = args.text as string
+        const rawText = args.text as string
         const reply_to = args.reply_to != null ? Number(args.reply_to) : undefined
         const files = (args.files as string[] | undefined) ?? []
         const format = (args.format as string | undefined) ?? 'text'
-        const parseMode = format === 'markdownv2' ? 'MarkdownV2' as const : undefined
+        // 'markdown' is the auto-converted mode: take CommonMark, produce MV2.
+        // 'markdownv2' stays raw passthrough for backward compatibility with
+        // callers that already escape themselves.
+        const text =
+          format === 'markdown' ? commonMarkToMarkdownV2(rawText) : rawText
+        const parseMode =
+          format === 'markdown' || format === 'markdownv2'
+            ? ('MarkdownV2' as const)
+            : undefined
         const source = (args.source as 'assistant' | 'system' | undefined) ?? 'assistant'
 
         // Optional inline keyboard. Validated at the boundary; mutually
@@ -734,7 +743,15 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
       case 'edit_message': {
         assertAllowedChat(args.chat_id as string)
         const editFormat = (args.format as string | undefined) ?? 'text'
-        const editParseMode = editFormat === 'markdownv2' ? 'MarkdownV2' as const : undefined
+        const editRawText = args.text as string
+        const editText =
+          editFormat === 'markdown'
+            ? commonMarkToMarkdownV2(editRawText)
+            : editRawText
+        const editParseMode =
+          editFormat === 'markdown' || editFormat === 'markdownv2'
+            ? ('MarkdownV2' as const)
+            : undefined
 
         let editKeyboard: ReturnType<typeof buildKeyboard> | undefined
         if (args.buttons !== undefined) {
@@ -754,7 +771,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const edited = await bot.api.editMessageText(
           args.chat_id as string,
           Number(args.message_id),
-          args.text as string,
+          editText,
           ...(hasOpts ? [editOpts] : []),
         )
         const id = typeof edited === 'object' ? edited.message_id : args.message_id
