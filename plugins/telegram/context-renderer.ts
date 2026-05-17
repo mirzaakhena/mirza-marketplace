@@ -3,10 +3,21 @@
 // module so it can be unit-tested without booting server.ts.
 
 export type StatusLinePayload = {
-  context_window?: { used_percentage?: number }
+  session_id?: string
+  cwd?: string
+  model?: { display_name?: string }
+  context_window?: {
+    used_percentage?: number
+    total_input_tokens?: number
+    context_window_size?: number
+  }
   rate_limits?: {
     five_hour?: { used_percentage?: number; resets_at?: number }
+    seven_day?: { used_percentage?: number; resets_at?: number }
   }
+  cost?: { total_cost_usd?: number }
+  thinking?: { enabled?: boolean }
+  fast_mode?: boolean
 }
 
 export type LastStatus = { captured_at_ms: number; payload: StatusLinePayload }
