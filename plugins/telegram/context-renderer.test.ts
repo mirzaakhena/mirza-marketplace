@@ -141,25 +141,138 @@ describe('shortSession', () => {
   })
 })
 
-describe('renderContextReply (baseline — current layout)', () => {
-  const status: LastStatus = {
-    captured_at_ms: Date.UTC(2026, 4, 17, 10, 42, 0),
+describe('renderContextReply (new layout)', () => {
+  const capturedAtMs = Date.UTC(2026, 4, 17, 10, 42, 0)
+  const nowMs = Date.UTC(2026, 4, 17, 10, 45, 0)  // 3 min later
+  const fiveHourReset = Math.floor(Date.UTC(2026, 4, 17, 12, 42, 0) / 1000)  // +1h57m
+  const sevenDayReset = Math.floor(Date.UTC(2026, 4, 23, 21, 0, 0) / 1000)   // +6d10h roughly
+
+  const fullStatus: LastStatus = {
+    captured_at_ms: capturedAtMs,
     payload: {
-      context_window: { used_percentage: 5 },
-      rate_limits: {
-        five_hour: { used_percentage: 40, resets_at: Math.floor(Date.UTC(2026, 4, 17, 12, 39, 0) / 1000) },
+      session_id: '8a16303d-4706-4ee2-a54b-782a3e4000eb',
+      cwd: '/Users/mirza/Workspace/mirza-marketplace/sandbox/folder_two',
+      model: { display_name: 'Opus 4.7 (1M context)' },
+      context_window: {
+        used_percentage: 5,
+        total_input_tokens: 46747,
+        context_window_size: 1_000_000,
       },
+      rate_limits: {
+        five_hour: { used_percentage: 40, resets_at: fiveHourReset },
+        seven_day: { used_percentage: 9, resets_at: sevenDayReset },
+      },
+      cost: { total_cost_usd: 0.8023515 },
+      thinking: { enabled: true },
+      fast_mode: false,
     },
   }
-  const nowMs = Date.UTC(2026, 4, 17, 10, 45, 0)  // 3 minutes after capture
 
-  test('produces full reply', () => {
-    const out = renderContextReply(status, nowMs)
+  test('full payload produces all sections in order', () => {
+    const out = renderContextReply(fullStatus, nowMs)
+    const expected = [
+      'Context',
+      '●○○○○○○○○○ 5%',
+      '46.7k / 1M tokens',
+      '',
+      'Rate Limit 5h',
+      '●●●●○○○○○○ 40%',
+      'reset 1h 57m',
+      '',
+      'Rate Limit 7d',
+      '●○○○○○○○○○ 9%',
+      'reset 6d 10h',
+      '',
+      'Opus 4.7 (1M context)',
+      'Session: 8a16303d',
+      'CWD: …/sandbox/folder_two',
+      'Cost: $0.80',
+      'Thinking: on',
+      'Fast: off',
+      '',
+      'Last update: 17:42 WIB',
+      '(3m lalu)',
+    ].join('\n')
+    expect(out).toBe(expected)
+  })
+
+  test('thinking disabled renders "off"', () => {
+    const s: LastStatus = {
+      ...fullStatus,
+      payload: { ...fullStatus.payload, thinking: { enabled: false } },
+    }
+    expect(renderContextReply(s, nowMs)).toContain('Thinking: off')
+  })
+
+  test('fast_mode true renders "on"', () => {
+    const s: LastStatus = {
+      ...fullStatus,
+      payload: { ...fullStatus.payload, fast_mode: true },
+    }
+    expect(renderContextReply(s, nowMs)).toContain('Fast: on')
+  })
+
+  test('missing seven_day omits the Rate Limit 7d block', () => {
+    const s: LastStatus = {
+      ...fullStatus,
+      payload: {
+        ...fullStatus.payload,
+        rate_limits: { five_hour: fullStatus.payload.rate_limits!.five_hour },
+      },
+    }
+    const out = renderContextReply(s, nowMs)
+    expect(out).not.toContain('Rate Limit 7d')
+    expect(out).toContain('Rate Limit 5h')
+  })
+
+  test('missing cost / thinking / fast_mode omits those lines', () => {
+    const s: LastStatus = {
+      captured_at_ms: capturedAtMs,
+      payload: {
+        session_id: fullStatus.payload.session_id,
+        cwd: fullStatus.payload.cwd,
+        model: fullStatus.payload.model,
+        context_window: fullStatus.payload.context_window,
+        rate_limits: fullStatus.payload.rate_limits,
+      },
+    }
+    const out = renderContextReply(s, nowMs)
+    expect(out).not.toContain('Cost:')
+    expect(out).not.toContain('Thinking:')
+    expect(out).not.toContain('Fast:')
+  })
+
+  test('missing model omits the model line but keeps Session/CWD', () => {
+    const s: LastStatus = {
+      ...fullStatus,
+      payload: { ...fullStatus.payload, model: undefined },
+    }
+    const out = renderContextReply(s, nowMs)
+    expect(out).not.toContain('Opus 4.7')
+    expect(out).toContain('Session: 8a16303d')
+    expect(out).toContain('CWD: …/sandbox/folder_two')
+  })
+
+  test('missing context_window still shows Context section with placeholder', () => {
+    const s: LastStatus = {
+      ...fullStatus,
+      payload: { ...fullStatus.payload, context_window: undefined },
+    }
+    const out = renderContextReply(s, nowMs)
     expect(out).toContain('Context')
+    expect(out).toContain('(tidak tersedia)')
+  })
+
+  test('context_window without token counts omits the tokens line', () => {
+    const s: LastStatus = {
+      ...fullStatus,
+      payload: {
+        ...fullStatus.payload,
+        context_window: { used_percentage: 5 },
+      },
+    }
+    const out = renderContextReply(s, nowMs)
     expect(out).toContain('●○○○○○○○○○ 5%')
-    expect(out).toContain('Usage')
-    expect(out).toContain('●●●●○○○○○○ 40%')
-    expect(out).toContain('Reset')
-    expect(out).toContain('Last update: 17:42 WIB (3m lalu)')
+    expect(out).not.toContain('tokens')
   })
 })

@@ -82,43 +82,71 @@ export function shortSession(id: string): string {
 }
 
 export function renderContextReply(status: LastStatus, nowMs: number = Date.now()): string {
-  const ctx = status.payload.context_window?.used_percentage
-  const five = status.payload.rate_limits?.five_hour
-  const fivePct = five?.used_percentage
-  const resetsAt = five?.resets_at
+  const p = status.payload
+  const sections: string[] = []
 
-  const ctxLine = typeof ctx === 'number'
-    ? `${progressBar(ctx)} ${Math.round(ctx)}%`
-    : '(tidak tersedia)'
-  const usageLine = typeof fivePct === 'number'
-    ? `${progressBar(fivePct)} ${Math.round(fivePct)}%`
-    : '(tidak tersedia — butuh Pro/Max & 1 request dulu)'
-
-  let resetLine = '(tidak tersedia)'
-  if (typeof resetsAt === 'number') {
-    const remain = resetsAt - Math.floor(nowMs / 1000)
-    if (remain > 0) {
-      const h = Math.floor(remain / 3600)
-      const m = Math.floor((remain % 3600) / 60)
-      resetLine = `(${h}h ${m}m / 5h)`
-    } else {
-      resetLine = '(reset baru saja)'
+  // --- Context section (always shown; placeholder if missing) ---
+  const ctxPct = p.context_window?.used_percentage
+  const ctxLines: string[] = ['Context']
+  if (typeof ctxPct === 'number') {
+    ctxLines.push(`${progressBar(ctxPct)} ${Math.round(ctxPct)}%`)
+    const used = p.context_window?.total_input_tokens
+    const total = p.context_window?.context_window_size
+    if (typeof used === 'number' && typeof total === 'number') {
+      ctxLines.push(`${formatTokens(used)} / ${formatTokens(total)} tokens`)
     }
+  } else {
+    ctxLines.push('(tidak tersedia)')
+  }
+  sections.push(ctxLines.join('\n'))
+
+  // --- Rate Limit 5h (omit entirely if missing) ---
+  const five = p.rate_limits?.five_hour
+  if (five && (typeof five.used_percentage === 'number' || typeof five.resets_at === 'number')) {
+    const lines = ['Rate Limit 5h']
+    if (typeof five.used_percentage === 'number') {
+      lines.push(`${progressBar(five.used_percentage)} ${Math.round(five.used_percentage)}%`)
+    }
+    if (typeof five.resets_at === 'number') {
+      lines.push(`reset ${formatResetRemain(five.resets_at, nowMs)}`)
+    }
+    sections.push(lines.join('\n'))
   }
 
-  const age = nowMs - status.captured_at_ms
-  const lastLine = `Last update: ${formatJakartaHM(status.captured_at_ms)} (${formatRelativeMs(age)})`
+  // --- Rate Limit 7d (omit entirely if missing) ---
+  const seven = p.rate_limits?.seven_day
+  if (seven && (typeof seven.used_percentage === 'number' || typeof seven.resets_at === 'number')) {
+    const lines = ['Rate Limit 7d']
+    if (typeof seven.used_percentage === 'number') {
+      lines.push(`${progressBar(seven.used_percentage)} ${Math.round(seven.used_percentage)}%`)
+    }
+    if (typeof seven.resets_at === 'number') {
+      lines.push(`reset ${formatResetRemain(seven.resets_at, nowMs)}`)
+    }
+    sections.push(lines.join('\n'))
+  }
 
-  return [
-    `Context`,
-    ctxLine,
-    ``,
-    `Usage`,
-    usageLine,
-    ``,
-    `Reset`,
-    resetLine,
-    ``,
-    lastLine,
-  ].join('\n')
+  // --- Metadata block (skip individual lines if missing) ---
+  const meta: string[] = []
+  if (p.model?.display_name) meta.push(p.model.display_name)
+  if (p.session_id) meta.push(`Session: ${shortSession(p.session_id)}`)
+  if (p.cwd) meta.push(`CWD: ${shortCwd(p.cwd)}`)
+  if (typeof p.cost?.total_cost_usd === 'number') {
+    meta.push(`Cost: $${p.cost.total_cost_usd.toFixed(2)}`)
+  }
+  if (typeof p.thinking?.enabled === 'boolean') {
+    meta.push(`Thinking: ${p.thinking.enabled ? 'on' : 'off'}`)
+  }
+  if (typeof p.fast_mode === 'boolean') {
+    meta.push(`Fast: ${p.fast_mode ? 'on' : 'off'}`)
+  }
+  if (meta.length > 0) sections.push(meta.join('\n'))
+
+  // --- Last update (always shown) ---
+  const age = nowMs - status.captured_at_ms
+  sections.push(
+    `Last update: ${formatJakartaHM(status.captured_at_ms)}\n(${formatRelativeMs(age)})`
+  )
+
+  return sections.join('\n\n')
 }
