@@ -27,6 +27,7 @@ import { createAlbumBuffer } from './album-buffer'
 import { resolveStateDir } from './state-path.ts'
 import { ensureChannelsGitignore } from './channels-gitignore.ts'
 import { renderContextReply, type LastStatus } from './context-renderer.ts'
+import { isOurOwnBridge } from './server-helpers.ts'
 
 const STATE_DIR = (() => {
   const resolved = resolveStateDir(process.env)
@@ -818,7 +819,8 @@ bot.command('hello', async ctx => {
 // previous one so the terminal display is preserved).
 // ---------------------------------------------------------------------------
 
-const CONTEXT_BRIDGE_PATH = join(import.meta.dir, 'scripts', 'context-bridge.sh')
+const CONTEXT_BRIDGE_SCRIPT = join(import.meta.dir, 'scripts', 'context-bridge.ts')
+const CONTEXT_BRIDGE_PATH = `bun run "${CONTEXT_BRIDGE_SCRIPT}"`
 
 const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR?.trim() || null
 
@@ -866,7 +868,10 @@ function ensureContextBridgeInstalled(): InstallResult {
     return { kind: 'already-installed' }
   }
 
-  const previousCommand = typeof current.command === 'string' ? current.command : null
+  const previousCommand =
+    typeof current.command === 'string' && !isOurOwnBridge(current.command)
+      ? current.command
+      : null
 
   let backupPath: string | null = null
   if (rawExisted && raw !== null) {

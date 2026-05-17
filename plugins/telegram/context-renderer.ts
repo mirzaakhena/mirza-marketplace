@@ -70,8 +70,8 @@ export function formatResetRemain(resetsAtSec: number, nowMs: number = Date.now(
 
 export function shortCwd(path: string): string {
   if (!path) return ''
-  const trimmed = path.endsWith('/') ? path.slice(0, -1) : path
-  const segments = trimmed.split('/').filter(s => s.length > 0)
+  const trimmed = path.replace(/[/\\]+$/, '')
+  const segments = trimmed.split(/[/\\]/).filter(s => s.length > 0)
   if (segments.length < 2) return trimmed
   const tail = segments.slice(-2).join('/')
   return `…/${tail}`
