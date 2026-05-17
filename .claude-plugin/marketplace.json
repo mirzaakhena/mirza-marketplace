@@ -11,6 +11,12 @@
       "description": "Custom Telegram channel for Claude Code with a /hello command. Forked from the official Telegram plugin.",
       "category": "productivity",
       "source": "./plugins/telegram"
+    },
+    {
+      "name": "immediate-reply",
+      "description": "Behavioral skill that makes Claude feel fast on Telegram by sending an instant acknowledgement before any non-trivial work.",
+      "category": "productivity",
+      "source": "./plugins/immediate-reply"
     }
   ]
 }
