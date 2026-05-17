@@ -127,6 +127,19 @@ describe('shortCwd', () => {
   test('empty string → empty string', () => {
     expect(shortCwd('')).toBe('')
   })
+  test('Windows-style backslash path', () => {
+    expect(shortCwd('C:\\Users\\mirza\\workspace\\bot-01'))
+      .toBe('…/workspace/bot-01')
+  })
+  test('Windows-style with trailing backslash', () => {
+    expect(shortCwd('C:\\Users\\foo\\bar\\')).toBe('…/foo/bar')
+  })
+  test('mixed separators', () => {
+    expect(shortCwd('/Users\\mirza/Workspace\\sandbox')).toBe('…/Workspace/sandbox')
+  })
+  test('Windows drive only', () => {
+    expect(shortCwd('C:\\')).toBe('C:')
+  })
 })
 
 describe('shortSession', () => {
