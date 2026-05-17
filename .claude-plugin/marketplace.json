@@ -17,6 +17,12 @@
       "description": "Behavioral skill that makes Claude feel fast on Telegram by sending an instant acknowledgement before any non-trivial work.",
       "category": "productivity",
       "source": "./plugins/immediate-reply"
+    },
+    {
+      "name": "interactive-prompts",
+      "description": "Behavioral skill that teaches Claude to render inline-keyboard buttons on Telegram for choice prompts (confirmation, single-select) so the user can answer with one tap. Requires telegram >= 0.0.9-mirza.0.",
+      "category": "productivity",
+      "source": "./plugins/interactive-prompts"
     }
   ]
 }
