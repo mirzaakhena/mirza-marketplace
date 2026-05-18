@@ -30,7 +30,7 @@ import { renderContextReply, type LastStatus } from './context-renderer.ts'
 import { isOurOwnBridge } from './server-helpers.ts'
 import { validateButtons, parseAiCallbackData, buildKeyboard, findButtonLabel } from './buttons.ts'
 import { commonMarkToMarkdownV2 } from './markdown.ts'
-import { tryRouteMetaCommand } from './meta-commands.ts'
+import { tryRouteMetaCommand, tryHandleMetaCallback } from './meta-commands.ts'
 
 const STATE_DIR = (() => {
   const resolved = resolveStateDir(process.env)
@@ -1037,6 +1037,31 @@ bot.command('context', async ctx => {
 bot.on('callback_query:data', async ctx => {
   const data = ctx.callbackQuery.data
 
+  // meta:* branch — Telegram-side picker callbacks (e.g. /switch sessions).
+  // These bypass the AI entirely and act on the wrapper directly.
+  if (data.startsWith('meta:')) {
+    const access = loadAccess()
+    const senderId = String(ctx.from.id)
+    if (!access.allowFrom.includes(senderId)) {
+      await ctx.answerCallbackQuery({ text: 'Not authorized.' }).catch(() => {})
+      return
+    }
+    const consumed = await tryHandleMetaCallback(data, process.env, {
+      ackCallback: async (text?: string) => {
+        try {
+          await ctx.answerCallbackQuery(text ? { text } : undefined)
+        } catch (err) {
+          process.stderr.write(`telegram channel: meta ack failed: ${err}\n`)
+        }
+      },
+      editMessage: async (text: string) => {
+        await ctx.editMessageText(text)
+      },
+    })
+    if (consumed) return
+    // Fall through to ai:* path if for some reason it wasn't a known meta.
+  }
+
   // ai:* branch — AI-issued buttons. Check first so a malformed callback_id
   // that happens to share a prefix doesn't fall through to perm regex.
   const aiParsed = parseAiCallbackData(data)
@@ -1549,16 +1574,30 @@ async function handleInbound(
     return
   }
 
-  // Meta-command intercept (e.g. /new). These bypass the AI entirely and
-  // route to the pty-controller wrapper via filesystem command file. If the
-  // wrapper isn't running we still consume the text and reply explaining
-  // why — never silently surface "/new" as a regular chat message.
+  // Meta-command intercept (/new, /switch, …). These bypass the AI entirely
+  // and either act on the wrapper directly or render a Telegram picker. If
+  // the wrapper isn't running we still consume the text and reply explaining
+  // why — never silently surface "/new" or "/switch" as regular chat.
   const consumed = await tryRouteMetaCommand(text, process.env, {
     reply: async msg => {
       try {
         await ctx.reply(msg)
       } catch (err) {
         process.stderr.write(`telegram channel: meta-command reply failed: ${err}\n`)
+      }
+    },
+    replyWithButtons: async (msgText, rows) => {
+      const kb = new InlineKeyboard()
+      for (let r = 0; r < rows.length; r++) {
+        for (const btn of rows[r]) {
+          kb.text(btn.label, btn.callbackData)
+        }
+        if (r < rows.length - 1) kb.row()
+      }
+      try {
+        await ctx.reply(msgText, { reply_markup: kb })
+      } catch (err) {
+        process.stderr.write(`telegram channel: meta-command picker reply failed: ${err}\n`)
       }
     },
   })
@@ -1647,6 +1686,7 @@ void (async () => {
               { command: 'hello', description: 'Say hello to Mirza' },
               { command: 'context', description: 'Show context & 5h usage' },
               { command: 'new', description: 'Clear current Claude session (requires mirza-cc wrapper)' },
+              { command: 'switch', description: 'Switch to another Claude session in this project (requires mirza-cc wrapper)' },
             ],
             { scope: { type: 'all_private_chats' } },
           ).catch(() => {})

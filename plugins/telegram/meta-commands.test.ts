@@ -36,14 +36,27 @@ function listPending(stateDir: string): string[] {
 
 interface RecordedReply {
   text: string
+  buttons?: ReadonlyArray<ReadonlyArray<{ label: string; callbackData: string }>>
 }
-function makeHandler(): { handler: { reply: (text: string) => Promise<void> }; replies: RecordedReply[] } {
+function makeHandler(): {
+  handler: {
+    reply: (text: string) => Promise<void>
+    replyWithButtons: (
+      text: string,
+      rows: { label: string; callbackData: string }[][],
+    ) => Promise<void>
+  }
+  replies: RecordedReply[]
+} {
   const replies: RecordedReply[] = []
   return {
     replies,
     handler: {
       reply: async (text: string) => {
         replies.push({ text })
+      },
+      replyWithButtons: async (text, rows) => {
+        replies.push({ text, buttons: rows })
       },
     },
   }

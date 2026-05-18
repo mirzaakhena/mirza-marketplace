@@ -1,0 +1,114 @@
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+} from 'node:fs'
+import { tmpdir, homedir } from 'node:os'
+import { join } from 'node:path'
+import {
+  deriveShortId,
+  encodeProjectDir,
+  listProjectSessions,
+} from './sessions-list'
+
+/**
+ * The helper reads from ~/.claude/projects/ and ~/.claude/sessions/ on the
+ * host. We can't easily intercept those paths in this codebase without
+ * threading a fs abstraction through, so the tests below focus on the
+ * deterministic pure pieces (encodeProjectDir, deriveShortId, sort/label
+ * logic via a real but throwaway HOME-relative dir).
+ */
+
+function realProjectsRoot(): string {
+  return join(homedir(), '.claude', 'projects')
+}
+
+describe('sessions-list: encodeProjectDir', () => {
+  test('replaces slash, backslash, colon with dash', () => {
+    expect(encodeProjectDir('/Users/mirza/workspace/bot-01')).toBe(
+      '-Users-mirza-workspace-bot-01',
+    )
+    expect(encodeProjectDir('C:\\Users\\Mirza\\workspace\\bot-01')).toBe(
+      'C--Users-Mirza-workspace-bot-01',
+    )
+  })
+
+  test('leaves already-dashed paths alone', () => {
+    expect(encodeProjectDir('my-folder')).toBe('my-folder')
+  })
+})
+
+describe('sessions-list: deriveShortId', () => {
+  test('takes the first 8 hex chars, lowercase, no dashes', () => {
+    expect(deriveShortId('1de4b23d-30a0-40cf-8392-053f78815a95')).toBe('1de4b23d')
+  })
+
+  test('handles uppercase UUID', () => {
+    expect(deriveShortId('1DE4B23D-30A0-40CF-8392-053F78815A95')).toBe('1de4b23d')
+  })
+})
+
+describe('sessions-list: listProjectSessions (integration with tmp project)', () => {
+  let projectDir: string
+  let projectsDir: string
+  let createdFiles: string[] = []
+
+  beforeEach(() => {
+    projectDir = mkdtempSync(join(tmpdir(), 'sess-list-test-'))
+    // The helper computes the encoded dir from projectDir and looks under
+    // ~/.claude/projects/. To exercise it end-to-end we write the .jsonl
+    // files at that exact location and clean up afterwards.
+    const encoded = encodeProjectDir(projectDir)
+    projectsDir = join(realProjectsRoot(), encoded)
+    mkdirSync(projectsDir, { recursive: true })
+    createdFiles = []
+  })
+
+  afterEach(() => {
+    for (const f of createdFiles) {
+      try { rmSync(f) } catch { /* ignore */ }
+    }
+    try { rmSync(projectsDir, { recursive: true, force: true }) } catch { /* ignore */ }
+    try { rmSync(projectDir, { recursive: true, force: true }) } catch { /* ignore */ }
+  })
+
+  function writeSession(sessionId: string): void {
+    const p = join(projectsDir, `${sessionId}.jsonl`)
+    writeFileSync(p, '{"type":"last-prompt","sessionId":"' + sessionId + '"}\n')
+    createdFiles.push(p)
+  }
+
+  test('returns empty list for an empty project', () => {
+    expect(listProjectSessions(projectDir)).toEqual([])
+  })
+
+  test('lists sessions and falls back to "session <prefix>" labels', () => {
+    writeSession('1de4b23d-30a0-40cf-8392-053f78815a95')
+    writeSession('77e1fb0e-d4fa-4903-b924-8485b6f17d7e')
+    const result = listProjectSessions(projectDir)
+    expect(result.length).toBe(2)
+    // Every entry must have a label; without a /rename source it falls back.
+    for (const r of result) {
+      expect(r.hasName).toBe(false)
+      expect(r.label.startsWith('session ')).toBe(true)
+    }
+    // shortId is 8 hex chars
+    expect(result[0].shortId).toMatch(/^[0-9a-f]{8}$/)
+  })
+
+  test('ignores stray non-UUID jsonl files', () => {
+    const stray = join(projectsDir, 'not-a-uuid.jsonl')
+    writeFileSync(stray, '')
+    createdFiles.push(stray)
+    writeSession('1de4b23d-30a0-40cf-8392-053f78815a95')
+    const result = listProjectSessions(projectDir)
+    expect(result.length).toBe(1)
+    expect(result[0].sessionId).toBe('1de4b23d-30a0-40cf-8392-053f78815a95')
+  })
+
+  test('returns missing project dir as empty list', () => {
+    expect(listProjectSessions('/does/not/exist')).toEqual([])
+  })
+})

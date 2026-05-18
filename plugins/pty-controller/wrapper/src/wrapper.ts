@@ -1,16 +1,25 @@
 #!/usr/bin/env node
 /**
  * mirza-cc wrapper — the parent process that hosts Claude Code inside a
- * node-pty pseudo-terminal and accepts slash-command requests from the
- * companion `pty-controller` Claude Code plugin via a filesystem inbox.
+ * node-pty pseudo-terminal and accepts requests from the companion
+ * `pty-controller` Claude Code plugin via a filesystem inbox.
  *
- * Responsibilities (Phase 1):
+ * Responsibilities:
  *   1. Spawn `claude` in a PTY, bidirectional-pipe with the user's terminal.
- *   2. Resolve a state dir (per-project) and create the inbox layout.
- *   3. Watch <state>/pending/ for command files; consume each one and write
- *      its slash command into the PTY.
+ *   2. Resolve a per-project state dir and create the inbox layout.
+ *   3. Watch <state>/pending/ for command files; consume each one. Payload
+ *      shape (tagged union):
+ *        { command: "/clear" }                    — inject a slash command
+ *        { type: "slash", command: "/clear" }     — explicit form, same thing
+ *        { type: "switch", sessionId: "<uuid>" }  — kill CC, respawn with
+ *                                                   `--resume <uuid>`
  *   4. Periodically touch <state>/wrapper.heartbeat so the plugin can probe
  *      whether we're alive.
+ *
+ * The wrapper stays alive across CC respawns (for /switch). It only exits
+ * when CC exits *naturally* (the user types /exit or kills it). A SIGINT in
+ * the wrapper terminal is forwarded to the PTY so Ctrl+C cancels the AI's
+ * current operation rather than killing the wrapper.
  *
  * Run:
  *   npm run wrapper                 # uses tsx (Node)
@@ -48,7 +57,7 @@ const CLAUDE_BIN = process.env.CLAUDE_BIN ?? 'claude'
 const DEFAULT_CLAUDE_ARGS =
   '--dangerously-skip-permissions ' +
   '--dangerously-load-development-channels plugin:telegram@mirza-marketplace'
-const CLAUDE_ARGS = (process.env.CLAUDE_ARGS ?? DEFAULT_CLAUDE_ARGS)
+const BASE_CLAUDE_ARGS = (process.env.CLAUDE_ARGS ?? DEFAULT_CLAUDE_ARGS)
   .trim()
   .split(/\s+/)
   .filter(Boolean)
@@ -70,59 +79,81 @@ log(`wrapper starting`)
 log(`  project dir:        ${PROJECT_DIR}`)
 log(`  state dir:          ${STATE_DIR}`)
 log(`  claude bin:         ${CLAUDE_BIN}`)
-log(`  claude args:        ${CLAUDE_ARGS.join(' ') || '(none)'}`)
+log(`  claude args:        ${BASE_CLAUDE_ARGS.join(' ') || '(none)'}`)
 
-// Spawn Claude under a PTY. Inherit terminal dimensions so the UI looks right.
-//
-// Important: on Unix, do NOT pass `claude` directly to node-pty. `claude` is
-// typically a node-installed shim (npm/pnpm/asdf) whose execution depends on
-// shell-resolved PATH and rc-files. Bypassing the shell triggers
-// posix_spawnp ENOENT or "exec format error". So we run through an
-// interactive login shell that loads the user's normal env (PATH from
-// .zprofile/.bashrc/etc.) and then execs claude.
-//
-// On Windows, cmd.exe `/c claude` is the equivalent dance — cmd resolves the
-// `claude.cmd` shim that npm produces.
-const cols = process.stdout.columns || 100
-const rows = process.stdout.rows || 30
 const userShell = process.env.SHELL || '/bin/sh'
 const shell = isWindows ? 'cmd.exe' : userShell
-// Compose the full `claude <args...>` command line as a single string for
-// the shell to parse. Flag values like `plugin:telegram@mirza-marketplace`
-// contain `:` and `@` which are safe characters in POSIX shells (no
-// quoting required); if you ever need a value with spaces, wrap it
-// yourself in CLAUDE_ARGS.
-const claudeCmd = [CLAUDE_BIN, ...CLAUDE_ARGS].join(' ')
-const args = isWindows ? ['/c', claudeCmd] : ['-l', '-i', '-c', claudeCmd]
 
-const pty: IPty = spawn(shell, args, {
-  name: 'xterm-256color',
-  cols,
-  rows,
-  cwd: PROJECT_DIR,
-  env: {
-    ...(process.env as Record<string, string>),
-    CLAUDE_PROJECT_DIR: PROJECT_DIR,
-    PTY_CONTROLLER_STATE_DIR: STATE_DIR,
-  },
-})
-log(`spawned claude (pid ${pty.pid})`)
+/**
+ * Spawn Claude under a fresh PTY and return the IPty handle. `extraArgs` is
+ * appended after BASE_CLAUDE_ARGS — used by switchToSession to inject
+ * `--resume <sessionId>` without mutating the base args.
+ *
+ * Implementation note (Unix): we run through an interactive login shell so
+ * `claude` resolves through the user's PATH/rc-files. Skipping the shell
+ * triggers posix_spawnp ENOENT for the npm-installed shim.
+ */
+function spawnClaudePty(extraArgs: string[] = []): IPty {
+  const cols = process.stdout.columns || 100
+  const rows = process.stdout.rows || 30
+  const allArgs = [...BASE_CLAUDE_ARGS, ...extraArgs]
+  const claudeCmd = [CLAUDE_BIN, ...allArgs].join(' ')
+  const args = isWindows ? ['/c', claudeCmd] : ['-l', '-i', '-c', claudeCmd]
 
-// PTY → user terminal (pass-through).
-pty.onData(data => {
-  process.stdout.write(data)
-})
+  const p = spawn(shell, args, {
+    name: 'xterm-256color',
+    cols,
+    rows,
+    cwd: PROJECT_DIR,
+    env: {
+      ...(process.env as Record<string, string>),
+      CLAUDE_PROJECT_DIR: PROJECT_DIR,
+      PTY_CONTROLLER_STATE_DIR: STATE_DIR,
+    },
+  })
+  log(`spawned claude (pid ${p.pid}, extra args: ${extraArgs.join(' ') || '(none)'})`)
+  return p
+}
+
+/**
+ * Wire up the per-pty I/O hooks (PTY → terminal, exit handling). Separate
+ * from spawnClaudePty so we can re-wire after a respawn for /switch.
+ */
+function attachPty(p: IPty): void {
+  p.onData(data => {
+    process.stdout.write(data)
+  })
+  p.onExit(({ exitCode, signal }) => {
+    log(`claude exited (code=${exitCode}, signal=${signal ?? 'none'})`)
+    if (pendingSwitchSessionId) {
+      const sid = pendingSwitchSessionId
+      pendingSwitchSessionId = null
+      log(`respawning claude with --resume ${sid}`)
+      currentPty = spawnClaudePty(['--resume', sid])
+      attachPty(currentPty)
+      return
+    }
+    shutdown(exitCode ?? 0)
+  })
+}
+
+// `currentPty` is reassigned on /switch. The stdin handler below dereferences
+// it through this binding so keystrokes always reach the live child.
+let currentPty: IPty = spawnClaudePty()
+let pendingSwitchSessionId: string | null = null
+attachPty(currentPty)
 
 // User terminal → PTY (raw mode so keypresses go straight through).
+// Reads from the binding so respawned PTYs keep receiving input.
 process.stdin.setRawMode?.(true)
 process.stdin.resume()
 process.stdin.on('data', chunk => {
-  pty.write(chunk.toString('utf8'))
+  currentPty.write(chunk.toString('utf8'))
 })
 
-// Re-propagate terminal resizes to the PTY so CC re-renders correctly.
+// Re-propagate terminal resizes to whichever PTY is current.
 process.stdout.on('resize', () => {
-  pty.resize(process.stdout.columns || 100, process.stdout.rows || 30)
+  currentPty.resize(process.stdout.columns || 100, process.stdout.rows || 30)
 })
 
 // Heartbeat — plugin probes freshness of this file to confirm wrapper is alive.
@@ -135,7 +166,7 @@ const heartbeatInterval = setInterval(() => {
 }, 5_000)
 writeFileSync(HEARTBEAT_FILE, new Date().toISOString())
 
-// Consume one pending command file: parse, delete, inject keystrokes.
+// Consume one pending command file: parse, delete, dispatch.
 async function consumePending(filename: string): Promise<void> {
   const path = join(PENDING_DIR, filename)
   let raw: string
@@ -152,21 +183,51 @@ async function consumePending(filename: string): Promise<void> {
     /* swallow — already gone is fine */
   }
 
-  let payload: { id?: string; command?: string }
+  let payload: {
+    id?: string
+    type?: string
+    command?: string
+    sessionId?: string
+  }
   try {
     payload = JSON.parse(raw)
   } catch (err) {
     log(`malformed json in ${filename}: ${err}`)
     return
   }
-  const command = payload.command
-  if (typeof command !== 'string' || !command.startsWith('/')) {
-    log(`ignored ${filename}: missing or non-slash command`)
+
+  const type = payload.type ?? 'slash'
+  if (type === 'slash') {
+    const command = payload.command
+    if (typeof command !== 'string' || !command.startsWith('/')) {
+      log(`ignored ${filename}: missing or non-slash command`)
+      return
+    }
+    log(`injecting "${command}" (id: ${payload.id ?? '?'})`)
+    currentPty.write(`${command}\r`)
     return
   }
 
-  log(`injecting "${command}" (id: ${payload.id ?? '?'})`)
-  pty.write(`${command}\r`)
+  if (type === 'switch') {
+    const sid = payload.sessionId
+    if (typeof sid !== 'string' || !sid) {
+      log(`ignored ${filename}: switch payload missing sessionId`)
+      return
+    }
+    if (pendingSwitchSessionId) {
+      log(`ignored ${filename}: a previous switch is still in flight`)
+      return
+    }
+    log(`switch requested → sessionId=${sid} (id: ${payload.id ?? '?'})`)
+    pendingSwitchSessionId = sid
+    // Trigger exit. The onExit handler will see pendingSwitchSessionId and
+    // respawn instead of shutting the wrapper down. SIGTERM is graceful
+    // enough for node-pty across platforms; the child gets a chance to flush.
+    currentPty.kill()
+    return
+  }
+
+  log(`ignored ${filename}: unknown payload type "${type}"`)
 }
 
 // Watch pending dir. fs.watch covers the happy path; the interval is a
@@ -211,19 +272,14 @@ function shutdown(code: number): void {
   process.exit(code)
 }
 
-pty.onExit(({ exitCode, signal }) => {
-  log(`claude exited (code=${exitCode}, signal=${signal ?? 'none'})`)
-  shutdown(exitCode ?? 0)
-})
-
 // Forward SIGINT to PTY so Ctrl+C inside the wrapper terminal still cancels
 // whatever the AI is doing inside CC, rather than killing the wrapper outright.
 process.on('SIGINT', () => {
   log(`SIGINT received — forwarding to PTY`)
-  pty.kill('SIGINT')
+  currentPty.kill('SIGINT')
 })
 
 process.on('SIGTERM', () => {
   log(`SIGTERM received — killing PTY`)
-  pty.kill()
+  currentPty.kill()
 })
