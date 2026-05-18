@@ -94,10 +94,21 @@ function listSessions(): Set<string> {
 }
 
 // Spawn Claude under a PTY. Inherit terminal dimensions so the UI looks right.
+//
+// Important: on Unix, do NOT pass `claude` directly to node-pty. `claude` is
+// typically a node-installed shim (npm/pnpm/asdf) whose execution depends on
+// shell-resolved PATH and rc-files. Bypassing the shell triggers
+// posix_spawnp ENOENT or "exec format error". So we run through an
+// interactive login shell that loads the user's normal env (PATH from
+// .zprofile/.bashrc/etc.) and then execs claude.
+//
+// On Windows, cmd.exe `/c claude` is the equivalent dance — cmd resolves the
+// `claude.cmd` shim that npm produces.
 const cols = process.stdout.columns || 100
 const rows = process.stdout.rows || 30
-const shell = isWindows ? 'cmd.exe' : CLAUDE_BIN
-const args = isWindows ? ['/c', CLAUDE_BIN] : []
+const userShell = process.env.SHELL || '/bin/sh'
+const shell = isWindows ? 'cmd.exe' : userShell
+const args = isWindows ? ['/c', CLAUDE_BIN] : ['-l', '-i', '-c', CLAUDE_BIN]
 
 const pty: IPty = spawn(shell, args, {
   name: 'xterm-256color',
