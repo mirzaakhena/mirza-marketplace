@@ -173,15 +173,25 @@ writeFileSync(HEARTBEAT_FILE, new Date().toISOString())
 // the new .jsonl appears only after CC consumes /clear, which only happens
 // after the current turn ends. We poll instead of relying on fs.watch
 // because fs.watch on Windows for create events is historically flaky.
-let awaitingClearReady: { sessionsBefore: Set<string> } | null = null
+//
+// `chatId` is propagated from the inbound command payload so the fresh CC
+// session (which loses all conversation context to /clear) can still know
+// which Telegram chat to notify.
+let awaitingClearReady: {
+  sessionsBefore: Set<string>
+  chatId?: string
+} | null = null
 const sessionPollInterval = setInterval(() => {
   if (!awaitingClearReady) return
   const current = listSessions()
   for (const f of current) {
     if (!awaitingClearReady.sessionsBefore.has(f)) {
-      log(`fresh session detected: ${f} — injecting /notify-user`)
+      const cmd = awaitingClearReady.chatId
+        ? `/notify-user ${awaitingClearReady.chatId}\r`
+        : '/notify-user\r'
+      log(`fresh session detected: ${f} — injecting "${cmd.trim()}"`)
       awaitingClearReady = null
-      pty.write('/notify-user\r')
+      pty.write(cmd)
       return
     }
   }
@@ -204,7 +214,7 @@ async function consumePending(filename: string): Promise<void> {
     /* swallow — already gone is fine */
   }
 
-  let payload: { id?: string; command?: string }
+  let payload: { id?: string; command?: string; chat_id?: string }
   try {
     payload = JSON.parse(raw)
   } catch (err) {
@@ -221,10 +231,20 @@ async function consumePending(filename: string): Promise<void> {
   pty.write(`${command}\r`)
 
   // Special case: /clear → start watching for the next fresh session jsonl
-  // so we can chain /notify-user once CC re-initializes.
+  // so we can chain /notify-user once CC re-initializes. Capture chat_id
+  // from the payload (telegram-side plugin passes it) so the fresh AI
+  // session — which loses all conversation context — still knows where
+  // to send the "session ready" reply.
   if (command === '/clear') {
-    awaitingClearReady = { sessionsBefore: listSessions() }
-    log(`awaiting fresh session after /clear`)
+    awaitingClearReady = {
+      sessionsBefore: listSessions(),
+      chatId: payload.chat_id,
+    }
+    log(
+      `awaiting fresh session after /clear${
+        payload.chat_id ? ` (will notify chat ${payload.chat_id})` : ''
+      }`,
+    )
   }
 }
 

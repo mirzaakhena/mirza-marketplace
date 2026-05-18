@@ -38,6 +38,16 @@ export interface MetaCommandHandlers {
   reply: (text: string) => Promise<void>
 }
 
+export interface MetaCommandContext {
+  /**
+   * The Telegram chat the inbound message came from. Used so the wrapper
+   * can carry the chat target through a /clear that destroys all
+   * conversation context — and still notify the right user when the fresh
+   * session is ready.
+   */
+  chatId: string
+}
+
 /** Resolve the per-project state dir pty-controller agrees on. */
 function resolvePtyStateDir(env: Record<string, string | undefined>): string | null {
   const explicit = env.PTY_CONTROLLER_STATE_DIR?.trim()
@@ -59,14 +69,23 @@ function wrapperHeartbeatFresh(stateDir: string): boolean {
   }
 }
 
-function writeWrapperCommand(stateDir: string, command: string): void {
+function writeWrapperCommand(
+  stateDir: string,
+  command: string,
+  chatId?: string,
+): void {
   const pending = join(stateDir, 'pending')
   mkdirSync(pending, { recursive: true })
   const id = randomUUID()
+  // `chat_id` is the Telegram chat that originated this command. The wrapper
+  // forwards it as an argument to the post-/clear notify-user slash command
+  // so the fresh AI session (which has no prior conversation context to read
+  // a chat_id from) knows where to send its confirmation reply.
   const payload = {
     id,
     ts: new Date().toISOString(),
     command,
+    ...(chatId != null ? { chat_id: chatId } : {}),
   }
   const finalPath = join(pending, `${id}.json`)
   const tmpPath = `${finalPath}.tmp.${process.pid}`
@@ -90,6 +109,7 @@ export async function tryRouteMetaCommand(
   text: string,
   env: Record<string, string | undefined>,
   handlers: MetaCommandHandlers,
+  context: MetaCommandContext,
 ): Promise<boolean> {
   const trimmed = text.trim().toLowerCase()
   if (trimmed !== '/new') return false
@@ -112,7 +132,7 @@ export async function tryRouteMetaCommand(
   }
 
   try {
-    writeWrapperCommand(stateDir, '/clear')
+    writeWrapperCommand(stateDir, '/clear', context.chatId)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     await handlers.reply(`⚠️ /new gagal menulis command ke wrapper: ${msg}`)

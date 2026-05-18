@@ -4,6 +4,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { tryRouteMetaCommand } from './meta-commands'
 
+// Thin test wrapper so all existing assertions keep working: defaults the
+// new MetaCommandContext arg to a fixed chat id. Tests that care about
+// chat_id pass-through call tryRouteMetaCommand directly.
+function tryRouteMetaCommandT(
+  text: string,
+  env: Record<string, string | undefined>,
+  handlers: { reply: (text: string) => Promise<void> },
+): Promise<boolean> {
+  return tryRouteMetaCommand(text, env, handlers, { chatId: '1121398977' })
+}
+
 function mkProject(): { projectDir: string; stateDir: string; cleanup: () => void } {
   const projectDir = mkdtempSync(join(tmpdir(), 'meta-cmd-test-'))
   const stateDir = join(projectDir, '.claude', 'channels', 'pty-controller')
@@ -62,7 +73,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
 
   test('returns false for non-meta-command text', async () => {
     const { handler, replies } = makeHandler()
-    const consumed = await tryRouteMetaCommand('hello world', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('hello world', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(false)
     expect(replies.length).toBe(0)
     expect(listPending(stateDir).length).toBe(0)
@@ -70,7 +81,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
 
   test('returns false for text that just mentions /new', async () => {
     const { handler } = makeHandler()
-    const consumed = await tryRouteMetaCommand('please /new the session', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('please /new the session', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(false)
   })
 
@@ -78,13 +89,13 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     // /new must be a standalone command. Anything else is regular text and
     // goes to the AI as normal — let the AI interpret it.
     const { handler } = makeHandler()
-    const consumed = await tryRouteMetaCommand('/new please', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/new please', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(false)
   })
 
   test('consumes /new but warns when CLAUDE_PROJECT_DIR is missing', async () => {
     const { handler, replies } = makeHandler()
-    const consumed = await tryRouteMetaCommand('/new', {}, handler)
+    const consumed = await tryRouteMetaCommandT('/new', {}, handler)
     expect(consumed).toBe(true)
     expect(replies.length).toBe(1)
     expect(replies[0].text).toMatch(/CLAUDE_PROJECT_DIR/)
@@ -93,7 +104,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
   test('consumes /new but warns when wrapper heartbeat is missing', async () => {
     const { handler, replies } = makeHandler()
     // No heartbeat file written.
-    const consumed = await tryRouteMetaCommand('/new', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/new', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(replies.length).toBe(1)
     expect(replies[0].text).toMatch(/wrapper tidak terdeteksi/)
@@ -104,7 +115,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     const { handler, replies } = makeHandler()
     // Heartbeat from 5 minutes ago = stale (fresh window is 30s).
     setHeartbeat(stateDir, new Date(Date.now() - 5 * 60_000).toISOString())
-    const consumed = await tryRouteMetaCommand('/new', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/new', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(replies[0].text).toMatch(/wrapper tidak terdeteksi/)
     expect(listPending(stateDir).length).toBe(0)
@@ -113,7 +124,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
   test('writes /clear command file and confirms when wrapper is fresh', async () => {
     const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
-    const consumed = await tryRouteMetaCommand('/new', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/new', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(replies.length).toBe(1)
     expect(replies[0].text).toMatch(/Clearing session/)
@@ -128,7 +139,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
   test('uppercase /NEW also matches (case-insensitive)', async () => {
     const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
-    const consumed = await tryRouteMetaCommand('/NEW', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/NEW', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(replies.length).toBe(1)
     expect(listPending(stateDir).length).toBe(1)
@@ -137,9 +148,28 @@ describe('meta-commands: tryRouteMetaCommand', () => {
   test('whitespace around /new is tolerated', async () => {
     const { handler } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
-    const consumed = await tryRouteMetaCommand('  /new  ', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('  /new  ', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(listPending(stateDir).length).toBe(1)
+  })
+
+  test('includes chat_id in the command payload', async () => {
+    // The wrapper needs chat_id to know where to send the post-/clear
+    // notification, because the fresh CC session won't have any prior
+    // conversation context to read it from.
+    const { handler } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    const consumed = await tryRouteMetaCommand(
+      '/new',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      handler,
+      { chatId: '424242' },
+    )
+    expect(consumed).toBe(true)
+    const pending = listPending(stateDir)
+    expect(pending.length).toBe(1)
+    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
+    expect(payload.chat_id).toBe('424242')
   })
 
   test('honors PTY_CONTROLLER_STATE_DIR override over CLAUDE_PROJECT_DIR', async () => {
@@ -147,7 +177,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     // Set heartbeat in our explicit state dir, leave CLAUDE_PROJECT_DIR's
     // implicit dir empty. The override should win.
     setHeartbeat(stateDir, new Date().toISOString())
-    const consumed = await tryRouteMetaCommand(
+    const consumed = await tryRouteMetaCommandT(
       '/new',
       { PTY_CONTROLLER_STATE_DIR: stateDir, CLAUDE_PROJECT_DIR: '/nowhere/that/exists' },
       handler,
