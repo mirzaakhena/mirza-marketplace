@@ -4,16 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { tryRouteMetaCommand } from './meta-commands'
 
-// Thin test wrapper so all existing assertions keep working: defaults the
-// new MetaCommandContext arg to a fixed chat id. Tests that care about
-// chat_id pass-through call tryRouteMetaCommand directly.
-function tryRouteMetaCommandT(
-  text: string,
-  env: Record<string, string | undefined>,
-  handlers: { reply: (text: string) => Promise<void> },
-): Promise<boolean> {
-  return tryRouteMetaCommand(text, env, handlers, { chatId: '1121398977' })
-}
+// Local alias kept so existing test bodies don't need rewriting.
+const tryRouteMetaCommandT = tryRouteMetaCommand
 
 function mkProject(): { projectDir: string; stateDir: string; cleanup: () => void } {
   const projectDir = mkdtempSync(join(tmpdir(), 'meta-cmd-test-'))
@@ -151,25 +143,6 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     const consumed = await tryRouteMetaCommandT('  /new  ', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(listPending(stateDir).length).toBe(1)
-  })
-
-  test('includes chat_id in the command payload', async () => {
-    // The wrapper needs chat_id to know where to send the post-/clear
-    // notification, because the fresh CC session won't have any prior
-    // conversation context to read it from.
-    const { handler } = makeHandler()
-    setHeartbeat(stateDir, new Date().toISOString())
-    const consumed = await tryRouteMetaCommand(
-      '/new',
-      { CLAUDE_PROJECT_DIR: projectDir },
-      handler,
-      { chatId: '424242' },
-    )
-    expect(consumed).toBe(true)
-    const pending = listPending(stateDir)
-    expect(pending.length).toBe(1)
-    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
-    expect(payload.chat_id).toBe('424242')
   })
 
   test('honors PTY_CONTROLLER_STATE_DIR override over CLAUDE_PROJECT_DIR', async () => {

@@ -25,8 +25,7 @@ If the wrapper is not running, the MCP tool returns a clear error and slash comm
   - `pty_send_slash(command)` — queue a slash command for the wrapper to inject.
   - `pty_status()` — check if the wrapper looks alive (fresh heartbeat).
 - **Slash commands** (`commands/`):
-  - `/new` — clear the current session and signal that a fresh one is ready.
-  - `/notify-user` — fired by the wrapper in the new session to send a Telegram confirmation.
+  - `/new` — clear the current Claude Code session. Sends a brief Telegram confirmation when issued from Telegram, then asks the wrapper to inject `/clear`. The fresh session that comes back is silent on its own — there is no post-clear notification, and there shouldn't be: the user just asked for a clean slate.
 
 ## Install
 

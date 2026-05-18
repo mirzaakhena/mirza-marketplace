@@ -11,9 +11,6 @@
  *      its slash command into the PTY.
  *   4. Periodically touch <state>/wrapper.heartbeat so the plugin can probe
  *      whether we're alive.
- *   5. After injecting /clear specifically, wait for a new session .jsonl
- *      file to appear in ~/.claude/projects/<encoded-cwd>/ — then inject
- *      /notify-user so the fresh AI session can ping Telegram.
  *
  * Run:
  *   npm run wrapper                 # uses tsx (Node)
@@ -28,15 +25,13 @@ import {
   mkdirSync,
   writeFileSync,
   readFileSync,
-  readdirSync,
   rmSync,
-  statSync,
+  readdirSync,
   existsSync,
   watch,
   type FSWatcher,
 } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { homedir } from 'node:os'
 import process from 'node:process'
 
 const PROJECT_DIR = resolve(process.env.CLAUDE_PROJECT_DIR ?? process.cwd())
@@ -59,20 +54,6 @@ const CLAUDE_ARGS = (process.env.CLAUDE_ARGS ?? DEFAULT_CLAUDE_ARGS)
   .filter(Boolean)
 const isWindows = process.platform === 'win32'
 
-// Encode project dir the same way CC does for ~/.claude/projects/<encoded>/.
-// CC replaces `:` and `\` with `-` and prefixes drive letters: C:\Users\Mirza\workspace\bot-01
-// becomes C--Users-Mirza-workspace-bot-01. This matches the encoded paths we
-// observed in ~/.claude/projects/.
-function encodeProjectDir(p: string): string {
-  return p.replace(/[\\/:]/g, '-')
-}
-const CLAUDE_PROJECTS_DIR = join(
-  homedir(),
-  '.claude',
-  'projects',
-  encodeProjectDir(PROJECT_DIR),
-)
-
 mkdirSync(PENDING_DIR, { recursive: true })
 
 function log(msg: string): void {
@@ -90,20 +71,6 @@ log(`  project dir:        ${PROJECT_DIR}`)
 log(`  state dir:          ${STATE_DIR}`)
 log(`  claude bin:         ${CLAUDE_BIN}`)
 log(`  claude args:        ${CLAUDE_ARGS.join(' ') || '(none)'}`)
-log(`  claude sessions in: ${CLAUDE_PROJECTS_DIR}`)
-
-// Snapshot known session jsonl files so we can detect "fresh session was
-// created" later (used to decide when to inject /notify-user).
-function listSessions(): Set<string> {
-  if (!existsSync(CLAUDE_PROJECTS_DIR)) return new Set()
-  try {
-    return new Set(
-      readdirSync(CLAUDE_PROJECTS_DIR).filter(f => f.endsWith('.jsonl')),
-    )
-  } catch {
-    return new Set()
-  }
-}
 
 // Spawn Claude under a PTY. Inherit terminal dimensions so the UI looks right.
 //
@@ -168,35 +135,6 @@ const heartbeatInterval = setInterval(() => {
 }, 5_000)
 writeFileSync(HEARTBEAT_FILE, new Date().toISOString())
 
-// Track pending /clear → expect a new session file → then inject /notify-user.
-// Mirrored as a small state machine because the timing is order-sensitive:
-// the new .jsonl appears only after CC consumes /clear, which only happens
-// after the current turn ends. We poll instead of relying on fs.watch
-// because fs.watch on Windows for create events is historically flaky.
-//
-// `chatId` is propagated from the inbound command payload so the fresh CC
-// session (which loses all conversation context to /clear) can still know
-// which Telegram chat to notify.
-let awaitingClearReady: {
-  sessionsBefore: Set<string>
-  chatId?: string
-} | null = null
-const sessionPollInterval = setInterval(() => {
-  if (!awaitingClearReady) return
-  const current = listSessions()
-  for (const f of current) {
-    if (!awaitingClearReady.sessionsBefore.has(f)) {
-      const cmd = awaitingClearReady.chatId
-        ? `/notify-user ${awaitingClearReady.chatId}\r`
-        : '/notify-user\r'
-      log(`fresh session detected: ${f} — injecting "${cmd.trim()}"`)
-      awaitingClearReady = null
-      pty.write(cmd)
-      return
-    }
-  }
-}, 500)
-
 // Consume one pending command file: parse, delete, inject keystrokes.
 async function consumePending(filename: string): Promise<void> {
   const path = join(PENDING_DIR, filename)
@@ -214,7 +152,7 @@ async function consumePending(filename: string): Promise<void> {
     /* swallow — already gone is fine */
   }
 
-  let payload: { id?: string; command?: string; chat_id?: string }
+  let payload: { id?: string; command?: string }
   try {
     payload = JSON.parse(raw)
   } catch (err) {
@@ -229,23 +167,6 @@ async function consumePending(filename: string): Promise<void> {
 
   log(`injecting "${command}" (id: ${payload.id ?? '?'})`)
   pty.write(`${command}\r`)
-
-  // Special case: /clear → start watching for the next fresh session jsonl
-  // so we can chain /notify-user once CC re-initializes. Capture chat_id
-  // from the payload (telegram-side plugin passes it) so the fresh AI
-  // session — which loses all conversation context — still knows where
-  // to send the "session ready" reply.
-  if (command === '/clear') {
-    awaitingClearReady = {
-      sessionsBefore: listSessions(),
-      chatId: payload.chat_id,
-    }
-    log(
-      `awaiting fresh session after /clear${
-        payload.chat_id ? ` (will notify chat ${payload.chat_id})` : ''
-      }`,
-    )
-  }
 }
 
 // Watch pending dir. fs.watch covers the happy path; the interval is a
@@ -277,7 +198,6 @@ const sweepInterval = setInterval(() => {
 
 function shutdown(code: number): void {
   clearInterval(heartbeatInterval)
-  clearInterval(sessionPollInterval)
   clearInterval(sweepInterval)
   pendingWatcher.close()
   try {
