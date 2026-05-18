@@ -23,6 +23,12 @@
       "description": "Behavioral skill that teaches Claude to render inline-keyboard buttons on Telegram for choice prompts (confirmation, single-select) so the user can answer with one tap. Requires telegram >= 0.0.9-mirza.0.",
       "category": "productivity",
       "source": "./plugins/interactive-prompts"
+    },
+    {
+      "name": "teach-me",
+      "description": "Behavioral skill that activates when the user wants to be taught a concept they don't yet understand. Builds understanding from fundamentals up — mirrors user's analogies, confirms and sharpens rather than corrects, holds off action until the foundation is solid.",
+      "category": "productivity",
+      "source": "./plugins/teach-me"
     }
   ]
 }

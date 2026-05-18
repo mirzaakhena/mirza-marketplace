@@ -1,0 +1,16 @@
+{
+  "name": "teach-me",
+  "description": "Educational explanation style. Ships a behavioral skill that activates when the user asks to be taught or explained a concept they don't fully understand. Builds understanding from fundamentals up — mirror user's analogies, confirm and sharpen rather than correct, hold off action until the foundation is solid.",
+  "version": "0.0.1",
+  "author": {
+    "name": "Mirza"
+  },
+  "keywords": [
+    "education",
+    "explanation",
+    "style",
+    "skill",
+    "teaching",
+    "communication"
+  ]
+}
