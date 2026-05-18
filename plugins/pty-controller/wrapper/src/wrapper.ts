@@ -46,6 +46,17 @@ const HEARTBEAT_FILE = join(STATE_DIR, 'wrapper.heartbeat')
 const LOG_FILE = join(STATE_DIR, 'wrapper.log')
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN ?? 'claude'
+// Default flags load mirza-marketplace's telegram channel (which isn't on
+// Anthropic's allowlist yet — channel plugins are research-preview) and
+// silence the per-tool permission prompts. Override with CLAUDE_ARGS env
+// var (set to empty string for vanilla claude, or any custom flag string).
+const DEFAULT_CLAUDE_ARGS =
+  '--dangerously-skip-permissions ' +
+  '--dangerously-load-development-channels plugin:telegram@mirza-marketplace'
+const CLAUDE_ARGS = (process.env.CLAUDE_ARGS ?? DEFAULT_CLAUDE_ARGS)
+  .trim()
+  .split(/\s+/)
+  .filter(Boolean)
 const isWindows = process.platform === 'win32'
 
 // Encode project dir the same way CC does for ~/.claude/projects/<encoded>/.
@@ -78,6 +89,7 @@ log(`wrapper starting`)
 log(`  project dir:        ${PROJECT_DIR}`)
 log(`  state dir:          ${STATE_DIR}`)
 log(`  claude bin:         ${CLAUDE_BIN}`)
+log(`  claude args:        ${CLAUDE_ARGS.join(' ') || '(none)'}`)
 log(`  claude sessions in: ${CLAUDE_PROJECTS_DIR}`)
 
 // Snapshot known session jsonl files so we can detect "fresh session was
@@ -108,7 +120,13 @@ const cols = process.stdout.columns || 100
 const rows = process.stdout.rows || 30
 const userShell = process.env.SHELL || '/bin/sh'
 const shell = isWindows ? 'cmd.exe' : userShell
-const args = isWindows ? ['/c', CLAUDE_BIN] : ['-l', '-i', '-c', CLAUDE_BIN]
+// Compose the full `claude <args...>` command line as a single string for
+// the shell to parse. Flag values like `plugin:telegram@mirza-marketplace`
+// contain `:` and `@` which are safe characters in POSIX shells (no
+// quoting required); if you ever need a value with spaces, wrap it
+// yourself in CLAUDE_ARGS.
+const claudeCmd = [CLAUDE_BIN, ...CLAUDE_ARGS].join(' ')
+const args = isWindows ? ['/c', claudeCmd] : ['-l', '-i', '-c', claudeCmd]
 
 const pty: IPty = spawn(shell, args, {
   name: 'xterm-256color',
