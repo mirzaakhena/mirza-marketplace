@@ -30,6 +30,7 @@ import { renderContextReply, type LastStatus } from './context-renderer.ts'
 import { isOurOwnBridge } from './server-helpers.ts'
 import { validateButtons, parseAiCallbackData, buildKeyboard, findButtonLabel } from './buttons.ts'
 import { commonMarkToMarkdownV2 } from './markdown.ts'
+import { tryRouteMetaCommand } from './meta-commands.ts'
 
 const STATE_DIR = (() => {
   const resolved = resolveStateDir(process.env)
@@ -1547,6 +1548,21 @@ async function handleInbound(
     }
     return
   }
+
+  // Meta-command intercept (e.g. /new). These bypass the AI entirely and
+  // route to the pty-controller wrapper via filesystem command file. If the
+  // wrapper isn't running we still consume the text and reply explaining
+  // why — never silently surface "/new" as a regular chat message.
+  const consumed = await tryRouteMetaCommand(text, process.env, {
+    reply: async msg => {
+      try {
+        await ctx.reply(msg)
+      } catch (err) {
+        process.stderr.write(`telegram channel: meta-command reply failed: ${err}\n`)
+      }
+    },
+  })
+  if (consumed) return
 
   // Typing indicator — signals "processing" until we reply (or ~5s elapses).
   void bot.api.sendChatAction(chat_id, 'typing').catch(() => {})
