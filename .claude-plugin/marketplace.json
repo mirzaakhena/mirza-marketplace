@@ -41,6 +41,12 @@
       "description": "Session handoff toolkit. /handoff captures the current session into a structured 8-section markdown file in <repo>/.handoff/; /handoff-resume loads the latest handoff in a new session, summarises it, and proceeds after user confirmation.",
       "category": "productivity",
       "source": "./plugins/handoff"
+    },
+    {
+      "name": "pty-controller",
+      "description": "Programmatically inject slash commands into a running Claude Code session by going through a companion wrapper process (mirza-cc) that hosts CC inside a node-pty pseudo-terminal. Provides /new (clear + notify), /notify-user (post-clear ping), and the pty_send_slash MCP tool. Requires the mirza-cc wrapper running — see plugin README.",
+      "category": "productivity",
+      "source": "./plugins/pty-controller"
     }
   ]
 }
