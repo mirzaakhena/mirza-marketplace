@@ -1,0 +1,16 @@
+{
+  "name": "handoff",
+  "description": "Session handoff toolkit. Ships /handoff (capture the current session into a structured 8-section markdown file in <repo>/.handoff/) and /handoff-resume (load the latest handoff in a new session, summarise it, and proceed after user confirmation).",
+  "version": "0.0.1",
+  "author": {
+    "name": "Mirza"
+  },
+  "keywords": [
+    "handoff",
+    "session",
+    "resume",
+    "context",
+    "skill",
+    "command"
+  ]
+}

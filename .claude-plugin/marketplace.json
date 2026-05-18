@@ -29,6 +29,18 @@
       "description": "Behavioral skill that activates when the user wants to be taught a concept they don't yet understand. Builds understanding from fundamentals up — mirrors user's analogies, confirms and sharpens rather than corrects, holds off action until the foundation is solid.",
       "category": "productivity",
       "source": "./plugins/teach-me"
+    },
+    {
+      "name": "daily-report",
+      "description": "Slash command + skill that produce a KakaoTalk-ready daily work report from recent git activity and a free-form prompt. Locked Yesterday/Today template with anti-fabrication rules.",
+      "category": "productivity",
+      "source": "./plugins/daily-report"
+    },
+    {
+      "name": "handoff",
+      "description": "Session handoff toolkit. /handoff captures the current session into a structured 8-section markdown file in <repo>/.handoff/; /handoff-resume loads the latest handoff in a new session, summarises it, and proceeds after user confirmation.",
+      "category": "productivity",
+      "source": "./plugins/handoff"
     }
   ]
 }
