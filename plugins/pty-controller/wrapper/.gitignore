@@ -1,0 +1,9 @@
+node_modules/
+*.log
+.DS_Store
+dist/
+.env
+
+# PoC capture artifacts (regenerate by running scripts)
+last-capture.ansi
+last-capture.txt

@@ -40,7 +40,15 @@ Pick **user** scope when prompted, same as the other plugins in this marketplace
 
 ## How to actually use it
 
-You must launch Claude Code via the `mirza-cc` wrapper instead of running `claude` directly. The wrapper lives in a separate project (`node-pty-cc` for now — see its README for details on how to start it).
+You must launch Claude Code via the `mirza-cc` wrapper instead of running `claude` directly. The wrapper source ships in this same plugin folder under [`wrapper/`](./wrapper) — install its deps once and you can run it from anywhere:
+
+```bash
+cd plugins/pty-controller/wrapper
+npm install
+npm run wrapper
+```
+
+See [`wrapper/README.md`](./wrapper/README.md) for full details, diagnostic scripts, and caveats.
 
 A typical session looks like:
 

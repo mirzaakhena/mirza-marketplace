@@ -1,0 +1,22 @@
+{
+  "name": "node-pty-cc",
+  "version": "0.0.1",
+  "description": "Proof of concept: run Claude Code inside a node-pty pseudo-terminal and programmatically send slash commands like /clear. No Telegram, no daemon — just exploration of whether CC behaves correctly under PTY emulation.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "wrapper": "tsx src/wrapper.ts",
+    "interactive": "tsx src/interactive.ts",
+    "auto-clear": "tsx src/auto-clear.ts",
+    "interactive:bun": "bun run src/interactive.ts",
+    "auto-clear:bun": "bun run src/auto-clear.ts"
+  },
+  "dependencies": {
+    "node-pty": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
