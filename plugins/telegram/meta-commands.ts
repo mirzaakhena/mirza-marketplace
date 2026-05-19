@@ -404,8 +404,9 @@ export async function tryHandleMetaCallback(
     const remainder = rest.slice('delete_'.length)
 
     if (remainder === 'cancel') {
-      // Handled in Task 8 — placeholder.
-      return false
+      await handlers.ackCallback('Cancelled')
+      await handlers.editMessage('(delete cancelled)').catch(() => {})
+      return true
     }
 
     if (remainder.startsWith('confirm_')) {

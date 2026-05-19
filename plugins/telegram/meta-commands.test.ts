@@ -471,4 +471,16 @@ describe('meta-commands: tryHandleMetaCallback for delete', () => {
     // Treated as success — the desired outcome is "session gone".
     expect(cb.edits[0]).toMatch(/dihapus/)
   })
+
+  test('delete cancel edits message to delete-cancelled', async () => {
+    const cb = makeCallbackHandler()
+    const consumed = await tryHandleMetaCallback(
+      'meta:delete_cancel',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      cb.handler,
+    )
+    expect(consumed).toBe(true)
+    expect(cb.acks[0]).toMatch(/cancelled/i)
+    expect(cb.edits[0]).toMatch(/delete cancelled/i)
+  })
 })
