@@ -97,6 +97,16 @@ function writeCurrentSessionId(sid: string): void {
 const POST_CLEAR_NOTIFY_BRIEF =
   'fresh session siap setelah /clear, sapa user singkat dan tanya mau lanjut apa'
 
+// Pacing between chained PTY injections inside the post-/clear sequence.
+// CC's slash-command parser swallows the entire stdin buffer up to (some
+// internal terminator) as one argument, so injecting `/rename foo\r` and
+// `/notify-user bar\r` back-to-back lands at CC as a single garbled argument
+// `foo\r/notify-user bar`. Spacing the writes far enough apart that CC has
+// fully processed the previous command before the next one arrives fixes
+// that. 1.5s is empirical — long enough on a warm machine, short enough that
+// the user doesn't feel paused.
+const POST_INJECTION_DELAY_MS = 1500
+
 const CLAUDE_BIN = process.env.CLAUDE_BIN ?? 'claude'
 // Default flags load mirza-marketplace's telegram channel (which isn't on
 // Anthropic's allowlist yet — channel plugins are research-preview) and
@@ -226,15 +236,24 @@ const sessionPollInterval = setInterval(() => {
       const { sessionName } = awaitingClearReady
       log(
         `fresh session detected: ${sid} — injecting${
-          sessionName ? ` /rename + /notify-user` : ` /notify-user`
+          sessionName ? ` /rename (+${POST_INJECTION_DELAY_MS}ms) + /notify-user` : ` /notify-user`
         }`,
       )
       writeCurrentSessionId(sid)
       awaitingClearReady = null
+      // Pace the chained injections so CC has time to process each command
+      // before the next byte arrives — otherwise CC's parser slurps the
+      // whole pile into one /rename argument. See POST_INJECTION_DELAY_MS.
+      let delay = 0
       if (sessionName) {
-        currentPty.write(`/rename ${sessionName}\r`)
+        const localName = sessionName
+        setTimeout(() => currentPty.write(`/rename ${localName}\r`), delay)
+        delay += POST_INJECTION_DELAY_MS
       }
-      currentPty.write(`/notify-user ${POST_CLEAR_NOTIFY_BRIEF}\r`)
+      setTimeout(
+        () => currentPty.write(`/notify-user ${POST_CLEAR_NOTIFY_BRIEF}\r`),
+        delay,
+      )
       return
     }
   }
