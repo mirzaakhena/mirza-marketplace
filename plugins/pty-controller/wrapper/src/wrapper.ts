@@ -48,6 +48,7 @@ import {
   readdirSync,
   existsSync,
   renameSync,
+  statSync,
   watch,
   type FSWatcher,
 } from 'node:fs'
@@ -202,18 +203,67 @@ const userShell = process.env.SHELL || '/bin/sh'
 const shell = isWindows ? 'cmd.exe' : userShell
 
 /**
+ * Decide whether to start a fresh `claude` or resume the most-recently-modified
+ * session in this project. Returns the args to splice in front of BASE_CLAUDE_ARGS
+ * and a flag for the post-spawn first-run logic.
+ *
+ * "Latest" = jsonl with the highest mtimeMs. Ties (same mtime to the millisecond)
+ * are unlikely in practice; if they happen, an arbitrary winner is fine — both
+ * are equally recent.
+ */
+function chooseStartupArgs(): {
+  resumeArgs: string[]
+  isFirstRun: boolean
+  latestSessionId: string | null
+} {
+  const files = listSessions()
+  if (files.size === 0) {
+    return { resumeArgs: [], isFirstRun: true, latestSessionId: null }
+  }
+  let latestId: string | null = null
+  let latestMtime = -1
+  for (const f of files) {
+    const id = f.slice(0, -'.jsonl'.length)
+    let mtime = 0
+    try {
+      mtime = statSync(join(CLAUDE_PROJECTS_DIR, f)).mtimeMs
+    } catch {
+      continue
+    }
+    if (mtime > latestMtime) {
+      latestMtime = mtime
+      latestId = id
+    }
+  }
+  if (!latestId) return { resumeArgs: [], isFirstRun: true, latestSessionId: null }
+  return {
+    resumeArgs: ['--resume', latestId],
+    isFirstRun: false,
+    latestSessionId: latestId,
+  }
+}
+
+/**
  * Spawn Claude under a fresh PTY and return the IPty handle.
  *
  * Implementation note (Unix): we run through an interactive login shell so
  * `claude` resolves through the user's PATH/rc-files. Skipping the shell
  * triggers posix_spawnp ENOENT for the npm-installed shim.
  */
-function spawnClaudePty(): IPty {
+function spawnClaudePty(): { pty: IPty; startup: ReturnType<typeof chooseStartupArgs> } {
   const cols = process.stdout.columns || 100
   const rows = process.stdout.rows || 30
-  const claudeCmd = [CLAUDE_BIN, ...BASE_CLAUDE_ARGS].join(' ')
+  const startup = chooseStartupArgs()
+  const claudeArgs = [...startup.resumeArgs, ...BASE_CLAUDE_ARGS]
+  const claudeCmd = [CLAUDE_BIN, ...claudeArgs].join(' ')
   const args = isWindows ? ['/c', claudeCmd] : ['-l', '-i', '-c', claudeCmd]
-
+  log(
+    `startup: ${
+      startup.isFirstRun
+        ? 'first-run (no existing sessions)'
+        : `resuming session ${startup.latestSessionId}`
+    }`,
+  )
   const p = spawn(shell, args, {
     name: 'xterm-256color',
     cols,
@@ -226,10 +276,12 @@ function spawnClaudePty(): IPty {
     },
   })
   log(`spawned claude (pid ${p.pid})`)
-  return p
+  return { pty: p, startup }
 }
 
-const currentPty: IPty = spawnClaudePty()
+const _spawn = spawnClaudePty()
+const currentPty: IPty = _spawn.pty
+const startupMode = _spawn.startup
 
 /**
  * Inject a slash command into the PTY, separating the command text from
