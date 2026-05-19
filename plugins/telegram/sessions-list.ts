@@ -24,6 +24,33 @@ import {
   saveRegistry,
 } from './session-names-registry'
 
+/**
+ * Indonesian-short relative time formatter for picker labels. Intentionally
+ * compact ("5 mnt", "2 jam") because Telegram button labels are narrow on
+ * mobile. Falls back to absolute dd/mm for ages > 12 weeks (the year
+ * disambiguator is omitted to save width; the dd/mm is enough hint for the
+ * picker user to decide whether to tap).
+ *
+ * `now` is injectable for tests; production calls use Date.now(). The dd/mm
+ * branch reads UTC fields so test expectations stay TZ-independent.
+ */
+export function formatRelative(ts: number, now: number = Date.now()): string {
+  const delta = Math.max(0, now - ts)
+  const minute = 60_000
+  const hour = 60 * minute
+  const day = 24 * hour
+  const week = 7 * day
+  if (delta < minute) return 'baru saja'
+  if (delta < hour) return `${Math.floor(delta / minute)} mnt`
+  if (delta < day) return `${Math.floor(delta / hour)} jam`
+  if (delta < 14 * day) return `${Math.floor(delta / day)} hari`
+  if (delta < 12 * week) return `${Math.floor(delta / week)} mgg`
+  const d = new Date(ts)
+  const dd = String(d.getUTCDate()).padStart(2, '0')
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
+  return `${dd}/${mm}`
+}
+
 export interface SessionInfo {
   /** Full UUID, used for `claude --resume <id>`. */
   sessionId: string
@@ -173,7 +200,7 @@ export function listProjectSessions(
     const fromPid = nameMap.get(sessionId)
     const resolvedName = fromRegistry?.name ?? fromPid?.name ?? null
     const hasName = resolvedName !== null
-    const label = resolvedName ?? `session ${sessionId.slice(0, 8)}`
+    const label = resolvedName ?? `session ${sessionId.slice(0, 8)} · ${formatRelative(mtime)}`
     return {
       sessionId,
       shortId: deriveShortId(sessionId),

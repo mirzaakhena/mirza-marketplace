@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import {
   deriveShortId,
   encodeProjectDir,
+  formatRelative,
   listProjectSessions,
 } from './sessions-list'
 
@@ -110,5 +111,50 @@ describe('sessions-list: listProjectSessions (integration with tmp project)', ()
 
   test('returns missing project dir as empty list', () => {
     expect(listProjectSessions('/does/not/exist')).toEqual([])
+  })
+
+  test('naked UUID fallback label includes a relative timestamp', () => {
+    // No registry / no pid file for this session — must fall back to
+    // "session <8hex> · <relative>". We just verify the prefix and the
+    // " · " separator; the exact relative string depends on mtime/now.
+    writeSession('1de4b23d-30a0-40cf-8392-053f78815a95')
+    const result = listProjectSessions(projectDir)
+    expect(result.length).toBe(1)
+    expect(result[0].hasName).toBe(false)
+    expect(result[0].label).toMatch(/^session 1de4b23d · /)
+  })
+})
+
+describe('formatRelative', () => {
+  const NOW = 1_700_000_000_000
+
+  test('returns "baru saja" for under 1 minute', () => {
+    expect(formatRelative(NOW - 30_000, NOW)).toBe('baru saja')
+  })
+
+  test('minutes for under 1 hour', () => {
+    expect(formatRelative(NOW - 5 * 60_000, NOW)).toBe('5 mnt')
+    expect(formatRelative(NOW - 59 * 60_000, NOW)).toBe('59 mnt')
+  })
+
+  test('hours for under 1 day', () => {
+    expect(formatRelative(NOW - 2 * 3_600_000, NOW)).toBe('2 jam')
+    expect(formatRelative(NOW - 23 * 3_600_000, NOW)).toBe('23 jam')
+  })
+
+  test('days for under 14 days', () => {
+    expect(formatRelative(NOW - 3 * 86_400_000, NOW)).toBe('3 hari')
+    expect(formatRelative(NOW - 13 * 86_400_000, NOW)).toBe('13 hari')
+  })
+
+  test('weeks for under 12 weeks', () => {
+    expect(formatRelative(NOW - 14 * 86_400_000, NOW)).toBe('2 mgg')
+    expect(formatRelative(NOW - 83 * 86_400_000, NOW)).toBe('11 mgg')
+  })
+
+  test('absolute dd/mm for older than 12 weeks', () => {
+    const ts = Date.UTC(2025, 0, 15, 0, 0, 0)
+    const now = Date.UTC(2025, 5, 1, 0, 0, 0)
+    expect(formatRelative(ts, now)).toBe('15/01')
   })
 })
