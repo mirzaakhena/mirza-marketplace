@@ -45,6 +45,7 @@ import {
   rmSync,
   readdirSync,
   existsSync,
+  renameSync,
   watch,
   type FSWatcher,
 } from 'node:fs'
@@ -72,6 +73,22 @@ const CLAUDE_PROJECTS_DIR = join(
   'projects',
   encodeProjectDir(PROJECT_DIR),
 )
+
+// Tracks the CC session currently live in this wrapper's PTY. Written on
+// initial spawn, after /clear materialises a fresh session, and after a
+// /resume injection. Consumed by the telegram plugin's /delete picker so
+// the active session can be excluded from the deletion list.
+const CURRENT_SESSION_FILE = join(STATE_DIR, 'wrapper.current_session_id')
+
+function writeCurrentSessionId(sid: string): void {
+  const tmp = `${CURRENT_SESSION_FILE}.tmp.${process.pid}`
+  try {
+    writeFileSync(tmp, sid)
+    renameSync(tmp, CURRENT_SESSION_FILE)
+  } catch (err) {
+    log(`failed to write current_session_id: ${err}`)
+  }
+}
 
 // Brief sent as $ARGUMENTS to the /notify-user command in the fresh
 // post-/clear session. /notify-user reads the brief, constructs a natural
@@ -203,9 +220,29 @@ const sessionPollInterval = setInterval(() => {
   const current = listSessions()
   for (const f of current) {
     if (!awaitingClearReady.sessionsBefore.has(f)) {
-      log(`fresh session detected: ${f} — injecting /notify-user`)
+      const sid = f.slice(0, -'.jsonl'.length)
+      log(`fresh session detected: ${sid} — injecting /notify-user`)
+      writeCurrentSessionId(sid)
       awaitingClearReady = null
       currentPty.write(`/notify-user ${POST_CLEAR_NOTIFY_BRIEF}\r`)
+      return
+    }
+  }
+}, 500)
+
+// One-shot: after CC starts, poll for the first session jsonl to appear
+// and record its id as the current session. Used by the telegram plugin's
+// /delete to exclude the active session from the picker. Mirrors the
+// post-/clear poll above but clears itself on first detection.
+const initialSessionsBefore = listSessions()
+const initialSessionPoll = setInterval(() => {
+  const current = listSessions()
+  for (const f of current) {
+    if (!initialSessionsBefore.has(f)) {
+      const sid = f.slice(0, -'.jsonl'.length)
+      log(`initial session detected: ${sid}`)
+      writeCurrentSessionId(sid)
+      clearInterval(initialSessionPoll)
       return
     }
   }
@@ -276,6 +313,7 @@ async function consumePending(filename: string): Promise<void> {
     // same constraint as /clear) and CC does the session swap in-process —
     // no terminal flicker, no wrapper respawn, no PTY teardown.
     log(`switch requested → injecting "/resume ${sid}" (id: ${payload.id ?? '?'})`)
+    writeCurrentSessionId(sid)
     currentPty.write(`/resume ${sid}\r`)
     return
   }
@@ -314,6 +352,7 @@ function shutdown(code: number): void {
   clearInterval(heartbeatInterval)
   clearInterval(sweepInterval)
   clearInterval(sessionPollInterval)
+  clearInterval(initialSessionPoll)
   pendingWatcher.close()
   try {
     rmSync(HEARTBEAT_FILE)
