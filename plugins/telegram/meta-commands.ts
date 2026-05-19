@@ -116,7 +116,7 @@ function wrapperHeartbeatFresh(stateDir: string): boolean {
  * switching to a different CC session.
  */
 type WrapperPayload =
-  | { type?: 'slash'; command: string }
+  | { type?: 'slash'; command: string; sessionName?: string }
   | { type: 'switch'; sessionId: string }
 
 function writeWrapperCommand(stateDir: string, payload: WrapperPayload): void {
@@ -153,12 +153,15 @@ export async function tryRouteMetaCommand(
   env: Record<string, string | undefined>,
   handlers: MetaCommandHandlers,
 ): Promise<boolean> {
-  const trimmed = text.trim().toLowerCase()
+  const trimmed = text.trim()
+  const lower = trimmed.toLowerCase()
 
-  if (trimmed === '/new') {
-    return handleNew(env, handlers)
+  // Match `/new` (exact) or `/new` followed by whitespace + arg.
+  if (lower === '/new' || lower.startsWith('/new ') || lower.startsWith('/new\t')) {
+    const rest = trimmed.slice('/new'.length).trim()
+    return handleNew(env, handlers, rest)
   }
-  if (trimmed === '/switch') {
+  if (lower === '/switch') {
     return handleSwitch(env, handlers)
   }
   return false
@@ -167,7 +170,18 @@ export async function tryRouteMetaCommand(
 async function handleNew(
   env: Record<string, string | undefined>,
   handlers: MetaCommandHandlers,
+  rawName: string,
 ): Promise<boolean> {
+  // Strip newlines/CRs that would corrupt the PTY-injected `/rename <name>\r`.
+  const sanitised = rawName.replace(/[\r\n]+/g, ' ').trim()
+  if (sanitised.length === 0) {
+    await handlers.reply(
+      '⚠️ /new butuh nama session. Contoh: /new bahas MCP',
+    )
+    return true
+  }
+  const sessionName = sanitised.slice(0, 64)
+
   const stateDir = resolvePtyStateDir(env)
   if (!stateDir) {
     await handlers.reply(
@@ -184,13 +198,13 @@ async function handleNew(
     return true
   }
   try {
-    writeWrapperCommand(stateDir, { command: '/clear' })
+    writeWrapperCommand(stateDir, { command: '/clear', sessionName })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     await handlers.reply(`⚠️ /new gagal menulis command ke wrapper: ${msg}`)
     return true
   }
-  await handlers.reply('🔄 Clearing session — fresh session sebentar lagi siap.')
+  await handlers.reply(`🔄 Clearing session — fresh session "${sessionName}" sebentar lagi siap.`)
   return true
 }
 
