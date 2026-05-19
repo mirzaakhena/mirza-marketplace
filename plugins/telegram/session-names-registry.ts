@@ -140,3 +140,20 @@ export function refreshFromPidFiles(
   }
   return registry
 }
+
+/**
+ * Returns the sessionId currently holding `name`, or null if `name` is free.
+ * Exact (case-sensitive) match against the registry's `name` field. When the
+ * registry contains legacy duplicates (multiple entries with the same name),
+ * returns the first one iterated; callers treat the result as a boolean
+ * "name is taken" — either match blocks the new write equally.
+ */
+export function findSessionIdByName(
+  registry: Map<string, RegistryEntry>,
+  name: string,
+): string | null {
+  for (const [sid, entry] of registry) {
+    if (entry.name === name) return sid
+  }
+  return null
+}

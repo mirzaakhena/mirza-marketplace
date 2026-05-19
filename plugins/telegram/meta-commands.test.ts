@@ -2,8 +2,9 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { tryRouteMetaCommand, tryHandleMetaCallback, __resetDeletePickerForTests } from './meta-commands'
+import { tryRouteMetaCommand, tryHandleMetaCallback, __resetDeletePickerForTests, __resetSwitchPickerForTests } from './meta-commands'
 import { listProjectSessions } from './sessions-list'
+import { setName as registrySetName } from './session-names-registry'
 
 // Local alias kept so existing test bodies don't need rewriting.
 const tryRouteMetaCommandT = tryRouteMetaCommand
@@ -271,6 +272,110 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     expect(consumed).toBe(true)
     expect(replies[0].text).toMatch(/wrapper tidak terdeteksi/)
     expect(listPending(stateDir).length).toBe(0)
+  })
+
+  test('/new rejects when name already taken in registry', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    // Seed the telegram registry — same resolution rule as production:
+    // <CLAUDE_PROJECT_DIR>/.claude/channels/telegram
+    const telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(telegramStateDir, { recursive: true })
+    registrySetName(telegramStateDir, 'existing-session-id', 'bahas MCP')
+
+    const consumed = await tryRouteMetaCommandT(
+      '/new bahas MCP',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      handler,
+    )
+    expect(consumed).toBe(true)
+    expect(replies.length).toBe(1)
+    expect(replies[0].text).toMatch(/sudah dipakai/)
+    expect(listPending(stateDir).length).toBe(0)
+  })
+
+  test('/rename rejects when name already taken by ANOTHER session', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    // Current session is some sid; another session in the registry owns "omar".
+    writeFileSync(join(stateDir, 'wrapper.current_session_id'), 'current-session-id')
+    const telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(telegramStateDir, { recursive: true })
+    registrySetName(telegramStateDir, 'other-session-id', 'omar')
+
+    const consumed = await tryRouteMetaCommandT(
+      '/rename omar',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      handler,
+    )
+    expect(consumed).toBe(true)
+    expect(replies.length).toBe(1)
+    expect(replies[0].text).toMatch(/sudah dipakai/)
+    expect(listPending(stateDir).length).toBe(0)
+  })
+
+  test('/rename to own existing name is idempotent (one payload written)', async () => {
+    const { handler } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    writeFileSync(join(stateDir, 'wrapper.current_session_id'), 'current-session-id')
+    const telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(telegramStateDir, { recursive: true })
+    // Current session already named "omar" in the registry.
+    registrySetName(telegramStateDir, 'current-session-id', 'omar')
+
+    const consumed = await tryRouteMetaCommandT(
+      '/rename omar',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      handler,
+    )
+    expect(consumed).toBe(true)
+    const pending = listPending(stateDir)
+    expect(pending.length).toBe(1)
+    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
+    expect(payload.command).toBe('/rename omar')
+  })
+
+  test('/rename succeeds when name is free (one payload, /rename <name>)', async () => {
+    const { handler } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    writeFileSync(join(stateDir, 'wrapper.current_session_id'), 'current-session-id')
+    const telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(telegramStateDir, { recursive: true })
+    // Registry exists but does NOT contain the requested name.
+    registrySetName(telegramStateDir, 'other-session-id', 'some other name')
+
+    const consumed = await tryRouteMetaCommandT(
+      '/rename omar',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      handler,
+    )
+    expect(consumed).toBe(true)
+    const pending = listPending(stateDir)
+    expect(pending.length).toBe(1)
+    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
+    expect(payload.command).toBe('/rename omar')
+  })
+
+  test('/new succeeds when name is free', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    // Registry exists but does NOT contain the requested name.
+    const telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(telegramStateDir, { recursive: true })
+    registrySetName(telegramStateDir, 'other-session', 'some other name')
+
+    const consumed = await tryRouteMetaCommandT(
+      '/new bahas MCP',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      handler,
+    )
+    expect(consumed).toBe(true)
+    expect(replies.length).toBe(0)
+    const pending = listPending(stateDir)
+    expect(pending.length).toBe(1)
+    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
+    expect(payload.command).toBe('/clear')
+    expect(payload.sessionName).toBe('bahas MCP')
   })
 })
 
@@ -545,5 +650,68 @@ describe('meta-commands: tryHandleMetaCallback for delete', () => {
     expect(consumed).toBe(true)
     expect(cb.acks[0]).toMatch(/cancelled/i)
     expect(cb.edits[0]).toMatch(/delete cancelled/i)
+  })
+})
+
+describe('meta-commands: tryHandleMetaCallback for switch', () => {
+  let projectDir: string
+  let stateDir: string
+  let cleanup: () => void
+  let homeOverride: string
+
+  beforeEach(() => {
+    const ctx = mkProject()
+    projectDir = ctx.projectDir
+    stateDir = ctx.stateDir
+    cleanup = ctx.cleanup
+    homeOverride = mkdtempSync(join(tmpdir(), 'meta-cmd-home-'))
+    process.env.USERPROFILE = homeOverride
+    process.env.HOME = homeOverride
+    __resetSwitchPickerForTests()
+  })
+  afterEach(() => {
+    cleanup()
+    try { rmSync(homeOverride, { recursive: true, force: true }) } catch {}
+  })
+
+  test('switch callback writes payload with sessionName = picker label', async () => {
+    // Seed two sessions; mark sidA as current so sidB shows up in /switch.
+    const sidA = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+    const sidB = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+    writeProjectJsonl(homeOverride, projectDir, sidA)
+    writeProjectJsonl(homeOverride, projectDir, sidB)
+    writeCurrentSessionId(stateDir, sidA)
+
+    // Give sidB a deterministic label via the telegram registry — same path
+    // resolution as production (<CLAUDE_PROJECT_DIR>/.claude/channels/telegram).
+    const telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(telegramStateDir, { recursive: true })
+    registrySetName(telegramStateDir, sidB, 'utama')
+
+    setHeartbeat(stateDir, new Date().toISOString())
+
+    // Populate switchPicker by invoking /switch — matches the production code
+    // path. (Same pattern setupAndPopulatePicker uses for /delete.)
+    const { handler } = makeHandler()
+    const consumed = await tryRouteMetaCommandT('/switch', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+
+    const shortId = sidB.replace(/-/g, '').slice(0, 8).toLowerCase()
+
+    // Now tap the picker row for sidB.
+    const cb = makeCallbackHandler()
+    const tapConsumed = await tryHandleMetaCallback(
+      `meta:switch_${shortId}`,
+      { CLAUDE_PROJECT_DIR: projectDir },
+      cb.handler,
+    )
+    expect(tapConsumed).toBe(true)
+
+    const pending = listPending(stateDir)
+    expect(pending.length).toBe(1)
+    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
+    expect(payload.type).toBe('switch')
+    expect(payload.sessionId).toBe(sidB)
+    expect(payload.sessionName).toBe('utama')
   })
 })

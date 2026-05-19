@@ -29,7 +29,11 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { listProjectSessions, encodeProjectDir } from './sessions-list.ts'
-import { setName as registrySetName } from './session-names-registry.ts'
+import {
+  loadRegistry,
+  setName as registrySetName,
+  findSessionIdByName,
+} from './session-names-registry.ts'
 import { resolveStateDir as resolveTelegramStateDir } from './state-path.ts'
 
 const HEARTBEAT_FRESH_MS = 30_000
@@ -133,7 +137,7 @@ function wrapperHeartbeatFresh(stateDir: string): boolean {
  */
 type WrapperPayload =
   | { type?: 'slash'; command: string; sessionName?: string }
-  | { type: 'switch'; sessionId: string }
+  | { type: 'switch'; sessionId: string; sessionName?: string }
 
 function writeWrapperCommand(stateDir: string, payload: WrapperPayload): void {
   const pending = join(stateDir, 'pending')
@@ -225,6 +229,17 @@ async function handleNew(
     )
     return true
   }
+  const telegramStateDir = resolveTelegramStateDir(env)
+  if (telegramStateDir) {
+    const registry = loadRegistry(telegramStateDir)
+    const taken = findSessionIdByName(registry, sessionName)
+    if (taken) {
+      await handlers.reply(
+        `⚠️ Nama "${sessionName}" sudah dipakai session lain di project ini. Pilih nama lain atau /switch ke session itu.`,
+      )
+      return true
+    }
+  }
   try {
     writeWrapperCommand(stateDir, { command: '/clear', sessionName })
   } catch (err) {
@@ -268,6 +283,21 @@ async function handleRename(
     )
     return true
   }
+  // Uniqueness check: reject if the name is taken by a DIFFERENT session.
+  // Self-rename to the session's own existing name is allowed (idempotent —
+  // a common mobile-finger mistake; no-op is better UX than an error).
+  const currentSid = readCurrentSessionId(stateDir)
+  const telegramStateDir = resolveTelegramStateDir(env)
+  if (telegramStateDir) {
+    const registry = loadRegistry(telegramStateDir)
+    const taken = findSessionIdByName(registry, newName)
+    if (taken && taken !== currentSid) {
+      await handlers.reply(
+        `⚠️ Nama "${newName}" sudah dipakai session lain. /switch ke session itu atau pilih nama lain.`,
+      )
+      return true
+    }
+  }
   try {
     writeWrapperCommand(stateDir, { command: `/rename ${newName}` })
   } catch (err) {
@@ -277,9 +307,8 @@ async function handleRename(
   }
   // Mirror the rename into the plugin-side registry so the new name shows
   // in the next picker render even if CC's pid file gets overwritten by a
-  // later /switch before we get a chance to read it.
-  const currentSid = readCurrentSessionId(stateDir)
-  const telegramStateDir = resolveTelegramStateDir(env)
+  // later /switch before we get a chance to read it. Re-uses `currentSid`
+  // and `telegramStateDir` resolved above for the uniqueness check.
   if (currentSid && telegramStateDir) {
     registrySetName(telegramStateDir, currentSid, newName)
   }
@@ -456,7 +485,11 @@ export async function tryHandleMetaCallback(
     }
 
     try {
-      writeWrapperCommand(stateDir, { type: 'switch', sessionId: entry.sessionId })
+      writeWrapperCommand(stateDir, {
+        type: 'switch',
+        sessionId: entry.sessionId,
+        sessionName: entry.label,
+      })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       await handlers.ackCallback(`Write failed: ${msg}`)

@@ -48,6 +48,7 @@ import {
   readdirSync,
   existsSync,
   renameSync,
+  statSync,
   watch,
   type FSWatcher,
 } from 'node:fs'
@@ -102,15 +103,11 @@ function writeCurrentSessionId(sid: string): void {
   }
 }
 
-// Pacing between chained PTY injections inside the post-/clear sequence.
-// CC's slash-command parser swallows the entire stdin buffer up to (some
-// internal terminator) as one argument, so injecting `/rename foo\r\n` and
-// `/notify-user bar\r\n` back-to-back lands at CC as a single garbled argument
-// `foo\r/notify-user bar`. Spacing the writes far enough apart that CC has
-// fully processed the previous command before the next one arrives fixes
-// that. 1.5s is empirical — long enough on a warm machine, short enough that
-// the user doesn't feel paused.
-const POST_INJECTION_DELAY_MS = 1500
+// Pacing between chained PTY injections. 1000ms is the empirical floor at
+// which CC's slash-command parser reliably digests the previous command
+// before the next write lands. Used by the post-/clear chain (/rename +
+// /notify-user) and by the post-/switch outbox event.
+const POST_INJECTION_DELAY_MS = 1000
 
 // Delay between writing a slash-command's text and the trailing Enter.
 // Empirically, writing `text + \r` as one PTY chunk lets CC's autocomplete
@@ -167,8 +164,84 @@ function listSessions(): Set<string> {
   }
 }
 
+// Resolve the telegram plugin's state dir. Mirrors the plugin's own
+// resolveTelegramStateDir logic: prefer the explicit CLAUDE_CHANNELS_DIR
+// env if set, else fall back to <CLAUDE_PROJECT_DIR>/.claude/channels/telegram.
+function resolveTelegramStateDir(): string | null {
+  const explicit = process.env.CLAUDE_CHANNELS_DIR?.trim()
+  if (explicit) return join(explicit, 'telegram')
+  const proj = process.env.CLAUDE_PROJECT_DIR?.trim()
+  if (!proj) return null
+  return join(proj, '.claude', 'channels', 'telegram')
+}
+
+// Mirror of `setName` from plugins/telegram/session-names-registry.ts.
+// Duplicated rather than imported to avoid a cross-package dependency
+// (Option β per the design spec). Best-effort: errors are swallowed.
+function writeTelegramRegistryName(sessionId: string, name: string): void {
+  const dir = resolveTelegramStateDir()
+  if (!dir) return
+  const path = join(dir, 'session-names.json')
+  let obj: Record<string, { name: string; updatedAt: number }> = {}
+  try {
+    obj = JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    /* missing/malformed → start fresh */
+  }
+  obj[sessionId] = { name, updatedAt: Date.now() }
+  try {
+    mkdirSync(dir, { recursive: true })
+    const tmp = `${path}.tmp.${process.pid}`
+    writeFileSync(tmp, JSON.stringify(obj, null, 2))
+    renameSync(tmp, path)
+  } catch (err) {
+    log(`failed to write telegram registry: ${err}`)
+  }
+}
+
 const userShell = process.env.SHELL || '/bin/sh'
 const shell = isWindows ? 'cmd.exe' : userShell
+
+/**
+ * Decide whether to start a fresh `claude` or resume the most-recently-modified
+ * session in this project. Returns the args to splice in front of BASE_CLAUDE_ARGS
+ * and a flag for the post-spawn first-run logic.
+ *
+ * "Latest" = jsonl with the highest mtimeMs. Ties (same mtime to the millisecond)
+ * are unlikely in practice; if they happen, an arbitrary winner is fine — both
+ * are equally recent.
+ */
+function chooseStartupArgs(): {
+  resumeArgs: string[]
+  isFirstRun: boolean
+  latestSessionId: string | null
+} {
+  const files = listSessions()
+  if (files.size === 0) {
+    return { resumeArgs: [], isFirstRun: true, latestSessionId: null }
+  }
+  let latestId: string | null = null
+  let latestMtime = -1
+  for (const f of files) {
+    const id = f.slice(0, -'.jsonl'.length)
+    let mtime = 0
+    try {
+      mtime = statSync(join(CLAUDE_PROJECTS_DIR, f)).mtimeMs
+    } catch {
+      continue
+    }
+    if (mtime > latestMtime) {
+      latestMtime = mtime
+      latestId = id
+    }
+  }
+  if (!latestId) return { resumeArgs: [], isFirstRun: true, latestSessionId: null }
+  return {
+    resumeArgs: ['--resume', latestId],
+    isFirstRun: false,
+    latestSessionId: latestId,
+  }
+}
 
 /**
  * Spawn Claude under a fresh PTY and return the IPty handle.
@@ -177,12 +250,20 @@ const shell = isWindows ? 'cmd.exe' : userShell
  * `claude` resolves through the user's PATH/rc-files. Skipping the shell
  * triggers posix_spawnp ENOENT for the npm-installed shim.
  */
-function spawnClaudePty(): IPty {
+function spawnClaudePty(): { pty: IPty; startup: ReturnType<typeof chooseStartupArgs> } {
   const cols = process.stdout.columns || 100
   const rows = process.stdout.rows || 30
-  const claudeCmd = [CLAUDE_BIN, ...BASE_CLAUDE_ARGS].join(' ')
+  const startup = chooseStartupArgs()
+  const claudeArgs = [...startup.resumeArgs, ...BASE_CLAUDE_ARGS]
+  const claudeCmd = [CLAUDE_BIN, ...claudeArgs].join(' ')
   const args = isWindows ? ['/c', claudeCmd] : ['-l', '-i', '-c', claudeCmd]
-
+  log(
+    `startup: ${
+      startup.isFirstRun
+        ? 'first-run (no existing sessions)'
+        : `resuming session ${startup.latestSessionId}`
+    }`,
+  )
   const p = spawn(shell, args, {
     name: 'xterm-256color',
     cols,
@@ -195,10 +276,12 @@ function spawnClaudePty(): IPty {
     },
   })
   log(`spawned claude (pid ${p.pid})`)
-  return p
+  return { pty: p, startup }
 }
 
-const currentPty: IPty = spawnClaudePty()
+const _spawn = spawnClaudePty()
+const currentPty: IPty = _spawn.pty
+const startupMode = _spawn.startup
 
 /**
  * Inject a slash command into the PTY, separating the command text from
@@ -299,6 +382,7 @@ const sessionPollInterval = setInterval(() => {
       // already up to date.
       let delay = 0
       if (sessionName) {
+        writeTelegramRegistryName(sid, sessionName)
         const localName = sessionName
         setTimeout(() => injectSlashCommand(`/rename ${localName}`), delay)
         delay += POST_INJECTION_DELAY_MS
@@ -320,21 +404,103 @@ const sessionPollInterval = setInterval(() => {
   }
 }, 500)
 
+// Resume path: we already know the session id from chooseStartupArgs, so
+// we can synchronously write current_session_id and emit the session-change
+// outbox event without waiting for a new jsonl to materialise (none will —
+// CC reuses the existing file on --resume). The initialSessionPoll below
+// still runs in this mode but won't detect anything; that's harmless.
+if (!startupMode.isFirstRun && startupMode.latestSessionId) {
+  const sid = startupMode.latestSessionId
+  writeCurrentSessionId(sid)
+  // Resolve label from telegram registry directly (best-effort).
+  const stateDir = resolveTelegramStateDir()
+  let resolvedName: string | null = null
+  if (stateDir) {
+    try {
+      const path = join(stateDir, 'session-names.json')
+      const obj = JSON.parse(readFileSync(path, 'utf8')) as Record<
+        string,
+        { name: string }
+      >
+      resolvedName = obj[sid]?.name ?? null
+    } catch {
+      /* missing/malformed → null */
+    }
+  }
+  writeSystemOutbox({
+    type: 'session-change',
+    sessionId: sid,
+    sessionName: resolvedName,
+  })
+}
+
 // One-shot: after CC starts, poll for the first session jsonl to appear
 // and record its id as the current session. Used by the telegram plugin's
 // /delete to exclude the active session from the picker. Mirrors the
 // post-/clear poll above but clears itself on first detection.
+//
+// On first-run, this also claims the label "main session" for the brand-new
+// session — provided that name isn't already taken in the telegram registry.
+// On resume, the loop never fires (no new jsonl appears); the resume block
+// above has already handled current_session_id + outbox emission.
 const initialSessionsBefore = listSessions()
 const initialSessionPoll = setInterval(() => {
   const current = listSessions()
   for (const f of current) {
-    if (!initialSessionsBefore.has(f)) {
-      const sid = f.slice(0, -'.jsonl'.length)
-      log(`initial session detected: ${sid}`)
-      writeCurrentSessionId(sid)
-      clearInterval(initialSessionPoll)
-      return
+    if (initialSessionsBefore.has(f)) continue
+    const sid = f.slice(0, -'.jsonl'.length)
+    log(`initial session detected: ${sid}`)
+    writeCurrentSessionId(sid)
+    clearInterval(initialSessionPoll)
+
+    if (startupMode.isFirstRun) {
+      // First-run path: try to claim "main session" if free in the registry.
+      const stateDir = resolveTelegramStateDir()
+      let canRename = true
+      if (stateDir) {
+        try {
+          const path = join(stateDir, 'session-names.json')
+          const obj = JSON.parse(readFileSync(path, 'utf8')) as Record<
+            string,
+            { name: string }
+          >
+          for (const entry of Object.values(obj)) {
+            if (entry.name === 'main session') {
+              canRename = false
+              break
+            }
+          }
+        } catch {
+          /* registry missing → name is free */
+        }
+      }
+      if (canRename) {
+        writeTelegramRegistryName(sid, 'main session')
+        injectSlashCommand(`/rename main session`)
+        setTimeout(
+          () =>
+            writeSystemOutbox({
+              type: 'session-change',
+              sessionId: sid,
+              sessionName: 'main session',
+            }),
+          POST_INJECTION_DELAY_MS,
+        )
+      } else {
+        log(
+          `"main session" already taken in registry — leaving new session unnamed`,
+        )
+        writeSystemOutbox({
+          type: 'session-change',
+          sessionId: sid,
+          sessionName: null,
+        })
+      }
     }
+    // If !isFirstRun, the resume block above already handled this.
+    // initialSessionPoll won't actually detect anything in that case,
+    // but defensive-skip here is harmless.
+    return
   }
 }, 500)
 
@@ -406,21 +572,27 @@ async function consumePending(filename: string): Promise<void> {
       log(`ignored ${filename}: switch payload missing sessionId`)
       return
     }
-    // Inject `/resume <sid>` as keystrokes into the live PTY rather than
-    // killing CC and respawning with `--resume`. The slash command lands in
-    // CC's input loop on its next tick (after the current AI turn completes,
-    // same constraint as /clear) and CC does the session swap in-process —
-    // no terminal flicker, no wrapper respawn, no PTY teardown.
-    log(`switch requested → injecting "/resume ${sid}" (id: ${payload.id ?? '?'})`)
+    const sessionName =
+      typeof (payload as { sessionName?: unknown }).sessionName === 'string'
+        ? ((payload as { sessionName: string }).sessionName as string)
+        : null
+    log(
+      `switch requested → injecting "/resume ${sid}"` +
+        (sessionName ? ` (label: "${sessionName}")` : '') +
+        ` (id: ${payload.id ?? '?'})`,
+    )
     writeCurrentSessionId(sid)
     injectSlashCommand(`/resume ${sid}`)
-    // Notify the user via direct bot.api send (no AI roundtrip). The plugin
-    // resolves the target session's label from its registry.
-    writeSystemOutbox({
-      type: 'session-change',
-      sessionId: sid,
-      sessionName: null,
-    })
+    // Delay matches the post-/clear path so the plugin's session-change
+    // handler sees a consistent rhythm and CC has time to fully swap before
+    // the user-facing transition message lands.
+    setTimeout(() => {
+      writeSystemOutbox({
+        type: 'session-change',
+        sessionId: sid,
+        sessionName,
+      })
+    }, POST_INJECTION_DELAY_MS)
     return
   }
 
