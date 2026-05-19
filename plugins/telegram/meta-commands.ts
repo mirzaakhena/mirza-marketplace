@@ -58,6 +58,10 @@ export interface MetaCallbackHandlers {
   ackCallback: (text?: string) => Promise<void>
   /** Edit the message that contained the buttons (strips keyboard implicitly). */
   editMessage: (text: string) => Promise<void>
+  /** Send a plain-text Telegram reply (used for follow-up prompts). */
+  reply: (text: string) => Promise<void>
+  /** Send a Telegram reply with an inline keyboard (used for confirm prompts). */
+  replyWithButtons: (text: string, rows: MetaCommandButton[][]) => Promise<void>
 }
 
 /**
@@ -389,6 +393,48 @@ export async function tryHandleMetaCallback(
     // Pop the entry so the same button can't be re-tapped to repeat a
     // possibly-expensive respawn.
     switchPicker.delete(shortId)
+    return true
+  }
+
+  if (rest.startsWith('delete_')) {
+    // Branches: `delete_<shortId>` (picker tap, Task 6),
+    // `delete_confirm_<shortId>` (Task 7), `delete_cancel` (Task 8)
+    const remainder = rest.slice('delete_'.length)
+
+    if (remainder === 'cancel') {
+      // Handled in Task 8 — placeholder.
+      return false
+    }
+
+    if (remainder.startsWith('confirm_')) {
+      // Handled in Task 7 — placeholder.
+      return false
+    }
+
+    // Plain picker tap: `delete_<shortId>`
+    const shortId = remainder
+    if (!SHORT_ID_RE.test(shortId)) {
+      await handlers.ackCallback('Bad short id')
+      return true
+    }
+    const entry = deletePicker.get(shortId)
+    if (!entry) {
+      await handlers.ackCallback('Picker expired')
+      await handlers.editMessage('(picker expired — /delete lagi)').catch(() => {})
+      return true
+    }
+
+    await handlers.ackCallback('Konfirmasi diperlukan')
+    await handlers
+      .editMessage(`🗑️ Pilih session untuk dihapus → ${entry.label}`)
+      .catch(() => {})
+    await handlers.replyWithButtons(
+      `Hapus session "${entry.label}"? Ini PERMANEN, tidak bisa di-undo.`,
+      [[
+        { label: '✅ Confirm', callbackData: `meta:delete_confirm_${shortId}` },
+        { label: '❌ Cancel', callbackData: 'meta:delete_cancel' },
+      ]],
+    )
     return true
   }
 

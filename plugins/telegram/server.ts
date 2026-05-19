@@ -1057,6 +1057,27 @@ bot.on('callback_query:data', async ctx => {
       editMessage: async (text: string) => {
         await ctx.editMessageText(text)
       },
+      reply: async (text: string) => {
+        try {
+          await ctx.reply(text)
+        } catch (err) {
+          process.stderr.write(`telegram channel: meta callback reply failed: ${err}\n`)
+        }
+      },
+      replyWithButtons: async (msgText, rows) => {
+        const kb = new InlineKeyboard()
+        for (let r = 0; r < rows.length; r++) {
+          for (const btn of rows[r]) {
+            kb.text(btn.label, btn.callbackData)
+          }
+          if (r < rows.length - 1) kb.row()
+        }
+        try {
+          await ctx.reply(msgText, { reply_markup: kb })
+        } catch (err) {
+          process.stderr.write(`telegram channel: meta callback picker reply failed: ${err}\n`)
+        }
+      },
     })
     if (consumed) return
     // Fall through to ai:* path if for some reason it wasn't a known meta.

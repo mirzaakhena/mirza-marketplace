@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { tryRouteMetaCommand } from './meta-commands'
+import { tryRouteMetaCommand, tryHandleMetaCallback, __resetDeletePickerForTests } from './meta-commands'
 import { listProjectSessions } from './sessions-list'
 
 // Local alias kept so existing test bodies don't need rewriting.
@@ -325,5 +325,89 @@ describe('meta-commands: /delete picker', () => {
     expect(replies[0].buttons).toBeDefined()
     const flatLabels = replies[0].buttons!.flat().map(b => b.label)
     expect(flatLabels.some(l => l.includes('aaaaaaaa'))).toBe(true)
+  })
+})
+
+function makeCallbackHandler(): {
+  handler: {
+    ackCallback: (text?: string) => Promise<void>
+    editMessage: (text: string) => Promise<void>
+    reply: (text: string) => Promise<void>
+    replyWithButtons: (
+      text: string,
+      rows: { label: string; callbackData: string }[][],
+    ) => Promise<void>
+  }
+  acks: string[]
+  edits: string[]
+  replies: RecordedReply[]
+} {
+  const acks: string[] = []
+  const edits: string[] = []
+  const replies: RecordedReply[] = []
+  return {
+    acks, edits, replies,
+    handler: {
+      ackCallback: async (text?: string) => { acks.push(text ?? '') },
+      editMessage: async (text: string) => { edits.push(text) },
+      reply: async (text: string) => { replies.push({ text }) },
+      replyWithButtons: async (text, rows) => { replies.push({ text, buttons: rows }) },
+    },
+  }
+}
+
+describe('meta-commands: tryHandleMetaCallback for delete', () => {
+  let projectDir: string
+  let stateDir: string
+  let cleanup: () => void
+  let homeOverride: string
+
+  beforeEach(() => {
+    const ctx = mkProject()
+    projectDir = ctx.projectDir
+    stateDir = ctx.stateDir
+    cleanup = ctx.cleanup
+    homeOverride = mkdtempSync(join(tmpdir(), 'meta-cmd-home-'))
+    process.env.USERPROFILE = homeOverride
+    process.env.HOME = homeOverride
+    __resetDeletePickerForTests()
+  })
+  afterEach(() => {
+    cleanup()
+    try { rmSync(homeOverride, { recursive: true, force: true }) } catch {}
+  })
+
+  test('delete picker tap emits confirmation prompt with Confirm/Cancel buttons', async () => {
+    const sid = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
+    const [shortId] = await setupAndPopulatePicker(homeOverride, projectDir, stateDir, [sid])
+
+    const cb = makeCallbackHandler()
+    const consumed = await tryHandleMetaCallback(
+      `meta:delete_${shortId}`,
+      { CLAUDE_PROJECT_DIR: projectDir },
+      cb.handler,
+    )
+    expect(consumed).toBe(true)
+    expect(cb.acks.length).toBe(1)
+    expect(cb.edits.length).toBe(1)
+    expect(cb.replies.length).toBe(1)
+    expect(cb.replies[0].text).toMatch(/Hapus session/i)
+    expect(cb.replies[0].text).toMatch(/PERMANEN/i)
+    const buttons = cb.replies[0].buttons!.flat()
+    expect(buttons.some(b => b.callbackData === `meta:delete_confirm_${shortId}`)).toBe(true)
+    expect(buttons.some(b => b.callbackData === 'meta:delete_cancel')).toBe(true)
+  })
+
+  test('delete picker tap for unknown shortId reports picker expired', async () => {
+    __resetDeletePickerForTests()
+    const cb = makeCallbackHandler()
+    const consumed = await tryHandleMetaCallback(
+      'meta:delete_deadbeef',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      cb.handler,
+    )
+    expect(consumed).toBe(true)
+    expect(cb.acks[0]).toMatch(/expired/i)
+    expect(cb.replies.length).toBe(0)
   })
 })
