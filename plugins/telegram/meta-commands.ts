@@ -26,7 +26,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { listProjectSessions } from './sessions-list.ts'
+import { listProjectSessions, encodeProjectDir } from './sessions-list.ts'
 
 const HEARTBEAT_FRESH_MS = 30_000
 const MAX_SWITCH_BUTTONS = 7 // Telegram allows 8 rows, we reserve 1 for cancel
@@ -80,15 +80,6 @@ function resolvePtyStateDir(env: Record<string, string | undefined>): string | n
   const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
   if (!projectDir) return null
   return join(projectDir, '.claude', 'channels', 'pty-controller')
-}
-
-/**
- * Encode a project dir the way CC encodes it for `~/.claude/projects/<encoded>/`.
- * Duplicated from the wrapper's matching helper; small enough that a shared
- * module isn't worth it.
- */
-function encodeProjectDir(p: string): string {
-  return p.replace(/[\\/:]/g, '-')
 }
 
 /**
