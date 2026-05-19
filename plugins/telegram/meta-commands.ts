@@ -153,10 +153,14 @@ function writeWrapperCommand(stateDir: string, payload: WrapperPayload): void {
  *   - `true`  → consumed (we did something; caller must NOT forward to AI)
  *   - `false` → not a meta-command (caller should continue normal flow)
  *
- * Recognized today (exact match, trimmed, lowercase compared):
- *   /new    — ask the wrapper to /clear the current CC session
- *   /switch — show a button picker of sessions in this project; tap
- *             rebuilds the wrapper with `claude --resume <id>`
+ * Slash command name is matched lowercase + whitespace-trimmed; any argument
+ * after the command is forwarded preserving case.
+ *
+ * Recognized today:
+ *   /new <name>    — clear the current CC session and rename the fresh one to <name>
+ *   /switch        — show a picker of project sessions; tap injects /resume into PTY
+ *   /delete        — show a picker of non-current sessions; tap → confirm → rmSync jsonl
+ *   /rename <name> — apply CC's /rename <name> to the live session
  *
  * If the wrapper isn't reachable, we still consume the command and reply
  * with an explanatory error rather than silently routing it to the AI
@@ -180,6 +184,11 @@ export async function tryRouteMetaCommand(
   }
   if (lower === '/delete') {
     return handleDelete(env, handlers)
+  }
+  // Match `/rename` (exact) or `/rename` followed by whitespace + arg.
+  if (lower === '/rename' || lower.startsWith('/rename ') || lower.startsWith('/rename\t')) {
+    const rest = trimmed.slice('/rename'.length).trim()
+    return handleRename(env, handlers, rest)
   }
   return false
 }
@@ -222,6 +231,46 @@ async function handleNew(
     return true
   }
   await handlers.reply(`🔄 Clearing session — fresh session "${sessionName}" sebentar lagi siap.`)
+  return true
+}
+
+async function handleRename(
+  env: Record<string, string | undefined>,
+  handlers: MetaCommandHandlers,
+  rawName: string,
+): Promise<boolean> {
+  // Same sanitisation as /new — CR/LF in the name would corrupt the PTY-injected
+  // `/rename <name>\r` keystroke. Collapse to single spaces, trim, cap at 64.
+  const sanitised = rawName.replace(/[\r\n]+/g, ' ').trim()
+  if (sanitised.length === 0) {
+    await handlers.reply(
+      '⚠️ /rename butuh nama baru. Contoh: /rename bahas MCP',
+    )
+    return true
+  }
+  const newName = sanitised.slice(0, 64)
+
+  const stateDir = resolvePtyStateDir(env)
+  if (!stateDir) {
+    await handlers.reply(
+      '⚠️ /rename tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.',
+    )
+    return true
+  }
+  if (!wrapperHeartbeatFresh(stateDir)) {
+    await handlers.reply(
+      '⚠️ /rename tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.',
+    )
+    return true
+  }
+  try {
+    writeWrapperCommand(stateDir, { command: `/rename ${newName}` })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await handlers.reply(`⚠️ /rename gagal menulis command ke wrapper: ${msg}`)
+    return true
+  }
+  await handlers.reply(`✏️ Renaming session ke "${newName}".`)
   return true
 }
 

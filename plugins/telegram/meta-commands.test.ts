@@ -209,6 +209,67 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     expect(payload.sessionName.length).toBe(64)
     expect(payload.sessionName).toBe('a'.repeat(64))
   })
+
+  test('consumes /rename with no arg and rejects with usage message', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    const consumed = await tryRouteMetaCommandT('/rename', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    expect(replies.length).toBe(1)
+    expect(replies[0].text).toMatch(/nama baru/i)
+    expect(listPending(stateDir).length).toBe(0)
+  })
+
+  test('consumes /rename with whitespace-only arg and rejects with usage message', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    const consumed = await tryRouteMetaCommandT('/rename     ', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    expect(replies[0].text).toMatch(/nama baru/i)
+    expect(listPending(stateDir).length).toBe(0)
+  })
+
+  test('writes /rename <name> command to wrapper when fresh', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    const consumed = await tryRouteMetaCommandT('/rename bahas MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    expect(replies[0].text).toMatch(/Renaming/i)
+    const pending = listPending(stateDir)
+    expect(pending.length).toBe(1)
+    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
+    expect(payload.command).toBe('/rename bahas MCP')
+  })
+
+  test('strips newlines from /rename name (PTY injection safety)', async () => {
+    const { handler } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    const consumed = await tryRouteMetaCommandT('/rename bahas\nMCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    const pending = listPending(stateDir)
+    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
+    expect(payload.command).toBe('/rename bahas MCP')
+  })
+
+  test('truncates /rename name longer than 64 chars', async () => {
+    const { handler } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    const longName = 'a'.repeat(100)
+    const consumed = await tryRouteMetaCommandT(`/rename ${longName}`, { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    const pending = listPending(stateDir)
+    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
+    expect(payload.command).toBe(`/rename ${'a'.repeat(64)}`)
+  })
+
+  test('/rename warns when wrapper heartbeat is stale', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date(Date.now() - 5 * 60_000).toISOString())
+    const consumed = await tryRouteMetaCommandT('/rename bahas MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    expect(replies[0].text).toMatch(/wrapper tidak terdeteksi/)
+    expect(listPending(stateDir).length).toBe(0)
+  })
 })
 
 // Shared helpers used by /delete tests across Tasks 5–8.

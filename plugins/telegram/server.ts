@@ -1709,6 +1709,7 @@ void (async () => {
               { command: 'new', description: 'Start a fresh named session' },
               { command: 'switch', description: 'Switch Claude session' },
               { command: 'delete', description: 'Delete a session' },
+              { command: 'rename', description: 'Rename current session' },
             ],
             { scope: { type: 'all_private_chats' } },
           ).catch(() => {})
