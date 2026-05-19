@@ -99,8 +99,8 @@ const POST_CLEAR_NOTIFY_BRIEF =
 
 // Pacing between chained PTY injections inside the post-/clear sequence.
 // CC's slash-command parser swallows the entire stdin buffer up to (some
-// internal terminator) as one argument, so injecting `/rename foo\r` and
-// `/notify-user bar\r` back-to-back lands at CC as a single garbled argument
+// internal terminator) as one argument, so injecting `/rename foo\r\n` and
+// `/notify-user bar\r\n` back-to-back lands at CC as a single garbled argument
 // `foo\r/notify-user bar`. Spacing the writes far enough apart that CC has
 // fully processed the previous command before the next one arrives fixes
 // that. 1.5s is empirical — long enough on a warm machine, short enough that
@@ -252,11 +252,11 @@ const sessionPollInterval = setInterval(() => {
       let delay = 0
       if (sessionName) {
         const localName = sessionName
-        setTimeout(() => currentPty.write(`/rename ${localName}\r`), delay)
+        setTimeout(() => currentPty.write(`/rename ${localName}\r\n`), delay)
         delay += POST_INJECTION_DELAY_MS
       }
       setTimeout(
-        () => currentPty.write(`/telegram:notify-user ${POST_CLEAR_NOTIFY_BRIEF}\r`),
+        () => currentPty.write(`/telegram:notify-user ${POST_CLEAR_NOTIFY_BRIEF}\r\n`),
         delay,
       )
       return
@@ -321,7 +321,7 @@ async function consumePending(filename: string): Promise<void> {
       return
     }
     log(`injecting "${command}" (id: ${payload.id ?? '?'})`)
-    currentPty.write(`${command}\r`)
+    currentPty.write(`${command}\r\n`)
     // After /clear, CC will materialise a new session jsonl. Snapshot
     // existing sessions now so the poll loop can spot the new one and
     // chain /notify-user into the fresh AI session. The snapshot is
@@ -357,7 +357,7 @@ async function consumePending(filename: string): Promise<void> {
     // no terminal flicker, no wrapper respawn, no PTY teardown.
     log(`switch requested → injecting "/resume ${sid}" (id: ${payload.id ?? '?'})`)
     writeCurrentSessionId(sid)
-    currentPty.write(`/resume ${sid}\r`)
+    currentPty.write(`/resume ${sid}\r\n`)
     return
   }
 
