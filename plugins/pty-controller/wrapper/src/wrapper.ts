@@ -107,6 +107,15 @@ const POST_CLEAR_NOTIFY_BRIEF =
 // the user doesn't feel paused.
 const POST_INJECTION_DELAY_MS = 1500
 
+// Delay between writing a slash-command's text and the trailing Enter.
+// Empirically, writing `text + \r` as one PTY chunk lets CC's autocomplete
+// picker swallow the \r (for namespaced commands like /telegram:foo, the
+// picker stays open until the input "settles"). Splitting into two writes
+// separated by a brief delay mimics a human pause between typing and
+// pressing Enter, so CC treats the trailing \r as a top-level "submit"
+// rather than a "select from picker" action.
+const SUBMIT_DELAY_MS = 250
+
 const CLAUDE_BIN = process.env.CLAUDE_BIN ?? 'claude'
 // Default flags load mirza-marketplace's telegram channel (which isn't on
 // Anthropic's allowlist yet — channel plugins are research-preview) and
@@ -185,6 +194,19 @@ function spawnClaudePty(): IPty {
 }
 
 const currentPty: IPty = spawnClaudePty()
+
+/**
+ * Inject a slash command into the PTY, separating the command text from
+ * the submitting Enter (\r) by SUBMIT_DELAY_MS. See SUBMIT_DELAY_MS for
+ * why splitting is necessary — short version: namespaced plugin commands
+ * (`/telegram:foo`) keep CC's autocomplete picker open, and a \r arriving
+ * in the same chunk gets swallowed by the picker instead of submitting.
+ */
+function injectSlashCommand(cmd: string): void {
+  currentPty.write(cmd)
+  setTimeout(() => currentPty.write('\r'), SUBMIT_DELAY_MS)
+}
+
 // Post-/clear state machine. Once we inject /clear, we snapshot the existing
 // session jsonl files and start polling for a new one to appear — its
 // appearance signals that the fresh CC session is live and ready to accept
@@ -252,11 +274,11 @@ const sessionPollInterval = setInterval(() => {
       let delay = 0
       if (sessionName) {
         const localName = sessionName
-        setTimeout(() => currentPty.write(`/rename ${localName}\r\n`), delay)
+        setTimeout(() => injectSlashCommand(`/rename ${localName}`), delay)
         delay += POST_INJECTION_DELAY_MS
       }
       setTimeout(
-        () => currentPty.write(`/telegram:notify-user ${POST_CLEAR_NOTIFY_BRIEF}\r\n`),
+        () => injectSlashCommand(`/telegram:notify-user ${POST_CLEAR_NOTIFY_BRIEF}`),
         delay,
       )
       return
@@ -321,7 +343,7 @@ async function consumePending(filename: string): Promise<void> {
       return
     }
     log(`injecting "${command}" (id: ${payload.id ?? '?'})`)
-    currentPty.write(`${command}\r\n`)
+    injectSlashCommand(command)
     // After /clear, CC will materialise a new session jsonl. Snapshot
     // existing sessions now so the poll loop can spot the new one and
     // chain /notify-user into the fresh AI session. The snapshot is
@@ -357,7 +379,7 @@ async function consumePending(filename: string): Promise<void> {
     // no terminal flicker, no wrapper respawn, no PTY teardown.
     log(`switch requested → injecting "/resume ${sid}" (id: ${payload.id ?? '?'})`)
     writeCurrentSessionId(sid)
-    currentPty.write(`/resume ${sid}\r\n`)
+    injectSlashCommand(`/resume ${sid}`)
     return
   }
 
