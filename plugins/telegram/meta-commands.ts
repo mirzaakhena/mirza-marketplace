@@ -82,6 +82,31 @@ function resolvePtyStateDir(env: Record<string, string | undefined>): string | n
   return join(projectDir, '.claude', 'channels', 'pty-controller')
 }
 
+/**
+ * Encode a project dir the way CC encodes it for `~/.claude/projects/<encoded>/`.
+ * Duplicated from the wrapper's matching helper; small enough that a shared
+ * module isn't worth it.
+ */
+function encodeProjectDir(p: string): string {
+  return p.replace(/[\\/:]/g, '-')
+}
+
+/**
+ * Read the wrapper's current PTY session id (UUID, no newline) from
+ * `<state>/wrapper.current_session_id`. Returns null if the file is absent
+ * or unreadable — callers must tolerate that, the wrapper might just not
+ * have written it yet.
+ */
+function readCurrentSessionId(stateDir: string): string | null {
+  const file = join(stateDir, 'wrapper.current_session_id')
+  try {
+    const raw = readFileSync(file, 'utf8').trim()
+    return raw.length > 0 ? raw : null
+  } catch {
+    return null
+  }
+}
+
 function wrapperHeartbeatFresh(stateDir: string): boolean {
   const beat = join(stateDir, 'wrapper.heartbeat')
   if (!existsSync(beat)) return false
