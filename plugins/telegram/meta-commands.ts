@@ -137,7 +137,7 @@ function wrapperHeartbeatFresh(stateDir: string): boolean {
  */
 type WrapperPayload =
   | { type?: 'slash'; command: string; sessionName?: string }
-  | { type: 'switch'; sessionId: string }
+  | { type: 'switch'; sessionId: string; sessionName?: string }
 
 function writeWrapperCommand(stateDir: string, payload: WrapperPayload): void {
   const pending = join(stateDir, 'pending')
@@ -485,7 +485,11 @@ export async function tryHandleMetaCallback(
     }
 
     try {
-      writeWrapperCommand(stateDir, { type: 'switch', sessionId: entry.sessionId })
+      writeWrapperCommand(stateDir, {
+        type: 'switch',
+        sessionId: entry.sessionId,
+        sessionName: entry.label,
+      })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       await handlers.ackCallback(`Write failed: ${msg}`)
