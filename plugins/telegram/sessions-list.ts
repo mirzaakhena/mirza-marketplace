@@ -18,6 +18,11 @@
 import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
+import {
+  loadRegistry,
+  refreshFromPidFiles,
+  saveRegistry,
+} from './session-names-registry'
 
 export interface SessionInfo {
   /** Full UUID, used for `claude --resume <id>`. */
@@ -137,17 +142,38 @@ export function deriveShortId(sessionId: string): string {
 }
 
 /**
- * Return sessions in this project, newest first. Each entry has either the
- * user's chosen /rename name or a fallback "session <prefix>" label.
+ * Return sessions in this project, newest first.
+ *
+ * Name resolution order:
+ *   1. Registry at `<telegramStateDir>/session-names.json` (if `stateDir` provided)
+ *   2. Live pid file `~/.claude/sessions/<pid>.json`
+ *   3. Fallback `session <8-hex>`
+ *
+ * When `stateDir` is provided, this call also refreshes the registry from
+ * pid files (capturing any names CC wrote since the last picker render) and
+ * persists the merged registry — best-effort, errors are swallowed.
  */
-export function listProjectSessions(projectDir: string): SessionInfo[] {
+export function listProjectSessions(
+  projectDir: string,
+  stateDir?: string,
+): SessionInfo[] {
   const files = listSessionFiles(projectDir)
   if (files.length === 0) return []
+
+  let registry: Map<string, { name: string; updatedAt: number }> | null = null
+  if (stateDir) {
+    registry = loadRegistry(stateDir)
+    refreshFromPidFiles(registry, projectDir)
+    saveRegistry(stateDir, registry)
+  }
+
   const nameMap = loadNameMap(projectDir)
   const sessions: SessionInfo[] = files.map(({ sessionId, mtime }) => {
-    const entry = nameMap.get(sessionId)
-    const hasName = !!entry
-    const label = entry ? entry.name : `session ${sessionId.slice(0, 8)}`
+    const fromRegistry = registry?.get(sessionId)
+    const fromPid = nameMap.get(sessionId)
+    const resolvedName = fromRegistry?.name ?? fromPid?.name ?? null
+    const hasName = resolvedName !== null
+    const label = resolvedName ?? `session ${sessionId.slice(0, 8)}`
     return {
       sessionId,
       shortId: deriveShortId(sessionId),

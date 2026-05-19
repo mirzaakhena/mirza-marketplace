@@ -29,6 +29,8 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { listProjectSessions, encodeProjectDir } from './sessions-list.ts'
+import { setName as registrySetName } from './session-names-registry.ts'
+import { resolveStateDir as resolveTelegramStateDir } from './state-path.ts'
 
 const HEARTBEAT_FRESH_MS = 30_000
 const MAX_SWITCH_BUTTONS = 7 // Telegram allows 8 rows, we reserve 1 for cancel
@@ -270,6 +272,14 @@ async function handleRename(
     await handlers.reply(`⚠️ /rename gagal menulis command ke wrapper: ${msg}`)
     return true
   }
+  // Mirror the rename into the plugin-side registry so the new name shows
+  // in the next picker render even if CC's pid file gets overwritten by a
+  // later /switch before we get a chance to read it.
+  const currentSid = readCurrentSessionId(stateDir)
+  const telegramStateDir = resolveTelegramStateDir(env)
+  if (currentSid && telegramStateDir) {
+    registrySetName(telegramStateDir, currentSid, newName)
+  }
   await handlers.reply(`✏️ Renaming session ke "${newName}".`)
   return true
 }
@@ -294,7 +304,8 @@ async function handleSwitch(
   }
 
   const currentSid = readCurrentSessionId(stateDir)
-  const all = listProjectSessions(projectDir)
+  const telegramStateDir = resolveTelegramStateDir(env)
+  const all = listProjectSessions(projectDir, telegramStateDir ?? undefined)
   const currentEntry = currentSid ? all.find(s => s.sessionId === currentSid) : undefined
   const currentLabel = currentEntry?.label ?? (currentSid ? `session ${currentSid.slice(0, 8)}` : null)
   const sessions = currentSid ? all.filter(s => s.sessionId !== currentSid) : all
@@ -357,7 +368,8 @@ async function handleDelete(
   }
 
   const currentSid = readCurrentSessionId(stateDir)
-  const all = listProjectSessions(projectDir)
+  const telegramStateDir = resolveTelegramStateDir(env)
+  const all = listProjectSessions(projectDir, telegramStateDir ?? undefined)
   const sessions = currentSid
     ? all.filter(s => s.sessionId !== currentSid)
     : all
