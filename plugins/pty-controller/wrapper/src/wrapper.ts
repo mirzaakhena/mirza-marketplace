@@ -102,15 +102,11 @@ function writeCurrentSessionId(sid: string): void {
   }
 }
 
-// Pacing between chained PTY injections inside the post-/clear sequence.
-// CC's slash-command parser swallows the entire stdin buffer up to (some
-// internal terminator) as one argument, so injecting `/rename foo\r\n` and
-// `/notify-user bar\r\n` back-to-back lands at CC as a single garbled argument
-// `foo\r/notify-user bar`. Spacing the writes far enough apart that CC has
-// fully processed the previous command before the next one arrives fixes
-// that. 1.5s is empirical — long enough on a warm machine, short enough that
-// the user doesn't feel paused.
-const POST_INJECTION_DELAY_MS = 1500
+// Pacing between chained PTY injections. 1000ms is the empirical floor at
+// which CC's slash-command parser reliably digests the previous command
+// before the next write lands. Used by the post-/clear chain (/rename +
+// /notify-user) and by the post-/switch outbox event.
+const POST_INJECTION_DELAY_MS = 1000
 
 // Delay between writing a slash-command's text and the trailing Enter.
 // Empirically, writing `text + \r` as one PTY chunk lets CC's autocomplete
