@@ -209,6 +209,19 @@ export function listProjectSessions(
       hasName,
     }
   })
+  // Disambiguator pass: when two or more sessions have the same resolved
+  // name, suffix each with its shortId so the picker can be tapped without
+  // ambiguity. Triggered by legacy duplicate registry entries (the
+  // uniqueness rule in handleNew/handleRename prevents new duplicates).
+  const nameCounts = new Map<string, number>()
+  for (const s of sessions) {
+    if (s.hasName) nameCounts.set(s.label, (nameCounts.get(s.label) ?? 0) + 1)
+  }
+  for (const s of sessions) {
+    if (s.hasName && (nameCounts.get(s.label) ?? 0) > 1) {
+      s.label = `${s.label} (${s.shortId})`
+    }
+  }
   sessions.sort((a, b) => b.mtime - a.mtime)
   return sessions
 }

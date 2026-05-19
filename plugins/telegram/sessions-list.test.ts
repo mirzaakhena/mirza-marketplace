@@ -13,6 +13,7 @@ import {
   formatRelative,
   listProjectSessions,
 } from './sessions-list'
+import { setName } from './session-names-registry'
 
 /**
  * The helper reads from ~/.claude/projects/ and ~/.claude/sessions/ on the
@@ -122,6 +123,37 @@ describe('sessions-list: listProjectSessions (integration with tmp project)', ()
     expect(result.length).toBe(1)
     expect(result[0].hasName).toBe(false)
     expect(result[0].label).toMatch(/^session 1de4b23d · /)
+  })
+
+  test('duplicate registry names get disambiguator suffix', () => {
+    const sidA = 'aaaaaaaa-1111-2222-3333-444444444444'
+    const sidB = 'bbbbbbbb-1111-2222-3333-444444444444'
+    writeSession(sidA)
+    writeSession(sidB)
+    const stateDir = mkdtempSync(join(tmpdir(), 'sess-list-state-'))
+    try {
+      setName(stateDir, sidA, 'omar')
+      setName(stateDir, sidB, 'omar')
+      const result = listProjectSessions(projectDir, stateDir)
+      const labels = result.map((r) => r.label).sort()
+      expect(labels).toEqual(['omar (aaaaaaaa)', 'omar (bbbbbbbb)'])
+    } finally {
+      try { rmSync(stateDir, { recursive: true, force: true }) } catch { /* ignore */ }
+    }
+  })
+
+  test('unique names keep their bare label', () => {
+    const sid = 'cccccccc-1111-2222-3333-444444444444'
+    writeSession(sid)
+    const stateDir = mkdtempSync(join(tmpdir(), 'sess-list-state-'))
+    try {
+      setName(stateDir, sid, 'utama')
+      const result = listProjectSessions(projectDir, stateDir)
+      expect(result.length).toBe(1)
+      expect(result[0].label).toBe('utama')
+    } finally {
+      try { rmSync(stateDir, { recursive: true, force: true }) } catch { /* ignore */ }
+    }
   })
 })
 
