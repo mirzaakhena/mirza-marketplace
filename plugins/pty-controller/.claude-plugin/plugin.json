@@ -1,7 +1,7 @@
 {
   "name": "pty-controller",
   "description": "Lets Claude programmatically send slash commands to itself by going through a parent wrapper process that hosts CC inside a node-pty pseudo-terminal. Requires the companion `mirza-cc` wrapper running — this plugin only writes command requests to a shared state directory; the wrapper reads them and injects keystrokes into the PTY. Without the wrapper, the MCP tool returns a clear error and slash commands are no-ops.",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "author": {
     "name": "Mirza"
   },

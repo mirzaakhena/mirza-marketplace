@@ -11,8 +11,9 @@
  *      shape (tagged union):
  *        { command: "/clear" }                    — inject a slash command
  *        { type: "slash", command: "/clear" }     — explicit form, same thing
- *        { type: "switch", sessionId: "<uuid>" }  — kill CC, respawn with
- *                                                   `--resume <uuid>`
+ *        { type: "switch", sessionId: "<uuid>" }  — inject `/resume <uuid>`
+ *                                                   as keystrokes into the
+ *                                                   live PTY
  *   4. Periodically touch <state>/wrapper.heartbeat so the plugin can probe
  *      whether we're alive.
  *   5. After injecting /clear specifically, poll ~/.claude/projects/<encoded>/
@@ -20,10 +21,13 @@
  *      live — at that point inject `/notify-user <brief>` so the new session
  *      pings the user on Telegram instead of staying silently fresh.
  *
- * The wrapper stays alive across CC respawns (for /switch). It only exits
- * when CC exits *naturally* (the user types /exit or kills it). A SIGINT in
- * the wrapper terminal is forwarded to the PTY so Ctrl+C cancels the AI's
- * current operation rather than killing the wrapper.
+ * The wrapper hosts a single CC process for its entire lifetime. /switch no
+ * longer kills and respawns CC with `--resume` — instead it injects the
+ * `/resume <sessionId>` slash command into the existing PTY, so the session
+ * swap happens inside CC itself rather than at the process boundary. When CC
+ * exits, the wrapper exits with it. A SIGINT in the wrapper terminal is
+ * forwarded to the PTY so Ctrl+C cancels the AI's current operation rather
+ * than killing the wrapper.
  *
  * Run:
  *   npm run wrapper                 # uses tsx (Node)
@@ -126,19 +130,16 @@ const userShell = process.env.SHELL || '/bin/sh'
 const shell = isWindows ? 'cmd.exe' : userShell
 
 /**
- * Spawn Claude under a fresh PTY and return the IPty handle. `extraArgs` is
- * appended after BASE_CLAUDE_ARGS — used by switchToSession to inject
- * `--resume <sessionId>` without mutating the base args.
+ * Spawn Claude under a fresh PTY and return the IPty handle.
  *
  * Implementation note (Unix): we run through an interactive login shell so
  * `claude` resolves through the user's PATH/rc-files. Skipping the shell
  * triggers posix_spawnp ENOENT for the npm-installed shim.
  */
-function spawnClaudePty(extraArgs: string[] = []): IPty {
+function spawnClaudePty(): IPty {
   const cols = process.stdout.columns || 100
   const rows = process.stdout.rows || 30
-  const allArgs = [...BASE_CLAUDE_ARGS, ...extraArgs]
-  const claudeCmd = [CLAUDE_BIN, ...allArgs].join(' ')
+  const claudeCmd = [CLAUDE_BIN, ...BASE_CLAUDE_ARGS].join(' ')
   const args = isWindows ? ['/c', claudeCmd] : ['-l', '-i', '-c', claudeCmd]
 
   const p = spawn(shell, args, {
@@ -152,52 +153,33 @@ function spawnClaudePty(extraArgs: string[] = []): IPty {
       PTY_CONTROLLER_STATE_DIR: STATE_DIR,
     },
   })
-  log(`spawned claude (pid ${p.pid}, extra args: ${extraArgs.join(' ') || '(none)'})`)
+  log(`spawned claude (pid ${p.pid})`)
   return p
 }
 
-/**
- * Wire up the per-pty I/O hooks (PTY → terminal, exit handling). Separate
- * from spawnClaudePty so we can re-wire after a respawn for /switch.
- */
-function attachPty(p: IPty): void {
-  p.onData(data => {
-    process.stdout.write(data)
-  })
-  p.onExit(({ exitCode, signal }) => {
-    log(`claude exited (code=${exitCode}, signal=${signal ?? 'none'})`)
-    if (pendingSwitchSessionId) {
-      const sid = pendingSwitchSessionId
-      pendingSwitchSessionId = null
-      log(`respawning claude with --resume ${sid}`)
-      currentPty = spawnClaudePty(['--resume', sid])
-      attachPty(currentPty)
-      return
-    }
-    shutdown(exitCode ?? 0)
-  })
-}
-
-// `currentPty` is reassigned on /switch. The stdin handler below dereferences
-// it through this binding so keystrokes always reach the live child.
-let currentPty: IPty = spawnClaudePty()
-let pendingSwitchSessionId: string | null = null
+const currentPty: IPty = spawnClaudePty()
 // Post-/clear state machine. Once we inject /clear, we snapshot the existing
 // session jsonl files and start polling for a new one to appear — its
 // appearance signals that the fresh CC session is live and ready to accept
 // `/notify-user`. Null means we're not currently waiting.
 let awaitingClearReady: { sessionsBefore: Set<string> } | null = null
-attachPty(currentPty)
+
+currentPty.onData(data => {
+  process.stdout.write(data)
+})
+currentPty.onExit(({ exitCode, signal }) => {
+  log(`claude exited (code=${exitCode}, signal=${signal ?? 'none'})`)
+  shutdown(exitCode ?? 0)
+})
 
 // User terminal → PTY (raw mode so keypresses go straight through).
-// Reads from the binding so respawned PTYs keep receiving input.
 process.stdin.setRawMode?.(true)
 process.stdin.resume()
 process.stdin.on('data', chunk => {
   currentPty.write(chunk.toString('utf8'))
 })
 
-// Re-propagate terminal resizes to whichever PTY is current.
+// Re-propagate terminal resizes to the PTY.
 process.stdout.on('resize', () => {
   currentPty.resize(process.stdout.columns || 100, process.stdout.rows || 30)
 })
@@ -288,16 +270,13 @@ async function consumePending(filename: string): Promise<void> {
       log(`ignored ${filename}: switch payload missing sessionId`)
       return
     }
-    if (pendingSwitchSessionId) {
-      log(`ignored ${filename}: a previous switch is still in flight`)
-      return
-    }
-    log(`switch requested → sessionId=${sid} (id: ${payload.id ?? '?'})`)
-    pendingSwitchSessionId = sid
-    // Trigger exit. The onExit handler will see pendingSwitchSessionId and
-    // respawn instead of shutting the wrapper down. SIGTERM is graceful
-    // enough for node-pty across platforms; the child gets a chance to flush.
-    currentPty.kill()
+    // Inject `/resume <sid>` as keystrokes into the live PTY rather than
+    // killing CC and respawning with `--resume`. The slash command lands in
+    // CC's input loop on its next tick (after the current AI turn completes,
+    // same constraint as /clear) and CC does the session swap in-process —
+    // no terminal flicker, no wrapper respawn, no PTY teardown.
+    log(`switch requested → injecting "/resume ${sid}" (id: ${payload.id ?? '?'})`)
+    currentPty.write(`/resume ${sid}\r`)
     return
   }
 
