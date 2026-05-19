@@ -179,7 +179,9 @@ const currentPty: IPty = spawnClaudePty()
 // session jsonl files and start polling for a new one to appear — its
 // appearance signals that the fresh CC session is live and ready to accept
 // `/notify-user`. Null means we're not currently waiting.
-let awaitingClearReady: { sessionsBefore: Set<string> } | null = null
+let awaitingClearReady:
+  | { sessionsBefore: Set<string>; sessionName?: string }
+  | null = null
 
 currentPty.onData(data => {
   process.stdout.write(data)
@@ -221,9 +223,17 @@ const sessionPollInterval = setInterval(() => {
   for (const f of current) {
     if (!awaitingClearReady.sessionsBefore.has(f)) {
       const sid = f.slice(0, -'.jsonl'.length)
-      log(`fresh session detected: ${sid} — injecting /notify-user`)
+      const { sessionName } = awaitingClearReady
+      log(
+        `fresh session detected: ${sid} — injecting${
+          sessionName ? ` /rename + /notify-user` : ` /notify-user`
+        }`,
+      )
       writeCurrentSessionId(sid)
       awaitingClearReady = null
+      if (sessionName) {
+        currentPty.write(`/rename ${sessionName}\r`)
+      }
       currentPty.write(`/notify-user ${POST_CLEAR_NOTIFY_BRIEF}\r`)
       return
     }
@@ -270,6 +280,7 @@ async function consumePending(filename: string): Promise<void> {
     type?: string
     command?: string
     sessionId?: string
+    sessionName?: string
   }
   try {
     payload = JSON.parse(raw)
@@ -295,8 +306,16 @@ async function consumePending(filename: string): Promise<void> {
     // session file appears strictly after that, so we won't accidentally
     // pick it up as "already there".
     if (command === '/clear') {
-      awaitingClearReady = { sessionsBefore: listSessions() }
-      log(`awaiting fresh session after /clear`)
+      const sessionName =
+        typeof (payload as { sessionName?: unknown }).sessionName === 'string'
+          ? ((payload as { sessionName: string }).sessionName as string)
+          : undefined
+      awaitingClearReady = { sessionsBefore: listSessions(), sessionName }
+      log(
+        `awaiting fresh session after /clear${
+          sessionName ? ` (will rename to "${sessionName}")` : ''
+        }`,
+      )
     }
     return
   }
