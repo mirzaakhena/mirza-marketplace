@@ -410,4 +410,65 @@ describe('meta-commands: tryHandleMetaCallback for delete', () => {
     expect(cb.acks[0]).toMatch(/expired/i)
     expect(cb.replies.length).toBe(0)
   })
+
+  test('delete confirm rmSync the project jsonl and edits message', async () => {
+    const sid = 'dddddddd-dddd-dddd-dddd-dddddddddddd'
+    const [shortId] = await setupAndPopulatePicker(homeOverride, projectDir, stateDir, [sid])
+
+    const encoded = projectDir.replace(/[\\/:]/g, '-')
+    const jsonlPath = join(homeOverride, '.claude', 'projects', encoded, `${sid}.jsonl`)
+    expect(existsSync(jsonlPath)).toBe(true)
+
+    const cb = makeCallbackHandler()
+    const consumed = await tryHandleMetaCallback(
+      `meta:delete_confirm_${shortId}`,
+      { CLAUDE_PROJECT_DIR: projectDir },
+      cb.handler,
+    )
+    expect(consumed).toBe(true)
+    expect(existsSync(jsonlPath)).toBe(false)
+    expect(cb.edits[0]).toMatch(/dihapus/)
+  })
+
+  test('delete confirm aborts if target became the current session', async () => {
+    const sid = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'
+    const [shortId] = await setupAndPopulatePicker(homeOverride, projectDir, stateDir, [sid])
+
+    // Simulate the user switching to that session between picker tap and confirm tap.
+    writeCurrentSessionId(stateDir, sid)
+
+    const encoded = projectDir.replace(/[\\/:]/g, '-')
+    const jsonlPath = join(homeOverride, '.claude', 'projects', encoded, `${sid}.jsonl`)
+    expect(existsSync(jsonlPath)).toBe(true)
+
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback(
+      `meta:delete_confirm_${shortId}`,
+      { CLAUDE_PROJECT_DIR: projectDir },
+      cb.handler,
+    )
+    // File NOT deleted.
+    expect(existsSync(jsonlPath)).toBe(true)
+    expect(cb.acks[0]).toMatch(/aktif/i)
+  })
+
+  test('delete confirm tolerates already-deleted jsonl', async () => {
+    const sid = 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+    const [shortId] = await setupAndPopulatePicker(homeOverride, projectDir, stateDir, [sid])
+
+    // Delete the jsonl out-of-band before tapping confirm.
+    const encoded = projectDir.replace(/[\\/:]/g, '-')
+    const jsonlPath = join(homeOverride, '.claude', 'projects', encoded, `${sid}.jsonl`)
+    rmSync(jsonlPath)
+    expect(existsSync(jsonlPath)).toBe(false)
+
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback(
+      `meta:delete_confirm_${shortId}`,
+      { CLAUDE_PROJECT_DIR: projectDir },
+      cb.handler,
+    )
+    // Treated as success — the desired outcome is "session gone".
+    expect(cb.edits[0]).toMatch(/dihapus/)
+  })
 })

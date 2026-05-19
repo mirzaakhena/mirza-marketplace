@@ -22,8 +22,10 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { listProjectSessions, encodeProjectDir } from './sessions-list.ts'
@@ -407,8 +409,51 @@ export async function tryHandleMetaCallback(
     }
 
     if (remainder.startsWith('confirm_')) {
-      // Handled in Task 7 — placeholder.
-      return false
+      const shortId = remainder.slice('confirm_'.length)
+      if (!SHORT_ID_RE.test(shortId)) {
+        await handlers.ackCallback('Bad short id')
+        return true
+      }
+      const entry = deletePicker.get(shortId)
+      if (!entry) {
+        await handlers.ackCallback('Prompt expired')
+        await handlers.editMessage('(prompt expired — /delete lagi)').catch(() => {})
+        return true
+      }
+
+      const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
+      if (!projectDir) {
+        await handlers.ackCallback('CLAUDE_PROJECT_DIR not set')
+        return true
+      }
+      const stateDir = resolvePtyStateDir(env)
+      if (stateDir) {
+        const currentSid = readCurrentSessionId(stateDir)
+        if (currentSid === entry.sessionId) {
+          await handlers.ackCallback('Session aktif tidak bisa dihapus')
+          await handlers
+            .editMessage(`⚠️ Tidak bisa hapus — "${entry.label}" sekarang session aktif.`)
+            .catch(() => {})
+          return true
+        }
+      }
+
+      const encoded = encodeProjectDir(projectDir)
+      const jsonlPath = join(homedir(), '.claude', 'projects', encoded, `${entry.sessionId}.jsonl`)
+      try {
+        rmSync(jsonlPath, { force: true })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        await handlers.ackCallback(`Gagal hapus: ${msg}`)
+        return true
+      }
+
+      await handlers.ackCallback(`session dihapus`)
+      await handlers
+        .editMessage(`🗑️ session "${entry.label}" dihapus.`)
+        .catch(() => {})
+      deletePicker.delete(shortId)
+      return true
     }
 
     // Plain picker tap: `delete_<shortId>`
