@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { tryRouteMetaCommand, tryHandleMetaCallback, __resetDeletePickerForTests } from './meta-commands'
 import { listProjectSessions } from './sessions-list'
+import { setName as registrySetName } from './session-names-registry'
 
 // Local alias kept so existing test bodies don't need rewriting.
 const tryRouteMetaCommandT = tryRouteMetaCommand
@@ -271,6 +272,48 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     expect(consumed).toBe(true)
     expect(replies[0].text).toMatch(/wrapper tidak terdeteksi/)
     expect(listPending(stateDir).length).toBe(0)
+  })
+
+  test('/new rejects when name already taken in registry', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    // Seed the telegram registry — same resolution rule as production:
+    // <CLAUDE_PROJECT_DIR>/.claude/channels/telegram
+    const telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(telegramStateDir, { recursive: true })
+    registrySetName(telegramStateDir, 'existing-session-id', 'bahas MCP')
+
+    const consumed = await tryRouteMetaCommandT(
+      '/new bahas MCP',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      handler,
+    )
+    expect(consumed).toBe(true)
+    expect(replies.length).toBe(1)
+    expect(replies[0].text).toMatch(/sudah dipakai/)
+    expect(listPending(stateDir).length).toBe(0)
+  })
+
+  test('/new succeeds when name is free', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    // Registry exists but does NOT contain the requested name.
+    const telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(telegramStateDir, { recursive: true })
+    registrySetName(telegramStateDir, 'other-session', 'some other name')
+
+    const consumed = await tryRouteMetaCommandT(
+      '/new bahas MCP',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      handler,
+    )
+    expect(consumed).toBe(true)
+    expect(replies.length).toBe(0)
+    const pending = listPending(stateDir)
+    expect(pending.length).toBe(1)
+    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
+    expect(payload.command).toBe('/clear')
+    expect(payload.sessionName).toBe('bahas MCP')
   })
 })
 

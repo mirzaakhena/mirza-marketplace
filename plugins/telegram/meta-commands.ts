@@ -29,7 +29,11 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { listProjectSessions, encodeProjectDir } from './sessions-list.ts'
-import { setName as registrySetName } from './session-names-registry.ts'
+import {
+  loadRegistry,
+  setName as registrySetName,
+  findSessionIdByName,
+} from './session-names-registry.ts'
 import { resolveStateDir as resolveTelegramStateDir } from './state-path.ts'
 
 const HEARTBEAT_FRESH_MS = 30_000
@@ -224,6 +228,17 @@ async function handleNew(
         'Pastikan CC dijalankan via `mirza-cc` wrapper, bukan `claude` langsung.',
     )
     return true
+  }
+  const telegramStateDir = resolveTelegramStateDir(env)
+  if (telegramStateDir) {
+    const registry = loadRegistry(telegramStateDir)
+    const taken = findSessionIdByName(registry, sessionName)
+    if (taken) {
+      await handlers.reply(
+        `⚠️ Nama "${sessionName}" sudah dipakai session lain di project ini. Pilih nama lain atau /switch ke session itu.`,
+      )
+      return true
+    }
   }
   try {
     writeWrapperCommand(stateDir, { command: '/clear', sessionName })
