@@ -23,4 +23,4 @@ Steps to follow exactly, in order:
 Notes:
 
 - If `pty_send_slash` returns an error, surface it plainly to the user. Do not retry.
-- The follow-up "fresh session is ready" notification is handled by the wrapper invoking `/notify-user` in the *new* session — not by you.
+- The follow-up "fresh session is ready" notification is handled by the wrapper invoking `/telegram:notify-user` in the *new* session — not by you. The fully-qualified namespace prefix is required: bare `/notify-user` is "Unknown command" to CC because plugin commands must be invoked as `/<plugin>:<command>`.

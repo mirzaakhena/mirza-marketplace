@@ -244,6 +244,11 @@ const sessionPollInterval = setInterval(() => {
       // Pace the chained injections so CC has time to process each command
       // before the next byte arrives — otherwise CC's parser slurps the
       // whole pile into one /rename argument. See POST_INJECTION_DELAY_MS.
+      //
+      // `/rename` is a built-in CC slash command and works unqualified.
+      // `/notify-user` is supplied by the telegram plugin, so it requires
+      // the fully-qualified `/<plugin>:<command>` form to dispatch — bare
+      // `/notify-user` is "Unknown command" to CC.
       let delay = 0
       if (sessionName) {
         const localName = sessionName
@@ -251,7 +256,7 @@ const sessionPollInterval = setInterval(() => {
         delay += POST_INJECTION_DELAY_MS
       }
       setTimeout(
-        () => currentPty.write(`/notify-user ${POST_CLEAR_NOTIFY_BRIEF}\r`),
+        () => currentPty.write(`/telegram:notify-user ${POST_CLEAR_NOTIFY_BRIEF}\r`),
         delay,
       )
       return

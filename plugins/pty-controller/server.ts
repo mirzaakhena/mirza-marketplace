@@ -19,7 +19,11 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { resolveStateDir, writeCommand, wrapperLikelyRunning } from './ipc.ts'
 
-const SLASH_COMMAND_RE = /^\/[a-z][a-z0-9_-]{0,31}(\s[\s\S]{0,256})?$/
+// Accepts either a bare command (`/clear`, `/rename foo`) or a namespaced
+// plugin command (`/telegram:notify-user brief`). Plugin commands need
+// `<plugin>:` prefix to dispatch in CC — bare names error out as
+// "Unknown command". Total name length capped at 63 to fit either form.
+const SLASH_COMMAND_RE = /^\/[a-z][a-z0-9_:-]{0,63}(\s[\s\S]{0,256})?$/
 
 const STATE_DIR = (() => {
   const dir = resolveStateDir(process.env)
