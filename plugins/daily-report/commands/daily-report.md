@@ -7,7 +7,7 @@ You are producing the user's daily work report, to be pasted into KakaoTalk.
 
 ## Step 1 — Invoke the skill
 
-Invoke the `daily-report` skill. It contains the locked template, style rules, anti-fabrication guard, and generation procedure. Follow its instructions exactly.
+Invoke the `writing-daily-report` skill. It contains the locked template, style rules, anti-fabrication guard, and generation procedure. Follow its instructions exactly.
 
 ## Step 2 — Gather context
 
@@ -15,10 +15,10 @@ Run this exact Bash snippet. It finds the `gather-context.sh` script at the corr
 
 ```bash
 for CANDIDATE in \
-  "${CLAUDE_PLUGIN_ROOT}/skills/daily-report/gather-context.sh" \
+  "${CLAUDE_PLUGIN_ROOT}/skills/writing-daily-report/gather-context.sh" \
   "./scripts/gather-context.sh" \
-  "./.claude/skills/daily-report/gather-context.sh" \
-  "$HOME/.claude/skills/daily-report/gather-context.sh"; do
+  "./.claude/skills/writing-daily-report/gather-context.sh" \
+  "$HOME/.claude/skills/writing-daily-report/gather-context.sh"; do
   if [[ -x "$CANDIDATE" ]]; then
     bash "$CANDIDATE" "$@"
     exit 0
@@ -28,15 +28,15 @@ echo "gather-context.sh not found in any known location" >&2
 exit 1
 ```
 
-When installed as a plugin, the first candidate (`$CLAUDE_PLUGIN_ROOT/skills/daily-report/gather-context.sh`) is where the script lives. The remaining candidates exist for legacy installs.
+When installed as a plugin, the first candidate (`$CLAUDE_PLUGIN_ROOT/skills/writing-daily-report/gather-context.sh`) is where the script lives. The remaining candidates exist for legacy installs.
 
 Replace `"$@"` with any file paths the user mentioned in `$ARGUMENTS` (pass them as positional args to the script so their content lands in the `===EXTRA_FILES===` section). If the user did not mention any file paths, call it with no args.
 
 ### Troubleshooting
 
 If the first path fails, try the next **as listed** — never invent intermediate directories. In particular:
-- ✅ `~/.claude/skills/daily-report/gather-context.sh`
-- ❌ `~/.claude/skills/daily-report/scripts/gather-context.sh`  (wrong — no `scripts/` subfolder at install target)
+- ✅ `~/.claude/skills/writing-daily-report/gather-context.sh`
+- ❌ `~/.claude/skills/writing-daily-report/scripts/gather-context.sh`  (wrong — no `scripts/` subfolder at install target)
 - ❌ `~/.claude/skills/scripts/gather-context.sh`  (wrong)
 
 ## Step 3 — Parse the free prompt

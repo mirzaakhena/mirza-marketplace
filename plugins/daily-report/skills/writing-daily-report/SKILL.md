@@ -1,5 +1,5 @@
 ---
-name: daily-report
+name: writing-daily-report
 description: Use when generating a daily work report for posting to KakaoTalk (or similar). Invoked by the /daily-report slash command. Produces a KakaoTalk-ready plain-text report with a `# Yesterday` and `# Today` section, following a locked template and strict anti-fabrication rules.
 ---
 
