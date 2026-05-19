@@ -5,18 +5,23 @@
 > **Perubahan utama dari upstream:**
 > - Command `/hello` di Telegram membalas `"Hello, Mirza!"`.
 > - **State per-project** — token, database, pairing, dst. disimpan di `<project>/.claude/channels/telegram/`, bukan `~/.claude/channels/telegram/` global. Multi-folder paralel dengan token berbeda.
-> - **Unified `/context`** — last-status.json & chained-statusline juga masuk channel state dir.
+> - **Unified `/context`** — last-status.json & chained-statusline juga masuk channel state dir; bridge statusLine ditulis dalam TypeScript (`scripts/context-bridge.ts`) supaya cross-platform.
+> - **Conversation logging** — semua inbound/outbound/edit dicatat ke `messages.db` (SQLite via `bun:sqlite`) untuk recall lintas sesi.
+> - **Album batching** — beberapa foto/dokumen yang dikirim sebagai satu Telegram album dikumpulkan jadi 1 notifikasi `<channel>`, bukan N notifikasi terpisah.
+> - **CommonMark → MarkdownV2 auto-escape** — `format: 'markdown'` di `reply`/`edit_message` menerima CommonMark biasa; plugin yang escape karakter spesial Telegram.
+> - **Inline keyboard buttons** — `reply`/`edit_message` boleh kirim `buttons[][]`; tap user balik sebagai pesan `<channel>` baru dengan `meta.callback_id`.
+> - **Meta-commands via Telegram** — `/new`, `/switch`, `/delete`, `/rename`, `/context` di chat tidak diteruskan ke AI; di-handle plugin (untuk yang butuh wrapper, butuh `mirza-cc`/`pty-controller`).
+> - **System outbox** — direktori `system-outbox/` di-watch; sibling plugin (mis. `pty-controller`) bisa drop file JSON untuk trigger pesan Telegram tanpa roundtrip AI.
+> - **`download_attachment` MCP tool** — fetch attachment historis via `file_id` (untuk dokumen/voice/audio/video yang tidak auto-download di inbound).
 > - **Strict resolution** — server exit kalau `CLAUDE_PROJECT_DIR` tidak set; no cwd fallback.
 >
 > Lisensi tetap Apache-2.0 dari upstream — lihat [LICENSE](./LICENSE).
 
-Connect a Telegram bot to your Claude Code with an MCP server.
-
-The MCP server logs into Telegram as a bot and provides tools to Claude to reply, react, or edit messages. When you message the bot, the server forwards the message to your Claude Code session.
+Plugin ini menjembatani bot Telegram ke session Claude Code via MCP server (Bun + grammy). Bot login pakai token Anda, polling pesan masuk, dan forward setiap DM/group message sebagai notifikasi `<channel>` ke session yang ter-pair. Outbound: AI bisa `reply`, `react`, `edit_message`, `download_attachment`, dan render inline-keyboard buttons.
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) — the MCP server runs on Bun. Install with `curl -fsSL https://bun.sh/install | bash`.
+- [Bun](https://bun.sh) — MCP server-nya jalan di Bun. Install via `curl -fsSL https://bun.sh/install | bash`.
 
 ## Install Scope Guidance
 
@@ -29,40 +34,31 @@ Plugin ini dirancang **untuk dipasang sekali**, state otomatis per-folder. Rekom
 | `local` | Per-repo, gitignored, hanya Anda. | Eksperimen 1 folder saja |
 
 ## Quick Setup
-> Default pairing flow for a single-user DM bot. See [ACCESS.md](./ACCESS.md) for groups and multi-user setups.
 
-**1. Create a bot with BotFather.**
+> Marketplace install flow (`/plugin marketplace add`, scope guidance, dst.) dijelaskan di [root README](../../README.md). Bagian ini fokus ke setup spesifik plugin Telegram setelah plugin ter-install.
+>
+> Default pairing flow di sini untuk single-user DM bot. Untuk group + multi-user, lihat [ACCESS.md](./ACCESS.md).
 
-Open a chat with [@BotFather](https://t.me/BotFather) on Telegram and send `/newbot`. BotFather asks for two things:
+**1. Bikin bot via BotFather.**
 
-- **Name** — the display name shown in chat headers (anything, can contain spaces)
-- **Username** — a unique handle ending in `bot` (e.g. `my_assistant_bot`).
+Buka chat dengan [@BotFather](https://t.me/BotFather), kirim `/newbot`. BotFather minta dua hal:
 
-BotFather replies with a token that looks like `123456789:AAHfiqksKZ8...` — that's the whole token, copy it including the leading number and colon.
+- **Name** — display name yang muncul di chat header (boleh apa saja, boleh pakai spasi).
+- **Username** — handle unik yang berakhir `bot` (mis. `my_assistant_bot`).
 
-**2. Install the plugin (user scope, sekali per mesin).**
+BotFather balas dengan token bentuknya `123456789:AAHfiqksKZ8...` — copy seluruhnya termasuk angka + titik dua di depan.
 
-These are Claude Code commands — run `claude` to start a session first.
+**2. Configure token di project Anda.**
 
-```
-/plugin marketplace add mirzaakhena/mirza-marketplace
-/plugin install telegram@mirza-marketplace
-/reload-plugins
-```
-
-Saat ditanya scope, pilih **`user`** (kecuali kalau Anda hanya ingin test di 1 folder, pilih `local`).
-
-**3. Give the server the token — di project Anda.**
-
-Buka CC session di folder project yang Anda inginkan, lalu:
+Buka CC session di folder project yang ingin Anda jadikan target, lalu:
 
 ```
 /telegram:configure 123456789:AAHfiqksKZ8...
 ```
 
-Skill akan tulis `TELEGRAM_BOT_TOKEN=...` ke `<project>/.claude/channels/telegram/.env`, set chmod 600, dan auto-add `.claude/channels/.gitignore` untuk melindungi semua channel state dari accidental commit.
+Skill akan tulis `TELEGRAM_BOT_TOKEN=...` ke `<project>/.claude/channels/telegram/.env`, set `chmod 600`, dan auto-bikin `.claude/channels/.gitignore` (pattern `*\n!.gitignore`) untuk melindungi semua channel state dari accidental commit.
 
-Token ini **terikat pada project ini saja**. Untuk project lain, configure dengan token yang berbeda.
+Token **terikat ke project ini saja**. Project lain butuh token berbeda (lihat Multi-folder workflow di bawah).
 
 > **Multi-folder workflow:**
 > ```
@@ -74,72 +70,275 @@ Token ini **terikat pada project ini saja**. Untuk project lain, configure denga
 > ```
 > Dua session paralel, masing-masing bot sendiri. Telegram API constraint: 1 token = 1 poller, jadi **beda project butuh beda bot token**.
 
-Override path eksplisit (dev/test): set env `TELEGRAM_STATE_DIR=/path/to/custom`.
+Override path eksplisit (dev/test): set env `TELEGRAM_STATE_DIR=/path/to/custom`. Kalau di-set, override `CLAUDE_PROJECT_DIR`.
 
-**4. Relaunch with the channel flag.**
-
-The server won't connect without this — exit your session and start a new one.
-
-> ⚠️ Karena fork ini **bukan** plugin yang ada di Anthropic-maintained channel allowlist, `--channels` biasa akan menolak. Pakai flag development sebagai gantinya:
+**3. Relaunch dengan flag development channel.**
 
 ```sh
 claude --dangerously-load-development-channels plugin:telegram@mirza-marketplace
 ```
 
-Claude Code akan minta konfirmasi pertama kali — terima.
+Karena fork ini bukan plugin Anthropic-maintained, `--channels` biasa akan tolak. Claude Code minta konfirmasi pertama kali — terima.
 
-**5. Enable MCP server `telegram` di session ini.**
+**4. Enable MCP server `telegram` di session ini.**
 
-> ⚠️ Channel plugins di Claude Code di-mark **Experimental** dan **MCP-nya disabled by default** per session — meski plugin sudah ter-install dan di-load. Kalau Anda skip langkah ini, bot **tidak akan polling Telegram** dan DM tidak akan sampai ke session.
-
-Di CC session, jalankan:
+Channel plugins di CC ditandai **Experimental** dan **MCP-nya disabled by default** per session. Tanpa enable, bot tidak polling Telegram. Jalankan:
 
 ```
 /mcp
 ```
 
-Cari `telegram` di daftar, lalu **enable** toggle-nya. Setelah enable, server MCP `telegram` akan spawn dan bot mulai polling Telegram.
+Cari `telegram`, toggle **on**. Sekali per session.
 
-> Kenapa default off? Channel plugin terima inbound dari external (Telegram) — itu sumber prompt injection. CC mensyaratkan opt-in eksplisit per session sebagai safety nudge. Anda harus lakukan ini setiap session baru (state-nya tidak persistent).
+**5. Pair.**
 
-**6. Pair.**
-
-With the MCP enabled, DM your bot on Telegram — it replies with a 6-character pairing code. If the bot doesn't respond, double-check:
-1. CC session running dengan `--dangerously-load-development-channels`
-2. `/mcp` toggle telegram **on**
-3. Token tersimpan di `<project>/.claude/channels/telegram/.env` (lihat status via `/telegram:configure` tanpa argumen)
-
-In your Claude Code session:
+Dengan MCP enabled, DM bot di Telegram — bot balas dengan kode pairing 6 karakter hex. Di CC session:
 
 ```
 /telegram:access pair <code>
 ```
 
-Your next DM reaches the assistant.
+DM berikutnya sudah sampai ke assistant.
 
-> Unlike Discord, there's no server invite step — Telegram bots accept DMs immediately. Pairing handles the user-ID lookup so you never touch numeric IDs.
+**6. Lock it down.**
 
-**7. Lock it down.**
+`pairing` adalah mode capture, bukan mode operasi. Setelah Anda masuk, switch ke `allowlist` supaya orang asing tidak dapat respon pairing-code:
 
-Pairing is for capturing IDs. Once you're in, switch to `allowlist` so strangers don't get pairing-code replies. Ask Claude to do it, or `/telegram:access policy allowlist` directly.
+```
+/telegram:access policy allowlist
+```
 
-## State Layout (per project)
+## MCP tools
+
+Server expose 4 tool ke AI (lihat `server.ts:477-583`):
+
+### `reply`
+
+Kirim pesan ke chat Telegram.
+
+| Param | Type | Required | Notes |
+|---|---|---|---|
+| `chat_id` | string | yes | Ambil dari `meta.chat_id` di inbound `<channel>`. |
+| `text` | string | yes | Konten utama. Di-chunk otomatis kalau > limit (default 4096, lihat `textChunkLimit`). |
+| `reply_to` | string | no | `message_id` yang mau di-quote. Threading dikontrol `replyToMode` (`off`/`first`/`all`, default `first`). |
+| `files` | string[] | no | Path absolut. `.jpg/.jpeg/.png/.gif/.webp` → photo (inline preview); selain itu → document. Max 50MB per file. **Tidak boleh dicampur dengan `buttons` dalam satu call.** Files dikirim sebagai pesan terpisah setelah text. |
+| `format` | `'text'` \| `'markdown'` \| `'markdownv2'` | no | Default `'text'`. `'markdown'` → CommonMark auto-converted ke MarkdownV2 (recommended; plugin yang escape `_*[]()~\`>#+-=|{}.!`). `'markdownv2'` → raw passthrough, caller yang escape sendiri. |
+| `source` | `'assistant'` \| `'system'` | no | Default `'assistant'`. Set `'system'` saat trigger non-user (cronjob, scheduler, webhook). Logged ke `messages.db`. |
+| `buttons` | `ButtonSpec[][]` | no | Inline keyboard. Rows × buttons. Lihat detail di bawah. |
+
+**Return:** `sent (id: N)` untuk single, `sent K parts (ids: a,b,c)` untuk chunked/multi-attachment.
+
+**Behavior notes:**
+- Outbound dibatasi ke chat yang terdaftar di `allowFrom` / `groups` (`assertAllowedChat`). Kirim ke chat asing → error.
+- File yang berada di dalam `STATE_DIR` (selain `inbox/`) ditolak untuk mencegah exfil token/db (`assertSendable`).
+- Tiap chunk + tiap file = 1 row di `messages.db`.
+
+**Button spec** (`buttons.ts`):
+- Maksimal 8 rows × 8 buttons. Tiap button: `{ label: string (≤64 chars), callback_id: /^[a-z0-9_]{1,32}$/ }`.
+- `callback_id` harus unik se-call.
+- Buttons menempel di chunk terakhir saja (kalau text di-chunk).
+- Saat user tap: AI dapat notifikasi `<channel>` baru dengan `content: "[button tapped: <label>]"` dan `meta.callback_id`, `meta.button_label`, `meta.source_message_id`. Pesan asli di-edit jadi `<text>\n\n→ <label>` (1 tap consume, history-clean).
+
+### `react`
+
+Tambah emoji reaction ke pesan.
+
+| Param | Type | Required |
+|---|---|---|
+| `chat_id` | string | yes |
+| `message_id` | string | yes |
+| `emoji` | string | yes — **harus dari whitelist Telegram** (👍 👎 ❤ 🔥 👀 🎉 dst). Di luar whitelist → Telegram API reject. |
+
+### `download_attachment`
+
+Fetch attachment historis ke `<state>/inbox/<ts>-<unique_id>.<ext>`. Dipakai saat inbound `meta.attachment_file_id` ada (dokumen/voice/audio/video — bukan foto, karena foto auto-download).
+
+| Param | Type | Required |
+|---|---|---|
+| `file_id` | string | yes — dari `meta.attachment_file_id` (atau dari entry `meta.attachments` array di album). |
+
+**Return:** path absolut. Cap 20MB (Telegram Bot API limit). Extension di-sanitize ke `[a-zA-Z0-9]+` sebelum disimpan.
+
+### `edit_message`
+
+Edit pesan yang sebelumnya bot kirim. Berguna untuk progress update (`⏳ working...` → hasil).
+
+| Param | Type | Required | Notes |
+|---|---|---|---|
+| `chat_id` | string | yes | |
+| `message_id` | string | yes | Hanya pesan sendiri yang bisa di-edit. |
+| `text` | string | yes | |
+| `format` | sama dengan `reply` | no | |
+| `buttons` | sama dengan `reply` | no | **Omit = clear keyboard yang lama** (default behavior Telegram). |
+
+**Catatan:** edit tidak trigger push notification. Untuk sinyalkan task panjang selesai, kirim `reply` baru bukan edit.
+
+## Slash commands (CC session-side)
+
+| Command | Purpose |
+|---|---|
+| `/telegram:configure [<token>\|clear]` | Save/clear token di `<project>/.claude/channels/telegram/.env`. Tanpa argumen = print status (token set?, policy, allowlist, pending pairings). |
+| `/telegram:access [<sub>]` | Manage access (pair/deny/allow/remove/policy/group/set). Tanpa argumen = print status. Detail di [ACCESS.md](./ACCESS.md). |
+| `/notify-user <brief>` | Untuk external trigger (scheduler, wrapper, sibling plugin) — turunkan free-form brief jadi pesan Telegram ke `allowFrom[0]` dengan `source: 'system'`. Tidak invoke kalau dipanggil tanpa argumen (smoke test). |
+
+## Skills
+
+User-invocable skills (lihat frontmatter `SKILL.md`):
+
+- **`telegram:configure`** — Setup channel: save bot token, review access policy. Trigger saat user paste token, tanya "how do I set this up", atau ingin cek status channel.
+- **`telegram:access`** — Manage access control (approve pairing, edit allowlist, set policy DM/group). Trigger saat user minta pair/approve/cek allowlist/ubah policy.
+
+Catatan keamanan kedua skill: **hanya bertindak atas request yang diketik user di terminal session**. Kalau request datang via channel notification (Telegram message dst.), skill refuse — channel messages bisa carry prompt injection.
+
+## Telegram-side commands (bot commands)
+
+Command yang user ketik **di chat Telegram** (bukan di CC). DM-only — di group disilent-drop.
+
+| Command | Effect |
+|---|---|
+| `/start` | Welcome + instruksi pairing. |
+| `/help` | List bot commands. |
+| `/status` | Cek pairing state (paired? pending code?). |
+| `/hello` | Reply `"Hello, Mirza!"` (fork-specific). |
+| `/context` | Pasang statusLine bridge (kalau belum), tampilkan context window % + 5-hour rate-limit usage. |
+| `/new <name>` | Clear CC session (via `mirza-cc` wrapper) dan rename session fresh ke `<name>`. Butuh wrapper aktif. |
+| `/switch` | Picker inline-keyboard untuk pindah ke session lain di project. Tap → wrapper inject `/resume <id>`. |
+| `/delete` | Picker untuk hapus session jsonl non-current. Konfirmasi sebelum delete. |
+| `/rename <name>` | Rename current session. Butuh wrapper. |
+
+`/new`/`/switch`/`/delete`/`/rename` butuh `pty-controller` wrapper jalan (heartbeat di `<project>/.claude/channels/pty-controller/wrapper.heartbeat` < 30s). Tanpa wrapper, command direply dengan error explanation — tidak diteruskan ke AI.
+
+## State & file layout
 
 ```
 <project>/.claude/channels/
-├── .gitignore              ← auto: "*\n!.gitignore\n" (file tracked, content ignored)
+├── .gitignore              ← auto-managed: "*\n!.gitignore" (file tracked, isi ignored)
 └── telegram/
-    ├── .env                ← token (chmod 600)
-    ├── access.json         ← pairing & allowlist
-    ├── messages.db         ← chat history (SQLite)
-    ├── inbox/              ← incoming attachments
-    ├── approved/
-    ├── bot.pid             ← process lock
-    ├── last-status.json    ← from /context
-    └── chained-statusline  ← from /context
+    ├── .env                ← TELEGRAM_BOT_TOKEN (chmod 600)
+    ├── access.json         ← dmPolicy, allowFrom, groups, pending, ackReaction, replyToMode, …
+    ├── messages.db         ← SQLite conversation log (chmod 600)
+    ├── inbox/              ← incoming attachments + download_attachment output
+    ├── approved/           ← drop-file inbox dari /telegram:access pair (server poll & confirm)
+    ├── system-outbox/      ← drop-file inbox dari sibling plugins (mis. session-change events)
+    ├── bot.pid             ← process lock (cegah dua poller paralel di project sama)
+    ├── last-status.json    ← capture statusLine /context terakhir
+    ├── chained-statusline  ← original statusLine command (di-chain saat bridge dipasang)
+    └── session-names.json  ← registry session name → sessionId (untuk /switch/rename uniqueness)
 ```
 
-Hapus `<project>/.claude/channels/telegram/` untuk reset state di project itu (tanpa mempengaruhi project lain).
+Hapus `<project>/.claude/channels/telegram/` untuk reset state project itu (tidak mempengaruhi project lain).
+
+`.gitignore` di-manage otomatis oleh plugin via `channels-gitignore.ts` (dipanggil saat `/telegram:configure` dan saat `/context` install bridge). File-nya tracked, isinya `* / !.gitignore` — semua subdir channel di-ignore.
+
+## Access control
+
+Detail lengkap di **[ACCESS.md](./ACCESS.md)** — DM policies (`pairing`/`allowlist`/`disabled`), group config, mention detection, delivery tuning, skill commands, dan schema `access.json`.
+
+Quick reference:
+- IDs = numeric Telegram user IDs (ambil dari [@userinfobot](https://t.me/userinfobot)).
+- Default policy: `pairing`.
+- `ackReaction` hanya menerima emoji dari [whitelist Telegram](./ACCESS.md#delivery).
+- Pairing codes expire 1 jam, max 3 pending, bot reply maksimal 2× per sender (initial + 1 reminder).
+- Set env `TELEGRAM_ACCESS_MODE=static` untuk lock config ke snapshot at-boot (pairing didowngrade ke allowlist dengan warning).
+
+## Behavior notes
+
+### Inbound message shape
+
+Pesan teks tunggal: `<channel source="telegram" chat_id meta="message_id user user_id ts">`. Photo single → tambah `image_path` (sudah ter-download). Document/voice/audio/video/video_note/sticker → tambah `attachment_kind`, `attachment_file_id`, optional `attachment_size`/`attachment_mime`/`attachment_name`. AI panggil `download_attachment` saat butuh.
+
+### Album batching
+
+Multiple foto/dokumen yang dikirim sekaligus (Telegram album) arrive sebagai N update terpisah dengan `media_group_id` sama. Plugin buffer per `${chat_id}:${media_group_id}` dengan **debounce 400ms / hard-cap 3000ms / max 10 items** (`album-buffer.ts`), lalu flush 1 notifikasi gabungan:
+- `content` = caption (atau gabungan caption ber-label `Photo N:` kalau ≥2 caption non-empty).
+- `meta.message_ids` = comma-joined semua part.
+- `meta.image_paths` = newline-joined path (foto auto-downloaded parallel).
+- `meta.attachments` = JSON string array untuk non-foto.
+- Logged sebagai 1 row di `messages.db` dengan `metadata.media_group_id` + `metadata.message_ids[]`.
+
+### Inline keyboard callbacks
+
+Buttons dari AI carry callback_data `ai:<callback_id>` (namespace untuk isolasi dari permission flow `perm:*` dan meta picker `meta:*`). Tap diauthorisasi terhadap `allowFrom` (sama dengan inbound text). Lihat tool `reply` di atas untuk shape notifikasi yang dikirim balik.
+
+### Markdown auto-escape
+
+`format: 'markdown'` di `reply`/`edit_message` lewat `commonMarkToMarkdownV2()` (`markdown.ts`) yang bungkus [`telegramify-markdown`](https://www.npmjs.com/package/telegramify-markdown). AI bebas pakai `**bold**`, `*italic*`, `` `inline` ``, fenced code, `[link](url)` tanpa harus escape `.` `-` `(` `!` dst manual. `format: 'markdownv2'` tetap ada sebagai raw passthrough (legacy).
+
+### Permission relay
+
+Plugin declare `claude/channel/permission` capability — saat CC butuh permission untuk tool call, request muncul di Telegram sebagai inline button (`✅ Allow` / `❌ Deny` / `See more`). Reply manual via text `yes <code>` / `no <code>` juga didukung (regex strict: 5 huruf a-z minus `l`, case-insensitive). Hanya `allowFrom` yang bisa approve.
+
+### System outbox (sibling plugin integration)
+
+Sibling plugin (`pty-controller`) bisa drop file `<state>/system-outbox/*.json` untuk trigger pesan Telegram tanpa lewat AI. Watcher + 2s sweep fallback dispatch by `type`. Saat ini di-handle: `session-change` (kirim `━━━━━ switch to session 📍 *<label>* ━━━━━` ke `allowFrom[0]`, di-MarkdownV2-escape, logged `source: 'system'`).
+
+### Typing indicator + ack reaction
+
+Tiap inbound terpicu `sendChatAction('typing')` (fire-and-forget). Kalau `access.ackReaction` di-set, juga react ke pesan inbound dengan emoji itu.
+
+### Photos vs documents
+
+Foto inbound dikompres Telegram. Untuk dapat file original, kirim "Send as File" di Telegram client — masuk ke handler `message:document`, meta-only di inbound, AI panggil `download_attachment`.
+
+### Polling resilience
+
+Polling loop retry dengan backoff exponential (max 15s). 409 Conflict ditolerir 8 attempt sebelum exit (artinya ada poller lain yang hold token sama). Stale `bot.pid` dari session lama di-SIGTERM saat boot.
+
+## Conversation logging
+
+Plugin catat semua percakapan ke `<project>/.claude/channels/telegram/messages.db`. Schema (lihat `messages-store.ts:45-60`):
+
+```sql
+CREATE TABLE messages (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts          INTEGER NOT NULL,
+  chat_id     TEXT    NOT NULL,
+  message_id  TEXT,
+  source      TEXT    NOT NULL,    -- 'user' | 'assistant' | 'system' | 'edit'
+  user_id     TEXT,
+  user_name   TEXT,
+  text        TEXT,
+  attachments TEXT,                 -- JSON
+  reply_to    TEXT,
+  metadata    TEXT                  -- JSON: format, media_group_id, message_ids, …
+);
+```
+
+### `source` parameter convention
+
+`reply` tool menerima optional `source: 'assistant' | 'system'`, default `'assistant'`.
+
+- **`assistant`** — direct reply ke pesan user (default).
+- **`system`** — non-user trigger: cronjob, scheduler, external webhook. Caller (skill, MCP server, cronjob handler) **wajib** set eksplisit untuk akurasi log. `/notify-user` selalu pakai ini.
+
+### Disable
+
+Set env `TELEGRAM_DISABLE_MESSAGES_STORE=1` untuk jalankan plugin tanpa logger (debugging/testing).
+
+### Inspect
+
+```bash
+sqlite3 <project>/.claude/channels/telegram/messages.db \
+  "SELECT id,ts,source,user_name,substr(text,1,80) FROM messages ORDER BY ts DESC LIMIT 20"
+```
+
+## No history / no search
+
+Telegram Bot API **tidak expose** message history maupun search. Bot hanya lihat pesan saat tiba — tidak ada `fetch_messages` tool. Konsekuensinya:
+
+- AI butuh konteks lama → minta user paste/summarize, atau query `messages.db` sendiri via Bash.
+- Foto di-download eager di inbound (tidak bisa fetch belakangan kecuali masih cached server-side via `download_attachment`).
+
+## Environment variables
+
+| Env | Effect |
+|---|---|
+| `CLAUDE_PROJECT_DIR` | Set otomatis oleh CC. Resolve state dir ke `<dir>/.claude/channels/telegram/`. **Required** (server exit kalau tidak set, kecuali `TELEGRAM_STATE_DIR` ada). |
+| `TELEGRAM_STATE_DIR` | Override eksplisit state dir. Win over `CLAUDE_PROJECT_DIR`. |
+| `TELEGRAM_BOT_TOKEN` | Bot token. Diambil dari `<state>/.env` saat boot kalau env shell tidak set. |
+| `TELEGRAM_ACCESS_MODE=static` | Lock access config ke snapshot at-boot, `pairing` di-downgrade ke `allowlist`. |
+| `TELEGRAM_DISABLE_MESSAGES_STORE=1` | Skip messages.db logging. |
+| `PTY_CONTROLLER_STATE_DIR` | Override path inbox `pty-controller` (untuk meta-commands). Default `<project>/.claude/channels/pty-controller/`. |
 
 ## Troubleshooting
 
@@ -149,48 +348,42 @@ Hapus `<project>/.claude/channels/telegram/` untuk reset state di project itu (t
 
 Plugin install scope `user` berarti CC akan coba spawn MCP server `telegram` di **setiap** session di setiap project. Tapi dengan strict mode, server **harus** punya `<project>/.claude/channels/telegram/.env` untuk start. Tanpa itu, server exit 1 dan CC mark "failed".
 
-Ini **bukan plugin rusak** — ini desain by-design (per-project isolation). Pilih sesuai konteks Anda:
+Ini **bukan plugin rusak** — by-design (per-project isolation). Pilihan:
 
-1. **Anda memang mau pakai bot di project ini** → run `/telegram:configure <token>` lalu `/reload-plugins`. Bot akan hidup setelah `/mcp` toggle on.
-2. **Anda tidak butuh bot di project ini** → biarkan "failed" status (harmless), atau disable plugin per-project via `/plugin` → toggle off untuk repo ini.
-3. **Verifikasi token tersimpan**: jalankan `/telegram:configure` (tanpa argumen) untuk lihat status state dir current project.
+1. **Mau pakai bot di project ini** → `/telegram:configure <token>` lalu `/reload-plugins`. Bot hidup setelah `/mcp` toggle on.
+2. **Tidak butuh bot di project ini** → biarkan "failed" status (harmless), atau disable plugin per-project via `/plugin`.
+3. **Verifikasi token tersimpan** → `/telegram:configure` (tanpa argumen) untuk lihat status.
 
 Manual debug:
 ```bash
 ls "$PWD/.claude/channels/telegram/" 2>&1   # cari .env
 CLAUDE_PROJECT_DIR=$PWD bun run ~/.claude/plugins/cache/mirza-marketplace/telegram/*/server.ts 2>&1 | head -5
 ```
-Stderr server akan kasih clue eksplisit (state dir path + missing file).
 
-### Bot tidak respons saat di-DM (no reply, no pairing code)
+### Bot tidak respons saat di-DM
 
 Checklist berurutan:
 
-1. **CC session aktif dengan flag dev?** Banner di top harus muncul: `Listening for channel messages from: plugin:telegram@mirza-marketplace`. Kalau tidak ada, exit dan restart dengan `claude --dangerously-load-development-channels plugin:telegram@mirza-marketplace`.
-2. **`/mcp` toggle telegram on?** Channel plugin MCP **disabled by default per session**. Run `/mcp`, find `telegram`, enable. (Ini lazim terlewat — lihat step 5 di Quick Setup.)
-3. **Token configured di project ini?** Run `/telegram:configure` (no args) untuk status. Kalau "no token", run `/telegram:configure <token>`.
-4. **Server actually running?** `ps aux | grep "bun.*server.ts" | grep -v grep`. Harus ada minimal 1 process.
-5. **Pernah pakai token yang sama di project lain?** Telegram API: 1 token = 1 poller. Project lain dengan token sama akan men-depak yang ini. Solusi: **pakai bot/token berbeda per project**.
+1. **CC session pakai flag dev?** Banner di top harus muncul: `Listening for channel messages from: plugin:telegram@mirza-marketplace`. Kalau tidak, restart dengan `claude --dangerously-load-development-channels plugin:telegram@mirza-marketplace`.
+2. **`/mcp` toggle telegram on?** Channel plugin MCP **disabled by default per session**.
+3. **Token configured?** `/telegram:configure` (no args) untuk status.
+4. **Server actually running?** `ps aux | grep "bun.*server.ts" | grep -v grep`.
+5. **Token sama dipakai project lain?** Telegram API: 1 token = 1 poller. Pakai bot/token berbeda per project.
 
 ### Multi-folder paralel: 409 Conflict di stderr
 
-Berarti **dua project pakai token yang sama**. Telegram API hanya izinkan 1 poller per token — keduanya saling depak.
+Dua project pakai token yang sama. Bikin bot kedua di [@BotFather](https://t.me/BotFather) (`/newbot`).
 
-Fix: buat bot kedua di [@BotFather](https://t.me/BotFather) (`/newbot`), pakai token baru di project kedua.
-
-### Reset state 1 project ke clean slate
+### Reset state 1 project
 
 ```bash
-# Stop poller (kalau jalan)
 kill $(cat <project>/.claude/channels/telegram/bot.pid) 2>/dev/null
-
-# Hapus seluruh state dir
 rm -rf <project>/.claude/channels/telegram/
 ```
 
-Project lain tidak terpengaruh. Untuk re-configure: `/telegram:configure <token>` lagi.
+Re-configure: `/telegram:configure <token>` lagi.
 
-### Uninstall plugin sepenuhnya
+### Uninstall total
 
 ```
 /plugin uninstall telegram@mirza-marketplace
@@ -198,60 +391,29 @@ Project lain tidak terpengaruh. Untuk re-configure: `/telegram:configure <token>
 /reload-plugins
 ```
 
-Lalu cleanup filesystem:
+Filesystem cleanup:
 ```bash
 rm -rf ~/.claude/plugins/cache/mirza-marketplace/
 rm -rf ~/.claude/plugins/marketplaces/mirza-marketplace/
-# Loop hapus state di setiap project (opsional):
 find ~/Workspace -type d -path "*/.claude/channels/telegram" -prune -exec rm -rf {} +
 ```
 
-Revoke bot token di [@BotFather](https://t.me/BotFather) (`/mybots` → pilih bot → API Token → Revoke) kalau Anda khawatir token sempat ter-expose.
+Revoke bot token di [@BotFather](https://t.me/BotFather) (`/mybots` → bot → API Token → Revoke) kalau khawatir token sempat ter-expose.
 
-## Access control
+## Not yet built
 
-See **[ACCESS.md](./ACCESS.md)** for DM policies, groups, mention detection, delivery config, skill commands, and the `access.json` schema.
+Beberapa item di [FEATURES_BACKLOG.md](./FEATURES_BACKLOG.md) yang sering ditanya tapi belum jalan:
 
-Quick reference: IDs are **numeric user IDs** (get yours from [@userinfobot](https://t.me/userinfobot)). Default policy is `pairing`. `ackReaction` only accepts Telegram's fixed emoji whitelist.
+- **Voice transcription** (T1.1) — `message:voice` di-forward sebagai meta-only, AI harus `download_attachment` lalu transcribe sendiri.
+- **Quoted message context extraction** (T1.3) — reply chain tidak otomatis dibawa; `reply_to` cuma ada di `messages.db`, tidak di `<channel>` meta saat ini.
+- **Multi-message array delivery** (T1.7) — `reply.text` masih single string, bukan array.
+- **Reaction event inbound** (T1.9) — bot bisa `react` outbound, tapi tidak forward saat user react ke pesan bot.
+- **Outbound media group / album** (T1.12) — multi-file outbound kirim N pesan terpisah, bukan 1 album visual.
+- **Per-channel state / persona** (T2.1) — belum ada timezone/nickname hint.
+- **Dashboard, preprocessing pipeline, group enhancements** (T2.2/T2.3/T2.5) — backlog.
 
-## Tools exposed to the assistant
+Lihat FEATURES_BACKLOG.md untuk daftar lengkap + rasional Tier 3 (item yang sengaja di-drop dari scope plugin).
 
-| Tool | Purpose |
-| --- | --- |
-| `reply` | Send to a chat. Takes `chat_id` + `text`, optionally `reply_to` (message ID) for native threading and `files` (absolute paths) for attachments. Images (`.jpg`/`.png`/`.gif`/`.webp`) send as photos with inline preview; other types send as documents. Max 50MB each. Auto-chunks text; files send as separate messages after the text. Returns the sent message ID(s). |
-| `react` | Add an emoji reaction to a message by ID. **Only Telegram's fixed whitelist** is accepted (👍 👎 ❤ 🔥 👀 etc). |
-| `edit_message` | Edit a message the bot previously sent. Useful for "working…" → result progress updates. Only works on the bot's own messages. |
+## License
 
-Inbound messages trigger a typing indicator automatically — Telegram shows "botname is typing…" while the assistant works on a response.
-
-## Photos
-
-Inbound photos are downloaded to `<project>/.claude/channels/telegram/inbox/` and the local path is included in the `<channel>` notification so the assistant can `Read` it. Telegram compresses photos — if you need the original file, send it as a document instead (long-press → Send as File).
-
-## No history or search
-
-Telegram's Bot API exposes **neither** message history nor search. The bot only sees messages as they arrive — no `fetch_messages` tool exists. If the assistant needs earlier context, it will ask you to paste or summarize.
-
-This also means there's no `download_attachment` tool for historical messages — photos are downloaded eagerly on arrival since there's no way to fetch them later.
-
-## Conversation Logging
-
-Plugin mencatat semua percakapan ke `<project>/.claude/channels/telegram/messages.db` (SQLite). Tabel `messages` menyimpan inbound user, outbound assistant/system, dan edit history. Tujuan: recall lintas sesi.
-
-### `source` parameter convention
-
-`reply` tool menerima optional param `source: 'assistant' | 'system'`, default `'assistant'`.
-
-- **`assistant`** — reply langsung ke pesan user (default, tidak perlu eksplisit).
-- **`system`** — reply yang dipicu non-user event: cronjob, scheduler, external webhook, scheduled task. Caller (skill, MCP server, cronjob handler) **harus** set ini eksplisit agar log akurat.
-
-### Disable
-
-Set env var `TELEGRAM_DISABLE_MESSAGES_STORE=1` untuk menjalankan plugin tanpa logger (mis. saat debugging atau testing).
-
-### Inspect
-
-```bash
-sqlite3 <project>/.claude/channels/telegram/messages.db \
-  "SELECT id,ts,source,user_name,substr(text,1,80) FROM messages ORDER BY ts DESC LIMIT 20"
-```
+Apache-2.0 (inherit dari upstream). Lihat [LICENSE](./LICENSE).
