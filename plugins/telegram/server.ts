@@ -50,11 +50,26 @@ const ACCESS_FILE = join(STATE_DIR, 'access.json')
 const APPROVED_DIR = join(STATE_DIR, 'approved')
 const ENV_FILE = join(STATE_DIR, '.env')
 
+// POSIX filesystem permissions (`chmod 0600` on .env and messages.db) are
+// how this plugin protects credentials and message history from other users
+// on the same machine. On Windows `chmodSync` is silently a no-op — those
+// files inherit whatever ACL the parent directory grants, which on a
+// single-user laptop is usually fine but on a shared/AD machine is NOT.
+// Emit one upfront warning instead of pretending the chmods worked.
+const POSIX_PERMS = process.platform !== 'win32'
+if (!POSIX_PERMS) {
+  process.stderr.write(
+    `telegram channel: running on Windows — POSIX chmod is a no-op; ` +
+    `.env (bot token) and messages.db are protected only by filesystem ACL. ` +
+    `On a single-user machine this is usually fine; on a shared host, restrict ACL on ${STATE_DIR} manually.\n`,
+  )
+}
+
 // Load <STATE_DIR>/.env into process.env. Real env wins.
 // Plugin-spawned servers don't get an env block — this is where the token lives.
 try {
-  // Token is a credential — lock to owner. No-op on Windows (would need ACLs).
-  chmodSync(ENV_FILE, 0o600)
+  // Token is a credential — lock to owner where supported.
+  if (POSIX_PERMS) chmodSync(ENV_FILE, 0o600)
   for (const line of readFileSync(ENV_FILE, 'utf8').split('\n')) {
     const m = line.match(/^(\w+)=(.*)$/)
     if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2]
@@ -86,8 +101,11 @@ mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })
 const messagesStore = createMessagesStore({ dbPath: MESSAGES_DB })
 messagesStore.init()
 // Spec D1: messages.db sensitivity matches access.json — enforce 0o600
-// after init creates the file. No-op on Windows where chmod is meaningless.
-try { chmodSync(MESSAGES_DB, 0o600) } catch {}
+// after init creates the file. Skipped on Windows (chmod is a no-op there;
+// the platform warning at startup already flagged this).
+if (POSIX_PERMS) {
+  try { chmodSync(MESSAGES_DB, 0o600) } catch {}
+}
 try {
   const stale = parseInt(readFileSync(PID_FILE, 'utf8'), 10)
   if (stale > 1 && stale !== process.pid) {

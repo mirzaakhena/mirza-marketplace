@@ -56,7 +56,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           command: {
             type: 'string',
             description:
-              'The slash command to inject, including the leading slash. Must match /^\\/[a-z][a-z0-9_-]{0,31}(\\s.{0,256})?$/ — at most 32-char command name, optional 256-char argument. Examples: "/clear", "/compact", "/notify-user fresh session ready".',
+              'The slash command to inject, including the leading slash. Must match /^\\/[a-z][a-z0-9_:-]{0,63}(\\s.{0,256})?$/ — at most 64-char command name (the `:` is allowed so namespaced plugin commands like `/telegram:notify-user` dispatch correctly), optional 256-char argument. Examples: "/clear", "/compact", "/telegram:notify-user fresh session ready".',
           },
         },
         required: ['command'],
@@ -85,7 +85,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         }
         if (!SLASH_COMMAND_RE.test(command)) {
           throw new Error(
-            `command must match /^\\/[a-z][a-z0-9_-]{0,31}(\\s.{0,256})?$/ — got: ${JSON.stringify(command)}`,
+            `command must match /^\\/[a-z][a-z0-9_:-]{0,63}(\\s.{0,256})?$/ — got: ${JSON.stringify(command)}`,
           )
         }
         if (!wrapperLikelyRunning(STATE_DIR)) {

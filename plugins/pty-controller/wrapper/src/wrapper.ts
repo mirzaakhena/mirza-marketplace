@@ -61,6 +61,7 @@ const PROJECT_DIR = resolve(process.env.CLAUDE_PROJECT_DIR ?? process.cwd())
 const STATE_DIR = join(PROJECT_DIR, '.claude', 'channels', 'pty-controller')
 const PENDING_DIR = join(STATE_DIR, 'pending')
 const HEARTBEAT_FILE = join(STATE_DIR, 'wrapper.heartbeat')
+const PID_FILE = join(STATE_DIR, 'wrapper.pid')
 const LOG_FILE = join(STATE_DIR, 'wrapper.log')
 
 // The telegram plugin's state dir lives as a sibling of ours. We write
@@ -348,6 +349,9 @@ process.stdout.on('resize', () => {
 })
 
 // Heartbeat — plugin probes freshness of this file to confirm wrapper is alive.
+// PID file is the second liveness signal: if the wrapper crashed within the
+// last heartbeat window the file is stale but the heartbeat looks fresh, so
+// the plugin also probes the PID with `kill(pid, 0)` to catch that case.
 const heartbeatInterval = setInterval(() => {
   try {
     writeFileSync(HEARTBEAT_FILE, new Date().toISOString())
@@ -356,6 +360,11 @@ const heartbeatInterval = setInterval(() => {
   }
 }, 5_000)
 writeFileSync(HEARTBEAT_FILE, new Date().toISOString())
+try {
+  writeFileSync(PID_FILE, String(process.pid))
+} catch (err) {
+  log(`pid file write failed: ${err}`)
+}
 
 // Post-/clear poll. Cheap (one readdir every 500ms) and only does work when
 // `awaitingClearReady` is set, so the steady-state cost is negligible.
@@ -634,6 +643,11 @@ function shutdown(code: number): void {
   pendingWatcher.close()
   try {
     rmSync(HEARTBEAT_FILE)
+  } catch {
+    /* ignore */
+  }
+  try {
+    rmSync(PID_FILE)
   } catch {
     /* ignore */
   }

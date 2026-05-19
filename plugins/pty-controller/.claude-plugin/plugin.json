@@ -5,6 +5,7 @@
   "author": {
     "name": "Mirza"
   },
+  "license": "MIT",
   "keywords": [
     "pty",
     "control",

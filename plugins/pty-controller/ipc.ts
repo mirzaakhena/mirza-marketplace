@@ -63,20 +63,57 @@ export function writeCommand(
 }
 
 /**
- * Probe whether a wrapper is likely running. We can't check the process
- * directly across machines, so we look for a heartbeat file the wrapper
- * touches periodically. Returns true if the heartbeat is fresh (default:
- * within 30s).
+ * Probe whether a wrapper is likely running.
+ *
+ * Two-signal check:
+ *   1. Heartbeat file freshness (wrapper touches it every 5s; we require
+ *      it within `freshMs`, default 30s — accommodates GC pauses, brief
+ *      filesystem stalls, system suspend/resume).
+ *   2. PID file + `process.kill(pid, 0)` liveness — catches the "wrapper
+ *      crashed within the last 30s" case where the heartbeat looks fresh
+ *      but the OS process is gone.
+ *
+ * The PID check is best-effort: if the wrapper is on a different host
+ * (rare, but PTY_CONTROLLER_STATE_DIR could in principle point at a shared
+ * mount), `kill` will throw and we fall back to the heartbeat-only verdict.
  */
 export function wrapperLikelyRunning(stateDir: string, freshMs = 30_000): boolean {
   const beat = join(stateDir, 'wrapper.heartbeat')
   if (!existsSync(beat)) return false
+  let heartbeatFresh = false
   try {
     const content = readFileSync(beat, 'utf8').trim()
     const wroteAt = Date.parse(content)
     if (Number.isNaN(wroteAt)) return false
-    return Date.now() - wroteAt < freshMs
+    heartbeatFresh = Date.now() - wroteAt < freshMs
   } catch {
     return false
+  }
+  if (!heartbeatFresh) return false
+
+  // Second signal: PID liveness. Wrapper writes wrapper.pid on startup and
+  // unlinks it on clean shutdown. If the PID file exists but the process is
+  // gone, the wrapper crashed — return false so the caller fails fast
+  // instead of queuing files that rot in pending/.
+  const pidPath = join(stateDir, 'wrapper.pid')
+  if (!existsSync(pidPath)) {
+    // Old wrapper builds didn't write this; heartbeat alone has to suffice.
+    return true
+  }
+  try {
+    const pid = parseInt(readFileSync(pidPath, 'utf8').trim(), 10)
+    if (!Number.isFinite(pid) || pid <= 0) return true // malformed — don't penalize
+    try {
+      process.kill(pid, 0)
+      return true // process exists
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === 'ESRCH') return false // process is gone
+      if (code === 'EPERM') return true // exists but owned by another user — still alive
+      // Other errors (e.g. cross-host pid we can't probe): trust the heartbeat.
+      return true
+    }
+  } catch {
+    return true // can't read PID file — don't penalize
   }
 }

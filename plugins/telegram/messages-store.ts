@@ -1,5 +1,17 @@
 import { Database } from 'bun:sqlite'
 
+/**
+ * Every value that may appear in the `source` column of `messages`.
+ *
+ * Outbound callers are constrained to `'assistant' | 'system'` (see
+ * `OutboundLogInput.source`). The other two land via internal writes:
+ * `logInbound` hardcodes `'user'`, and `logEdit` hardcodes `'assistant'`
+ * (with an `edited_of` field merged into `metadata`). There is intentionally
+ * no `'edit'` source — edits are still authored by the assistant, just
+ * marked via metadata so that downstream readers can choose to fold them.
+ */
+export type MessageSource = 'user' | 'assistant' | 'system'
+
 export interface InboundLogInput {
   ts: number
   chat_id: string
@@ -16,7 +28,7 @@ export interface OutboundLogInput {
   ts: number
   chat_id: string
   message_id?: string
-  source: 'assistant' | 'system'
+  source: Extract<MessageSource, 'assistant' | 'system'>
   text?: string
   attachments?: unknown[]
   reply_to?: string
