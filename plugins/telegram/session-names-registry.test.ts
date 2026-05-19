@@ -14,6 +14,7 @@ import {
   saveRegistry,
   setName,
   refreshFromPidFiles,
+  findSessionIdByName,
 } from './session-names-registry'
 
 function mkTempDir(label: string): string {
@@ -177,5 +178,36 @@ describe('session-names-registry', () => {
 
     refreshFromPidFiles(registry, projectDir)
     expect(registry.get(sid)!.name).toBe('fresh-name')
+  })
+
+  test('findSessionIdByName returns sessionId when name matches', () => {
+    setName(stateDir, 'sid-a', 'utama')
+    setName(stateDir, 'sid-b', 'bahas')
+    const registry = loadRegistry(stateDir)
+    expect(findSessionIdByName(registry, 'utama')).toBe('sid-a')
+    expect(findSessionIdByName(registry, 'bahas')).toBe('sid-b')
+  })
+
+  test('findSessionIdByName returns null when name is free', () => {
+    setName(stateDir, 'sid-a', 'utama')
+    const registry = loadRegistry(stateDir)
+    expect(findSessionIdByName(registry, 'nonexistent')).toBeNull()
+  })
+
+  test('findSessionIdByName is case-sensitive', () => {
+    setName(stateDir, 'sid-a', 'Omar')
+    const registry = loadRegistry(stateDir)
+    expect(findSessionIdByName(registry, 'omar')).toBeNull()
+    expect(findSessionIdByName(registry, 'Omar')).toBe('sid-a')
+  })
+
+  test('findSessionIdByName returns one of the matches when duplicates exist', () => {
+    // Legacy data: two sessions with the same name. The function returns
+    // *one* sessionId; the caller treats either as "name is taken".
+    setName(stateDir, 'sid-a', 'omar')
+    setName(stateDir, 'sid-b', 'omar')
+    const registry = loadRegistry(stateDir)
+    const hit = findSessionIdByName(registry, 'omar')
+    expect(hit === 'sid-a' || hit === 'sid-b').toBe(true)
   })
 })
