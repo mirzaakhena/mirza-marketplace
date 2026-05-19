@@ -73,6 +73,14 @@ interface SwitchPickerEntry {
 }
 const switchPicker = new Map<string, SwitchPickerEntry>()
 
+const MAX_DELETE_BUTTONS = 7 // same as /switch — reserve 1 row for cancel
+
+interface DeletePickerEntry {
+  sessionId: string
+  label: string
+}
+const deletePicker = new Map<string, DeletePickerEntry>()
+
 /** Resolve the per-project state dir pty-controller agrees on. */
 function resolvePtyStateDir(env: Record<string, string | undefined>): string | null {
   const explicit = env.PTY_CONTROLLER_STATE_DIR?.trim()
@@ -163,6 +171,9 @@ export async function tryRouteMetaCommand(
   }
   if (lower === '/switch') {
     return handleSwitch(env, handlers)
+  }
+  if (lower === '/delete') {
+    return handleDelete(env, handlers)
   }
   return false
 }
@@ -260,6 +271,59 @@ async function handleSwitch(
   return true
 }
 
+async function handleDelete(
+  env: Record<string, string | undefined>,
+  handlers: MetaCommandHandlers,
+): Promise<boolean> {
+  const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
+  if (!projectDir) {
+    await handlers.reply(
+      '⚠️ /delete tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.',
+    )
+    return true
+  }
+  const stateDir = resolvePtyStateDir(env)
+  if (!stateDir || !wrapperHeartbeatFresh(stateDir)) {
+    await handlers.reply(
+      '⚠️ /delete tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.',
+    )
+    return true
+  }
+
+  const currentSid = readCurrentSessionId(stateDir)
+  const all = listProjectSessions(projectDir)
+  const sessions = currentSid
+    ? all.filter(s => s.sessionId !== currentSid)
+    : all
+
+  if (sessions.length === 0) {
+    await handlers.reply('Tidak ada session lain yang bisa dihapus.')
+    return true
+  }
+
+  deletePicker.clear()
+  for (const s of sessions.slice(0, MAX_DELETE_BUTTONS)) {
+    deletePicker.set(s.shortId, { sessionId: s.sessionId, label: s.label })
+  }
+
+  const rows: MetaCommandButton[][] = []
+  for (const s of sessions.slice(0, MAX_DELETE_BUTTONS)) {
+    const label = s.label.length > 60 ? s.label.slice(0, 59) + '…' : s.label
+    rows.push([{ label, callbackData: `meta:delete_${s.shortId}` }])
+  }
+  rows.push([{ label: '❌ Cancel', callbackData: 'meta:delete_cancel' }])
+
+  const moreNote =
+    sessions.length > MAX_DELETE_BUTTONS
+      ? ` (showing ${MAX_DELETE_BUTTONS} terbaru dari ${sessions.length})`
+      : ''
+  await handlers.replyWithButtons(
+    `🗑️ Pilih session untuk dihapus${moreNote}:`,
+    rows,
+  )
+  return true
+}
+
 /**
  * Try to handle a `callback_query.data` string as a meta-route. Returns:
  *   - `true`  → consumed (the bot's own callback handler must NOT forward to AI)
@@ -340,4 +404,9 @@ export async function tryHandleMetaCallback(
  */
 export function __resetSwitchPickerForTests(): void {
   switchPicker.clear()
+}
+
+// Export for test resets — parallel to __resetSwitchPickerForTests
+export function __resetDeletePickerForTests(): void {
+  deletePicker.clear()
 }

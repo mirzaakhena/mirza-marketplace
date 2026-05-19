@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, existsSync, readFil
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { tryRouteMetaCommand } from './meta-commands'
+import { listProjectSessions } from './sessions-list'
 
 // Local alias kept so existing test bodies don't need rewriting.
 const tryRouteMetaCommandT = tryRouteMetaCommand
@@ -207,5 +208,122 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
     expect(payload.sessionName.length).toBe(64)
     expect(payload.sessionName).toBe('a'.repeat(64))
+  })
+})
+
+// Shared helpers used by /delete tests across Tasks 5–8.
+function writeProjectJsonl(homeDirOverride: string, projectDir: string, sessionId: string): void {
+  const encoded = projectDir.replace(/[\\/:]/g, '-')
+  const dir = join(homeDirOverride, '.claude', 'projects', encoded)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, `${sessionId}.jsonl`), '')
+}
+
+function writeCurrentSessionId(stateDir: string, sid: string): void {
+  writeFileSync(join(stateDir, 'wrapper.current_session_id'), sid)
+}
+
+/**
+ * Set up a /delete picker state: write `sessionIds` as jsonls under the
+ * fake home dir, mark `currentSid` (if provided) as the active session,
+ * set a fresh heartbeat, then invoke /delete to populate `deletePicker`.
+ * Returns the shortIds of the sessions that ended up in the picker.
+ */
+async function setupAndPopulatePicker(
+  homeOverride: string,
+  projectDir: string,
+  stateDir: string,
+  sessionIds: string[],
+  currentSid?: string,
+): Promise<string[]> {
+  for (const sid of sessionIds) writeProjectJsonl(homeOverride, projectDir, sid)
+  if (currentSid) writeCurrentSessionId(stateDir, currentSid)
+  setHeartbeat(stateDir, new Date().toISOString())
+  const { handler } = makeHandler()
+  await tryRouteMetaCommandT('/delete', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+  return sessionIds
+    .filter(sid => sid !== currentSid)
+    .map(sid => sid.replace(/-/g, '').slice(0, 8).toLowerCase())
+}
+
+describe('meta-commands: /delete picker', () => {
+  let projectDir: string
+  let stateDir: string
+  let cleanup: () => void
+  let homeOverride: string
+
+  beforeEach(() => {
+    const ctx = mkProject()
+    projectDir = ctx.projectDir
+    stateDir = ctx.stateDir
+    cleanup = ctx.cleanup
+    homeOverride = mkdtempSync(join(tmpdir(), 'meta-cmd-home-'))
+    process.env.USERPROFILE = homeOverride
+    process.env.HOME = homeOverride
+  })
+
+  afterEach(() => {
+    cleanup()
+    try { rmSync(homeOverride, { recursive: true, force: true }) } catch {}
+  })
+
+  test('/delete replies with no-other-sessions message when current is the only one', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    const sid = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+    writeProjectJsonl(homeOverride, projectDir, sid)
+    writeCurrentSessionId(stateDir, sid)
+
+    const consumed = await tryRouteMetaCommandT('/delete', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    expect(replies.length).toBe(1)
+    expect(replies[0].text).toMatch(/Tidak ada session lain/)
+    expect(replies[0].buttons).toBeUndefined()
+  })
+
+  test('/delete shows picker excluding the current session', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    const sidA = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+    const sidB = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+    writeProjectJsonl(homeOverride, projectDir, sidA)
+    writeProjectJsonl(homeOverride, projectDir, sidB)
+    writeCurrentSessionId(stateDir, sidA)
+
+    const consumed = await tryRouteMetaCommandT('/delete', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    expect(replies.length).toBe(1)
+    expect(replies[0].buttons).toBeDefined()
+    const flatLabels = replies[0].buttons!.flat().map(b => b.label)
+    expect(flatLabels.some(l => l.includes('bbbbbbbb'))).toBe(true)
+    expect(flatLabels.some(l => l.includes('aaaaaaaa'))).toBe(false)
+  })
+
+  test('/delete warns when CLAUDE_PROJECT_DIR is missing', async () => {
+    const { handler, replies } = makeHandler()
+    const consumed = await tryRouteMetaCommandT('/delete', {}, handler)
+    expect(consumed).toBe(true)
+    expect(replies[0].text).toMatch(/CLAUDE_PROJECT_DIR/)
+  })
+
+  test('/delete warns when wrapper heartbeat is stale', async () => {
+    const { handler, replies } = makeHandler()
+    const consumed = await tryRouteMetaCommandT('/delete', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    expect(replies[0].text).toMatch(/wrapper tidak terdeteksi/)
+  })
+
+  test('/delete proceeds without current-session exclusion when state file is missing', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    const sidA = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+    writeProjectJsonl(homeOverride, projectDir, sidA)
+    // No writeCurrentSessionId — file absent.
+
+    const consumed = await tryRouteMetaCommandT('/delete', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    expect(replies[0].buttons).toBeDefined()
+    const flatLabels = replies[0].buttons!.flat().map(b => b.label)
+    expect(flatLabels.some(l => l.includes('aaaaaaaa'))).toBe(true)
   })
 })
