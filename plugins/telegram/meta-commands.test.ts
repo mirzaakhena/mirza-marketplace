@@ -117,13 +117,15 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     expect(listPending(stateDir).length).toBe(0)
   })
 
-  test('writes /clear command file with sessionName and confirms when wrapper is fresh', async () => {
+  test('writes /clear command file with sessionName and no intermediate ack when wrapper is fresh', async () => {
     const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
     const consumed = await tryRouteMetaCommandT('/new bahas MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
-    expect(replies.length).toBe(1)
-    expect(replies[0].text).toMatch(/Clearing session/)
+    // No ack on the happy path — the transition message arrives later via
+    // the system-outbox event the wrapper writes after the fresh session
+    // materialises.
+    expect(replies.length).toBe(0)
     const pending = listPending(stateDir)
     expect(pending.length).toBe(1)
     const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
@@ -138,7 +140,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     setHeartbeat(stateDir, new Date().toISOString())
     const consumed = await tryRouteMetaCommandT('/NEW Bahas MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
-    expect(replies.length).toBe(1)
+    expect(replies.length).toBe(0)
     const pending = listPending(stateDir)
     expect(pending.length).toBe(1)
     const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))

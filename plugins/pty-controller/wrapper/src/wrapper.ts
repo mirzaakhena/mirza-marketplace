@@ -17,9 +17,11 @@
  *   4. Periodically touch <state>/wrapper.heartbeat so the plugin can probe
  *      whether we're alive.
  *   5. After injecting /clear specifically, poll ~/.claude/projects/<encoded>/
- *      for a new session jsonl. When one appears, the fresh AI session is
- *      live — at that point inject `/notify-user <brief>` so the new session
- *      pings the user on Telegram instead of staying silently fresh.
+ *      for a new session jsonl. When one appears, drop a "session-change"
+ *      event into <telegram-state>/system-outbox/ so the telegram plugin
+ *      can ping the user about the new session via direct bot.api — no
+ *      AI roundtrip required. /switch writes the same event the moment it
+ *      injects /resume.
  *
  * The wrapper hosts a single CC process for its entire lifetime. /switch no
  * longer kills and respawns CC with `--resume` — instead it injects the
@@ -51,6 +53,7 @@ import {
 } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { homedir } from 'node:os'
+import { randomUUID } from 'node:crypto'
 import process from 'node:process'
 
 const PROJECT_DIR = resolve(process.env.CLAUDE_PROJECT_DIR ?? process.cwd())
@@ -58,6 +61,15 @@ const STATE_DIR = join(PROJECT_DIR, '.claude', 'channels', 'pty-controller')
 const PENDING_DIR = join(STATE_DIR, 'pending')
 const HEARTBEAT_FILE = join(STATE_DIR, 'wrapper.heartbeat')
 const LOG_FILE = join(STATE_DIR, 'wrapper.log')
+
+// The telegram plugin's state dir lives as a sibling of ours. We write
+// "system-outbox" events here for the telegram plugin's server.ts to pick
+// up and translate into bot.api Telegram messages without involving an
+// AI roundtrip. Coupling between wrapper (pty-controller plugin) and
+// telegram plugin is acceptable: both are owned by the same maintainer
+// and the contract is small (a typed JSON payload).
+const TELEGRAM_STATE_DIR = join(PROJECT_DIR, '.claude', 'channels', 'telegram')
+const SYSTEM_OUTBOX_DIR = join(TELEGRAM_STATE_DIR, 'system-outbox')
 
 // Encode the project dir the way CC does for ~/.claude/projects/<encoded>/.
 // CC replaces `:`, `/`, and `\` with `-`, so e.g. C:\Users\Mirza\workspace\bot-01
@@ -89,13 +101,6 @@ function writeCurrentSessionId(sid: string): void {
     log(`failed to write current_session_id: ${err}`)
   }
 }
-
-// Brief sent as $ARGUMENTS to the /notify-user command in the fresh
-// post-/clear session. /notify-user reads the brief, constructs a natural
-// message itself, and resolves chat_id from access.json — so we don't need
-// to pass any chat-routing data through here.
-const POST_CLEAR_NOTIFY_BRIEF =
-  'fresh session siap setelah /clear, sapa user singkat dan tanya mau lanjut apa'
 
 // Pacing between chained PTY injections inside the post-/clear sequence.
 // CC's slash-command parser swallows the entire stdin buffer up to (some
@@ -207,6 +212,30 @@ function injectSlashCommand(cmd: string): void {
   setTimeout(() => currentPty.write('\r'), SUBMIT_DELAY_MS)
 }
 
+/**
+ * Drop a typed JSON event into the telegram plugin's system-outbox dir.
+ * The plugin's server.ts watches that directory and translates each
+ * event into a Telegram bot.api send — bypassing CC entirely (no AI
+ * roundtrip needed to ping the user about a session change).
+ *
+ * Atomic write via temp+rename so the plugin never reads a half-written
+ * file. Best-effort: errors are logged, not thrown.
+ */
+function writeSystemOutbox(payload: Record<string, unknown>): void {
+  try {
+    mkdirSync(SYSTEM_OUTBOX_DIR, { recursive: true })
+    const id = randomUUID()
+    const final = join(SYSTEM_OUTBOX_DIR, `${id}.json`)
+    const tmp = `${final}.tmp.${process.pid}`
+    const full = { id, ts: new Date().toISOString(), ...payload }
+    writeFileSync(tmp, JSON.stringify(full, null, 2))
+    renameSync(tmp, final)
+    log(`wrote system-outbox: ${id} ${JSON.stringify(payload)}`)
+  } catch (err) {
+    log(`failed to write system-outbox: ${err}`)
+  }
+}
+
 // Post-/clear state machine. Once we inject /clear, we snapshot the existing
 // session jsonl files and start polling for a new one to appear — its
 // appearance signals that the fresh CC session is live and ready to accept
@@ -263,22 +292,27 @@ const sessionPollInterval = setInterval(() => {
       )
       writeCurrentSessionId(sid)
       awaitingClearReady = null
-      // Pace the chained injections so CC has time to process each command
-      // before the next byte arrives — otherwise CC's parser slurps the
-      // whole pile into one /rename argument. See POST_INJECTION_DELAY_MS.
-      //
-      // `/rename` is a built-in CC slash command and works unqualified.
-      // `/notify-user` is supplied by the telegram plugin, so it requires
-      // the fully-qualified `/<plugin>:<command>` form to dispatch — bare
-      // `/notify-user` is "Unknown command" to CC.
+      // Pace /rename so CC has time to process it before the system-outbox
+      // event fires — the event triggers a Telegram-side "switch to session"
+      // message, and we want it to land AFTER /rename has settled so the
+      // session-names registry (used to resolve the new session's label) is
+      // already up to date.
       let delay = 0
       if (sessionName) {
         const localName = sessionName
         setTimeout(() => injectSlashCommand(`/rename ${localName}`), delay)
         delay += POST_INJECTION_DELAY_MS
       }
+      // Notify the user via direct bot.api send (no AI roundtrip). The
+      // payload carries `sessionName` if we just renamed, so the plugin
+      // doesn't have to race the registry refresh to find the label.
       setTimeout(
-        () => injectSlashCommand(`/telegram:notify-user ${POST_CLEAR_NOTIFY_BRIEF}`),
+        () =>
+          writeSystemOutbox({
+            type: 'session-change',
+            sessionId: sid,
+            sessionName: sessionName ?? null,
+          }),
         delay,
       )
       return
@@ -380,6 +414,13 @@ async function consumePending(filename: string): Promise<void> {
     log(`switch requested → injecting "/resume ${sid}" (id: ${payload.id ?? '?'})`)
     writeCurrentSessionId(sid)
     injectSlashCommand(`/resume ${sid}`)
+    // Notify the user via direct bot.api send (no AI roundtrip). The plugin
+    // resolves the target session's label from its registry.
+    writeSystemOutbox({
+      type: 'session-change',
+      sessionId: sid,
+      sessionName: null,
+    })
     return
   }
 

@@ -20,7 +20,7 @@ import { z } from 'zod'
 import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from 'grammy'
 import type { ReactionTypeEmoji } from 'grammy/types'
 import { randomBytes } from 'crypto'
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync, existsSync, watch, type FSWatcher } from 'fs'
 import { join, extname, sep } from 'path'
 import { createMessagesStore } from './messages-store.ts'
 import { createAlbumBuffer } from './album-buffer'
@@ -31,6 +31,7 @@ import { isOurOwnBridge } from './server-helpers.ts'
 import { validateButtons, parseAiCallbackData, buildKeyboard, findButtonLabel } from './buttons.ts'
 import { commonMarkToMarkdownV2 } from './markdown.ts'
 import { tryRouteMetaCommand, tryHandleMetaCallback } from './meta-commands.ts'
+import { listProjectSessions } from './sessions-list.ts'
 
 const STATE_DIR = (() => {
   const resolved = resolveStateDir(process.env)
@@ -73,6 +74,7 @@ if (!TOKEN) {
   process.exit(1)
 }
 const INBOX_DIR = join(STATE_DIR, 'inbox')
+const SYSTEM_OUTBOX_DIR = join(STATE_DIR, 'system-outbox')
 const PID_FILE = join(STATE_DIR, 'bot.pid')
 const MESSAGES_DB = join(STATE_DIR, 'messages.db')
 
@@ -811,6 +813,8 @@ function shutdown(): void {
   if (shuttingDown) return
   shuttingDown = true
   process.stderr.write('telegram channel: shutting down\n')
+  try { systemOutboxWatcher.close() } catch {}
+  try { clearInterval(systemOutboxSweepInterval) } catch {}
   try { messagesStore.close() } catch {}
   try {
     if (parseInt(readFileSync(PID_FILE, 'utf8'), 10) === process.pid) rmSync(PID_FILE)
@@ -1685,6 +1689,131 @@ async function handleInbound(
 bot.catch(err => {
   process.stderr.write(`telegram channel: handler error (polling continues): ${err.error}\n`)
 })
+
+// ---------------------------------------------------------------------------
+// system-outbox: events written by sibling plugins (notably the pty-controller
+// wrapper) that translate into bot.api Telegram messages without involving CC
+// or an AI roundtrip. Each event is a typed JSON file dropped into
+// <state>/system-outbox/. We watch the dir, dispatch by `type`, send the
+// message via bot.api, log to messages-store with source: "system", and
+// delete the file.
+// ---------------------------------------------------------------------------
+
+mkdirSync(SYSTEM_OUTBOX_DIR, { recursive: true })
+
+async function processSystemOutboxFile(filename: string): Promise<void> {
+  const path = join(SYSTEM_OUTBOX_DIR, filename)
+  let raw: string
+  try {
+    raw = readFileSync(path, 'utf8')
+  } catch {
+    return // another tick already consumed it, fine
+  }
+  // Delete eagerly so a crash mid-handle doesn't double-process.
+  try { rmSync(path) } catch {}
+
+  let payload: { type?: string; sessionId?: string; sessionName?: string | null }
+  try {
+    payload = JSON.parse(raw)
+  } catch (err) {
+    process.stderr.write(`telegram channel: malformed system-outbox file ${filename}: ${err}\n`)
+    return
+  }
+
+  if (payload.type === 'session-change') {
+    await handleSessionChangeEvent(payload).catch(err => {
+      process.stderr.write(`telegram channel: session-change handler failed: ${err}\n`)
+    })
+    return
+  }
+
+  process.stderr.write(`telegram channel: unknown system-outbox type "${payload.type}" in ${filename}\n`)
+}
+
+async function handleSessionChangeEvent(payload: {
+  sessionId?: string
+  sessionName?: string | null
+}): Promise<void> {
+  const access = readAccessFile()
+  const chat_id = access.allowFrom[0]
+  if (!chat_id) {
+    process.stderr.write('telegram channel: session-change event but no allowFrom recipient — dropping\n')
+    return
+  }
+
+  // Resolve label: explicit name in payload wins; else listProjectSessions
+  // (which refreshes the name registry from pid files); else fallback to the
+  // sid prefix so the message is still informative.
+  let label = (payload.sessionName ?? '').trim() || null
+  if (!label && payload.sessionId) {
+    const projectDir = process.env.CLAUDE_PROJECT_DIR?.trim()
+    if (projectDir) {
+      try {
+        const sessions = listProjectSessions(projectDir, STATE_DIR)
+        const found = sessions.find(s => s.sessionId === payload.sessionId)
+        if (found && found.hasName) label = found.label
+      } catch {
+        /* fall through to sid-prefix fallback */
+      }
+    }
+  }
+  if (!label && payload.sessionId) {
+    label = `session ${payload.sessionId.slice(0, 8)}`
+  }
+  if (!label) label = '(unknown)'
+
+  const text = `━━━━━━━━━━━━\nswitch to session\n📍 *${label}*\n━━━━━━━━━━━━`
+
+  try {
+    const sent = await bot.api.sendMessage(chat_id, commonMarkToMarkdownV2(text), {
+      parse_mode: 'MarkdownV2',
+    })
+    try {
+      messagesStore.append({
+        ts: Date.now(),
+        chat_id,
+        message_id: String(sent.message_id),
+        source: 'system',
+        text,
+        metadata: JSON.stringify({
+          kind: 'session-change',
+          sessionId: payload.sessionId ?? null,
+          label,
+        }),
+      })
+    } catch (err) {
+      process.stderr.write(`telegram channel: messages-store append failed for system msg: ${err}\n`)
+    }
+    process.stderr.write(`telegram channel: sent session-change → ${chat_id} ("${label}", msg ${sent.message_id})\n`)
+  } catch (err) {
+    process.stderr.write(`telegram channel: sendMessage failed for session-change: ${err}\n`)
+  }
+}
+
+const systemOutboxWatcher: FSWatcher = watch(SYSTEM_OUTBOX_DIR, (_eventType, filename) => {
+  if (!filename) return
+  const name = filename.toString()
+  if (!name.endsWith('.json')) return
+  if (name.includes('.tmp.')) return
+  // Defer briefly so the writer's tmp-then-rename has time to commit on Windows.
+  setTimeout(() => {
+    if (existsSync(join(SYSTEM_OUTBOX_DIR, name))) {
+      void processSystemOutboxFile(name)
+    }
+  }, 50)
+})
+// Sweep fallback in case fs.watch misses an event (Windows ConPTY quirks).
+const systemOutboxSweepInterval = setInterval(() => {
+  try {
+    for (const f of readdirSync(SYSTEM_OUTBOX_DIR)) {
+      if (!f.endsWith('.json')) continue
+      if (f.includes('.tmp.')) continue
+      void processSystemOutboxFile(f)
+    }
+  } catch {
+    /* dir missing transiently — recreated on next mkdirSync */
+  }
+}, 2_000)
 
 // Retry polling with backoff on any error. Previously only 409 was retried —
 // a single ETIMEDOUT/ECONNRESET/DNS failure rejected bot.start(), the catch

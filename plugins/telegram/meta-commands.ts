@@ -232,7 +232,10 @@ async function handleNew(
     await handlers.reply(`⚠️ /new gagal menulis command ke wrapper: ${msg}`)
     return true
   }
-  await handlers.reply(`🔄 Clearing session — fresh session "${sessionName}" sebentar lagi siap.`)
+  // No "Clearing session..." ack here — the wrapper writes a system-outbox
+  // event when the fresh session materialises, and the plugin sends the
+  // "switch to session: <name>" transition message from there. One message
+  // total, arrives when the session is actually ready.
   return true
 }
 
@@ -460,12 +463,12 @@ export async function tryHandleMetaCallback(
       return true
     }
 
-    await handlers.ackCallback(`Switching to ${entry.label}`)
-    await handlers
-      .editMessage(`🔀 Switching to: ${entry.label}\nWrapper akan respawn CC dengan --resume.`)
-      .catch(() => {})
-    // Pop the entry so the same button can't be re-tapped to repeat a
-    // possibly-expensive respawn.
+    // Strip the picker keyboard but don't pre-announce the destination — the
+    // wrapper writes a system-outbox event the moment it injects /resume, and
+    // the plugin sends a "switch to session: <name>" transition message from
+    // there. One unified message for both /new and /switch paths.
+    await handlers.ackCallback()
+    await handlers.editMessage(`🔀 → ${entry.label}`).catch(() => {})
     switchPicker.delete(shortId)
     return true
   }
