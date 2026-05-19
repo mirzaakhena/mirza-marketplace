@@ -163,6 +163,41 @@ function listSessions(): Set<string> {
   }
 }
 
+// Resolve the telegram plugin's state dir. Mirrors the plugin's own
+// resolveTelegramStateDir logic: prefer the explicit CLAUDE_CHANNELS_DIR
+// env if set, else fall back to <CLAUDE_PROJECT_DIR>/.claude/channels/telegram.
+function resolveTelegramStateDir(): string | null {
+  const explicit = process.env.CLAUDE_CHANNELS_DIR?.trim()
+  if (explicit) return join(explicit, 'telegram')
+  const proj = process.env.CLAUDE_PROJECT_DIR?.trim()
+  if (!proj) return null
+  return join(proj, '.claude', 'channels', 'telegram')
+}
+
+// Mirror of `setName` from plugins/telegram/session-names-registry.ts.
+// Duplicated rather than imported to avoid a cross-package dependency
+// (Option β per the design spec). Best-effort: errors are swallowed.
+function writeTelegramRegistryName(sessionId: string, name: string): void {
+  const dir = resolveTelegramStateDir()
+  if (!dir) return
+  const path = join(dir, 'session-names.json')
+  let obj: Record<string, { name: string; updatedAt: number }> = {}
+  try {
+    obj = JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    /* missing/malformed → start fresh */
+  }
+  obj[sessionId] = { name, updatedAt: Date.now() }
+  try {
+    mkdirSync(dir, { recursive: true })
+    const tmp = `${path}.tmp.${process.pid}`
+    writeFileSync(tmp, JSON.stringify(obj, null, 2))
+    renameSync(tmp, path)
+  } catch (err) {
+    log(`failed to write telegram registry: ${err}`)
+  }
+}
+
 const userShell = process.env.SHELL || '/bin/sh'
 const shell = isWindows ? 'cmd.exe' : userShell
 
@@ -295,6 +330,7 @@ const sessionPollInterval = setInterval(() => {
       // already up to date.
       let delay = 0
       if (sessionName) {
+        writeTelegramRegistryName(sid, sessionName)
         const localName = sessionName
         setTimeout(() => injectSlashCommand(`/rename ${localName}`), delay)
         delay += POST_INJECTION_DELAY_MS
