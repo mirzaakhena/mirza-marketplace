@@ -294,6 +294,68 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     expect(listPending(stateDir).length).toBe(0)
   })
 
+  test('/rename rejects when name already taken by ANOTHER session', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    // Current session is some sid; another session in the registry owns "omar".
+    writeFileSync(join(stateDir, 'wrapper.current_session_id'), 'current-session-id')
+    const telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(telegramStateDir, { recursive: true })
+    registrySetName(telegramStateDir, 'other-session-id', 'omar')
+
+    const consumed = await tryRouteMetaCommandT(
+      '/rename omar',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      handler,
+    )
+    expect(consumed).toBe(true)
+    expect(replies.length).toBe(1)
+    expect(replies[0].text).toMatch(/sudah dipakai/)
+    expect(listPending(stateDir).length).toBe(0)
+  })
+
+  test('/rename to own existing name is idempotent (one payload written)', async () => {
+    const { handler } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    writeFileSync(join(stateDir, 'wrapper.current_session_id'), 'current-session-id')
+    const telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(telegramStateDir, { recursive: true })
+    // Current session already named "omar" in the registry.
+    registrySetName(telegramStateDir, 'current-session-id', 'omar')
+
+    const consumed = await tryRouteMetaCommandT(
+      '/rename omar',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      handler,
+    )
+    expect(consumed).toBe(true)
+    const pending = listPending(stateDir)
+    expect(pending.length).toBe(1)
+    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
+    expect(payload.command).toBe('/rename omar')
+  })
+
+  test('/rename succeeds when name is free (one payload, /rename <name>)', async () => {
+    const { handler } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    writeFileSync(join(stateDir, 'wrapper.current_session_id'), 'current-session-id')
+    const telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(telegramStateDir, { recursive: true })
+    // Registry exists but does NOT contain the requested name.
+    registrySetName(telegramStateDir, 'other-session-id', 'some other name')
+
+    const consumed = await tryRouteMetaCommandT(
+      '/rename omar',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      handler,
+    )
+    expect(consumed).toBe(true)
+    const pending = listPending(stateDir)
+    expect(pending.length).toBe(1)
+    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
+    expect(payload.command).toBe('/rename omar')
+  })
+
   test('/new succeeds when name is free', async () => {
     const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())

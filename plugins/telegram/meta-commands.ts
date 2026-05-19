@@ -283,6 +283,21 @@ async function handleRename(
     )
     return true
   }
+  // Uniqueness check: reject if the name is taken by a DIFFERENT session.
+  // Self-rename to the session's own existing name is allowed (idempotent —
+  // a common mobile-finger mistake; no-op is better UX than an error).
+  const currentSid = readCurrentSessionId(stateDir)
+  const telegramStateDir = resolveTelegramStateDir(env)
+  if (telegramStateDir) {
+    const registry = loadRegistry(telegramStateDir)
+    const taken = findSessionIdByName(registry, newName)
+    if (taken && taken !== currentSid) {
+      await handlers.reply(
+        `⚠️ Nama "${newName}" sudah dipakai session lain. /switch ke session itu atau pilih nama lain.`,
+      )
+      return true
+    }
+  }
   try {
     writeWrapperCommand(stateDir, { command: `/rename ${newName}` })
   } catch (err) {
@@ -292,9 +307,8 @@ async function handleRename(
   }
   // Mirror the rename into the plugin-side registry so the new name shows
   // in the next picker render even if CC's pid file gets overwritten by a
-  // later /switch before we get a chance to read it.
-  const currentSid = readCurrentSessionId(stateDir)
-  const telegramStateDir = resolveTelegramStateDir(env)
+  // later /switch before we get a chance to read it. Re-uses `currentSid`
+  // and `telegramStateDir` resolved above for the uniqueness check.
   if (currentSid && telegramStateDir) {
     registrySetName(telegramStateDir, currentSid, newName)
   }
