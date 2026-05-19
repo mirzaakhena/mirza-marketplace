@@ -404,21 +404,103 @@ const sessionPollInterval = setInterval(() => {
   }
 }, 500)
 
+// Resume path: we already know the session id from chooseStartupArgs, so
+// we can synchronously write current_session_id and emit the session-change
+// outbox event without waiting for a new jsonl to materialise (none will —
+// CC reuses the existing file on --resume). The initialSessionPoll below
+// still runs in this mode but won't detect anything; that's harmless.
+if (!startupMode.isFirstRun && startupMode.latestSessionId) {
+  const sid = startupMode.latestSessionId
+  writeCurrentSessionId(sid)
+  // Resolve label from telegram registry directly (best-effort).
+  const stateDir = resolveTelegramStateDir()
+  let resolvedName: string | null = null
+  if (stateDir) {
+    try {
+      const path = join(stateDir, 'session-names.json')
+      const obj = JSON.parse(readFileSync(path, 'utf8')) as Record<
+        string,
+        { name: string }
+      >
+      resolvedName = obj[sid]?.name ?? null
+    } catch {
+      /* missing/malformed → null */
+    }
+  }
+  writeSystemOutbox({
+    type: 'session-change',
+    sessionId: sid,
+    sessionName: resolvedName,
+  })
+}
+
 // One-shot: after CC starts, poll for the first session jsonl to appear
 // and record its id as the current session. Used by the telegram plugin's
 // /delete to exclude the active session from the picker. Mirrors the
 // post-/clear poll above but clears itself on first detection.
+//
+// On first-run, this also claims the label "main session" for the brand-new
+// session — provided that name isn't already taken in the telegram registry.
+// On resume, the loop never fires (no new jsonl appears); the resume block
+// above has already handled current_session_id + outbox emission.
 const initialSessionsBefore = listSessions()
 const initialSessionPoll = setInterval(() => {
   const current = listSessions()
   for (const f of current) {
-    if (!initialSessionsBefore.has(f)) {
-      const sid = f.slice(0, -'.jsonl'.length)
-      log(`initial session detected: ${sid}`)
-      writeCurrentSessionId(sid)
-      clearInterval(initialSessionPoll)
-      return
+    if (initialSessionsBefore.has(f)) continue
+    const sid = f.slice(0, -'.jsonl'.length)
+    log(`initial session detected: ${sid}`)
+    writeCurrentSessionId(sid)
+    clearInterval(initialSessionPoll)
+
+    if (startupMode.isFirstRun) {
+      // First-run path: try to claim "main session" if free in the registry.
+      const stateDir = resolveTelegramStateDir()
+      let canRename = true
+      if (stateDir) {
+        try {
+          const path = join(stateDir, 'session-names.json')
+          const obj = JSON.parse(readFileSync(path, 'utf8')) as Record<
+            string,
+            { name: string }
+          >
+          for (const entry of Object.values(obj)) {
+            if (entry.name === 'main session') {
+              canRename = false
+              break
+            }
+          }
+        } catch {
+          /* registry missing → name is free */
+        }
+      }
+      if (canRename) {
+        writeTelegramRegistryName(sid, 'main session')
+        injectSlashCommand(`/rename main session`)
+        setTimeout(
+          () =>
+            writeSystemOutbox({
+              type: 'session-change',
+              sessionId: sid,
+              sessionName: 'main session',
+            }),
+          POST_INJECTION_DELAY_MS,
+        )
+      } else {
+        log(
+          `"main session" already taken in registry — leaving new session unnamed`,
+        )
+        writeSystemOutbox({
+          type: 'session-change',
+          sessionId: sid,
+          sessionName: null,
+        })
+      }
     }
+    // If !isFirstRun, the resume block above already handled this.
+    // initialSessionPoll won't actually detect anything in that case,
+    // but defensive-skip here is harmless.
+    return
   }
 }, 500)
 
