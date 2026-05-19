@@ -15,6 +15,10 @@
  *                                                   `--resume <uuid>`
  *   4. Periodically touch <state>/wrapper.heartbeat so the plugin can probe
  *      whether we're alive.
+ *   5. After injecting /clear specifically, poll ~/.claude/projects/<encoded>/
+ *      for a new session jsonl. When one appears, the fresh AI session is
+ *      live — at that point inject `/notify-user <brief>` so the new session
+ *      pings the user on Telegram instead of staying silently fresh.
  *
  * The wrapper stays alive across CC respawns (for /switch). It only exits
  * when CC exits *naturally* (the user types /exit or kills it). A SIGINT in
@@ -41,6 +45,7 @@ import {
   type FSWatcher,
 } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { homedir } from 'node:os'
 import process from 'node:process'
 
 const PROJECT_DIR = resolve(process.env.CLAUDE_PROJECT_DIR ?? process.cwd())
@@ -48,6 +53,28 @@ const STATE_DIR = join(PROJECT_DIR, '.claude', 'channels', 'pty-controller')
 const PENDING_DIR = join(STATE_DIR, 'pending')
 const HEARTBEAT_FILE = join(STATE_DIR, 'wrapper.heartbeat')
 const LOG_FILE = join(STATE_DIR, 'wrapper.log')
+
+// Encode the project dir the way CC does for ~/.claude/projects/<encoded>/.
+// CC replaces `:`, `/`, and `\` with `-`, so e.g. C:\Users\Mirza\workspace\bot-01
+// becomes C--Users-Mirza-workspace-bot-01. We use this to spot the .jsonl
+// file CC creates for a freshly-started conversation (post-/clear) so we
+// can chain `/notify-user` into that fresh session.
+function encodeProjectDir(p: string): string {
+  return p.replace(/[\\/:]/g, '-')
+}
+const CLAUDE_PROJECTS_DIR = join(
+  homedir(),
+  '.claude',
+  'projects',
+  encodeProjectDir(PROJECT_DIR),
+)
+
+// Brief sent as $ARGUMENTS to the /notify-user command in the fresh
+// post-/clear session. /notify-user reads the brief, constructs a natural
+// message itself, and resolves chat_id from access.json — so we don't need
+// to pass any chat-routing data through here.
+const POST_CLEAR_NOTIFY_BRIEF =
+  'fresh session siap setelah /clear, sapa user singkat dan tanya mau lanjut apa'
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN ?? 'claude'
 // Default flags load mirza-marketplace's telegram channel (which isn't on
@@ -80,6 +107,20 @@ log(`  project dir:        ${PROJECT_DIR}`)
 log(`  state dir:          ${STATE_DIR}`)
 log(`  claude bin:         ${CLAUDE_BIN}`)
 log(`  claude args:        ${BASE_CLAUDE_ARGS.join(' ') || '(none)'}`)
+log(`  claude sessions in: ${CLAUDE_PROJECTS_DIR}`)
+
+// Snapshot known session jsonl files. Used by the post-/clear state machine
+// to detect when CC has materialised a freshly-started conversation.
+function listSessions(): Set<string> {
+  if (!existsSync(CLAUDE_PROJECTS_DIR)) return new Set()
+  try {
+    return new Set(
+      readdirSync(CLAUDE_PROJECTS_DIR).filter(f => f.endsWith('.jsonl')),
+    )
+  } catch {
+    return new Set()
+  }
+}
 
 const userShell = process.env.SHELL || '/bin/sh'
 const shell = isWindows ? 'cmd.exe' : userShell
@@ -141,6 +182,11 @@ function attachPty(p: IPty): void {
 // it through this binding so keystrokes always reach the live child.
 let currentPty: IPty = spawnClaudePty()
 let pendingSwitchSessionId: string | null = null
+// Post-/clear state machine. Once we inject /clear, we snapshot the existing
+// session jsonl files and start polling for a new one to appear — its
+// appearance signals that the fresh CC session is live and ready to accept
+// `/notify-user`. Null means we're not currently waiting.
+let awaitingClearReady: { sessionsBefore: Set<string> } | null = null
 attachPty(currentPty)
 
 // User terminal → PTY (raw mode so keypresses go straight through).
@@ -165,6 +211,23 @@ const heartbeatInterval = setInterval(() => {
   }
 }, 5_000)
 writeFileSync(HEARTBEAT_FILE, new Date().toISOString())
+
+// Post-/clear poll. Cheap (one readdir every 500ms) and only does work when
+// `awaitingClearReady` is set, so the steady-state cost is negligible.
+// We poll instead of fs.watch because fs.watch's create-event coverage on
+// Windows is historically flaky and this path needs to be reliable.
+const sessionPollInterval = setInterval(() => {
+  if (!awaitingClearReady) return
+  const current = listSessions()
+  for (const f of current) {
+    if (!awaitingClearReady.sessionsBefore.has(f)) {
+      log(`fresh session detected: ${f} — injecting /notify-user`)
+      awaitingClearReady = null
+      currentPty.write(`/notify-user ${POST_CLEAR_NOTIFY_BRIEF}\r`)
+      return
+    }
+  }
+}, 500)
 
 // Consume one pending command file: parse, delete, dispatch.
 async function consumePending(filename: string): Promise<void> {
@@ -205,6 +268,17 @@ async function consumePending(filename: string): Promise<void> {
     }
     log(`injecting "${command}" (id: ${payload.id ?? '?'})`)
     currentPty.write(`${command}\r`)
+    // After /clear, CC will materialise a new session jsonl. Snapshot
+    // existing sessions now so the poll loop can spot the new one and
+    // chain /notify-user into the fresh AI session. The snapshot is
+    // taken eagerly (immediately after writing /clear) because CC won't
+    // process the keystroke until the current AI turn ends — the new
+    // session file appears strictly after that, so we won't accidentally
+    // pick it up as "already there".
+    if (command === '/clear') {
+      awaitingClearReady = { sessionsBefore: listSessions() }
+      log(`awaiting fresh session after /clear`)
+    }
     return
   }
 
@@ -260,6 +334,7 @@ const sweepInterval = setInterval(() => {
 function shutdown(code: number): void {
   clearInterval(heartbeatInterval)
   clearInterval(sweepInterval)
+  clearInterval(sessionPollInterval)
   pendingWatcher.close()
   try {
     rmSync(HEARTBEAT_FILE)
