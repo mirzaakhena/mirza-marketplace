@@ -1706,8 +1706,9 @@ void (async () => {
               { command: 'status', description: 'Check your pairing status' },
               { command: 'hello', description: 'Say hello to Mirza' },
               { command: 'context', description: 'Show context & 5h usage' },
-              { command: 'new', description: 'Clear current Claude session (requires mirza-cc wrapper)' },
-              { command: 'switch', description: 'Switch to another Claude session in this project (requires mirza-cc wrapper)' },
+              { command: 'new', description: 'Start a fresh named session' },
+              { command: 'switch', description: 'Switch Claude session' },
+              { command: 'delete', description: 'Delete a session' },
             ],
             { scope: { type: 'all_private_chats' } },
           ).catch(() => {})
