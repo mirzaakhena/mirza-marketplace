@@ -402,21 +402,27 @@ async function consumePending(filename: string): Promise<void> {
       log(`ignored ${filename}: switch payload missing sessionId`)
       return
     }
-    // Inject `/resume <sid>` as keystrokes into the live PTY rather than
-    // killing CC and respawning with `--resume`. The slash command lands in
-    // CC's input loop on its next tick (after the current AI turn completes,
-    // same constraint as /clear) and CC does the session swap in-process —
-    // no terminal flicker, no wrapper respawn, no PTY teardown.
-    log(`switch requested → injecting "/resume ${sid}" (id: ${payload.id ?? '?'})`)
+    const sessionName =
+      typeof (payload as { sessionName?: unknown }).sessionName === 'string'
+        ? ((payload as { sessionName: string }).sessionName as string)
+        : null
+    log(
+      `switch requested → injecting "/resume ${sid}"` +
+        (sessionName ? ` (label: "${sessionName}")` : '') +
+        ` (id: ${payload.id ?? '?'})`,
+    )
     writeCurrentSessionId(sid)
     injectSlashCommand(`/resume ${sid}`)
-    // Notify the user via direct bot.api send (no AI roundtrip). The plugin
-    // resolves the target session's label from its registry.
-    writeSystemOutbox({
-      type: 'session-change',
-      sessionId: sid,
-      sessionName: null,
-    })
+    // Delay matches the post-/clear path so the plugin's session-change
+    // handler sees a consistent rhythm and CC has time to fully swap before
+    // the user-facing transition message lands.
+    setTimeout(() => {
+      writeSystemOutbox({
+        type: 'session-change',
+        sessionId: sid,
+        sessionName,
+      })
+    }, POST_INJECTION_DELAY_MS)
     return
   }
 
