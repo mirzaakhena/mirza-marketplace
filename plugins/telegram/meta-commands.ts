@@ -293,9 +293,17 @@ async function handleSwitch(
     return true
   }
 
-  const sessions = listProjectSessions(projectDir)
+  const currentSid = readCurrentSessionId(stateDir)
+  const all = listProjectSessions(projectDir)
+  const currentEntry = currentSid ? all.find(s => s.sessionId === currentSid) : undefined
+  const currentLabel = currentEntry?.label ?? (currentSid ? `session ${currentSid.slice(0, 8)}` : null)
+  const sessions = currentSid ? all.filter(s => s.sessionId !== currentSid) : all
   if (sessions.length === 0) {
-    await handlers.reply('Tidak ada session di project ini.')
+    await handlers.reply(
+      currentLabel
+        ? `Hanya ada satu session di project ini ("${currentLabel}"). Tidak ada session lain untuk diswitch.`
+        : 'Tidak ada session di project ini.',
+    )
     return true
   }
 
@@ -319,8 +327,11 @@ async function handleSwitch(
     sessions.length > MAX_SWITCH_BUTTONS
       ? ` (showing ${MAX_SWITCH_BUTTONS} terbaru dari ${sessions.length})`
       : ''
+  const headline = currentLabel
+    ? `🔀 Pilih session untuk diswitch (sekarang di "${currentLabel}")${moreNote}:`
+    : `🔀 Pilih session untuk diswitch${moreNote}:`
   await handlers.replyWithButtons(
-    `🔀 Pilih session untuk diswitch${moreNote}:`,
+    headline,
     rows,
   )
   return true
