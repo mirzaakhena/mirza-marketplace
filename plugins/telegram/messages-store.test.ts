@@ -399,6 +399,186 @@ describe('messages-store: logInbound quote_text', () => {
   })
 })
 
+describe('messages-store: getMessage', () => {
+  test('direct hit returns user message with parsed attachments + metadata', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    store.logInbound({
+      ts: 1700000010000,
+      chat_id: 'CHAT_G',
+      message_id: '500',
+      user_id: 'U500',
+      user_name: 'mirza',
+      text: 'pesan dengan foto',
+      attachments: [{ type: 'photo', path: '/inbox/x.jpg' }],
+      reply_to: '499',
+      quote_text: 'sebelumnya',
+      quote_is_manual: true,
+    })
+
+    const row = store.getMessage('CHAT_G', '500')
+    expect(row).not.toBeNull()
+    expect(row).toMatchObject({
+      chat_id: 'CHAT_G',
+      message_id: '500',
+      source: 'user',
+      ts: 1700000010000,
+      text: 'pesan dengan foto',
+      reply_to: '499',
+      user_id: 'U500',
+      user_name: 'mirza',
+    })
+    expect(row!.attachments).toEqual([{ type: 'photo', path: '/inbox/x.jpg' }])
+    expect(row!.metadata).toEqual({ quote_text: 'sebelumnya', quote_is_manual: true })
+    store.close()
+  })
+
+  test('direct hit returns assistant message', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    store.logOutbound({
+      ts: 1700000011000,
+      chat_id: 'CHAT_G',
+      message_id: '501',
+      source: 'assistant',
+      text: 'jawaban dari bot',
+    })
+
+    const row = store.getMessage('CHAT_G', '501')
+    expect(row).not.toBeNull()
+    expect(row).toMatchObject({
+      message_id: '501',
+      source: 'assistant',
+      text: 'jawaban dari bot',
+      user_id: null,
+      user_name: null,
+    })
+    store.close()
+  })
+
+  test('album reply to first item → direct hit succeeds', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    store.logInbound({
+      ts: 1700000012000,
+      chat_id: 'CHAT_G',
+      message_id: '600', // first item
+      text: 'caption album',
+      attachments: [
+        { type: 'photo', path: '/inbox/a.jpg' },
+        { type: 'photo', path: '/inbox/b.jpg' },
+      ],
+      metadata: {
+        media_group_id: 'MG_600',
+        message_ids: ['600', '601', '602'],
+      },
+    })
+
+    const row = store.getMessage('CHAT_G', '600')
+    expect(row).not.toBeNull()
+    expect(row!.attachments).toHaveLength(2)
+    expect((row!.metadata as any).message_ids).toEqual(['600', '601', '602'])
+    store.close()
+  })
+
+  test('album reply to non-first item → fallback finds the same row', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    store.logInbound({
+      ts: 1700000013000,
+      chat_id: 'CHAT_G',
+      message_id: '700', // first item
+      text: 'caption album',
+      attachments: [
+        { type: 'photo', path: '/inbox/c.jpg' },
+        { type: 'photo', path: '/inbox/d.jpg' },
+        { type: 'photo', path: '/inbox/e.jpg' },
+      ],
+      metadata: {
+        media_group_id: 'MG_700',
+        message_ids: ['700', '701', '702'],
+      },
+    })
+
+    // User quoted item #2 (msgid 701). Fallback should find the album row.
+    const row = store.getMessage('CHAT_G', '701')
+    expect(row).not.toBeNull()
+    expect(row!.message_id).toBe('700') // still the first-item key
+    expect(row!.attachments).toHaveLength(3)
+    expect((row!.metadata as any).message_ids).toContain('701')
+    store.close()
+  })
+
+  test('not found → returns null', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+    expect(store.getMessage('CHAT_G', '9999')).toBeNull()
+    store.close()
+  })
+
+  test('cross-chat isolation: same message_id in different chat → not returned', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    store.logInbound({
+      ts: 1700000014000,
+      chat_id: 'CHAT_A',
+      message_id: '800',
+      text: 'pesan di chat A',
+    })
+
+    expect(store.getMessage('CHAT_B', '800')).toBeNull()
+    store.close()
+  })
+
+  test('LIKE false-positive guard: substring of unrelated metadata value does not match', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    // Row 1 has metadata containing the string "999" but inside an
+    // unrelated field — must NOT be returned when looking up message_id 999.
+    store.logInbound({
+      ts: 1700000015000,
+      chat_id: 'CHAT_G',
+      message_id: '900',
+      text: 'unrelated',
+      metadata: { some_field: 'value containing 999 substring' },
+    })
+
+    expect(store.getMessage('CHAT_G', '999')).toBeNull()
+    store.close()
+  })
+
+  test('multi-row safety: when duplicate (chat_id, message_id) exist, returns latest by ts', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    store.logInbound({ ts: 1700000016000, chat_id: 'CHAT_G', message_id: '1000', text: 'older' })
+    store.logInbound({ ts: 1700000017000, chat_id: 'CHAT_G', message_id: '1000', text: 'newer' })
+
+    const row = store.getMessage('CHAT_G', '1000')
+    expect(row!.text).toBe('newer')
+    store.close()
+  })
+
+  test('returns null when store disabled', () => {
+    const original = process.env.TELEGRAM_DISABLE_MESSAGES_STORE
+    process.env.TELEGRAM_DISABLE_MESSAGES_STORE = '1'
+    try {
+      const store = createMessagesStore({ dbPath: ':memory:' })
+      store.init()
+      expect(store.getMessage('CHAT_G', '1000')).toBeNull()
+    } finally {
+      if (original === undefined) delete process.env.TELEGRAM_DISABLE_MESSAGES_STORE
+      else process.env.TELEGRAM_DISABLE_MESSAGES_STORE = original
+    }
+  })
+})
+
 describe('messages-store: disable via env var', () => {
   test('TELEGRAM_DISABLE_MESSAGES_STORE=1 → init is no-op, methods silent', () => {
     const original = process.env.TELEGRAM_DISABLE_MESSAGES_STORE

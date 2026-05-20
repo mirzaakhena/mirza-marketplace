@@ -51,11 +51,36 @@ export interface EditLogInput {
   metadata?: Record<string, unknown>
 }
 
+/**
+ * A row returned by `getMessage`. `attachments` and `metadata` are parsed
+ * back into structured values (vs. the raw JSON text stored in the DB).
+ */
+export interface StoredMessage {
+  chat_id: string
+  message_id: string
+  source: MessageSource
+  ts: number
+  text: string | null
+  reply_to: string | null
+  user_id: string | null
+  user_name: string | null
+  attachments: unknown[] | null
+  metadata: Record<string, unknown> | null
+}
+
 export interface MessagesStore {
   init(): void
   logInbound(input: InboundLogInput): void
   logOutbound(input: OutboundLogInput): void
   logEdit(input: EditLogInput): void
+  /**
+   * Look up a single message by `(chat_id, message_id)`. Returns the row with
+   * `attachments` and `metadata` already JSON-parsed, or `null` when not
+   * found. Album items 2..N — whose IDs are stored only inside
+   * `metadata.message_ids` of the album's first-item row — are resolved via a
+   * fallback scan; see docs/2026-05-20-get-message-by-id.md for the rationale.
+   */
+  getMessage(chat_id: string, message_id: string): StoredMessage | null
   close(): void
   // Test-only escape hatch for inspecting internal DB.
   _dbForTest(): Database
@@ -79,6 +104,34 @@ CREATE INDEX IF NOT EXISTS idx_messages_chat_ts ON messages(chat_id, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_msg     ON messages(chat_id, message_id);
 CREATE INDEX IF NOT EXISTS idx_messages_source  ON messages(source, ts DESC);
 `
+
+interface RawRow {
+  chat_id: string
+  message_id: string
+  source: string
+  ts: number
+  text: string | null
+  reply_to: string | null
+  user_id: string | null
+  user_name: string | null
+  attachments: string | null
+  metadata: string | null
+}
+
+function safeParseArray(json: string): unknown[] | null {
+  try {
+    const v = JSON.parse(json)
+    return Array.isArray(v) ? v : null
+  } catch { return null }
+}
+
+function safeParseMetadata(json: string | null): Record<string, unknown> | null {
+  if (!json) return null
+  try {
+    const v = JSON.parse(json)
+    return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
+  } catch { return null }
+}
 
 export function createMessagesStore(opts: { dbPath: string }): MessagesStore {
   let db: Database | null = null
@@ -177,6 +230,63 @@ export function createMessagesStore(opts: { dbPath: string }): MessagesStore {
         )
       } catch (err) {
         warn('write', err)
+      }
+    },
+    getMessage(chat_id: string, message_id: string): StoredMessage | null {
+      if (!db) return null
+      try {
+        // Step 1 — direct hit on (chat_id, message_id). Latest row wins if
+        // duplicates were ever inserted (edits, replays). Order by ts DESC.
+        let row = db.prepare(
+          `SELECT chat_id, message_id, source, ts, text, reply_to,
+                  user_id, user_name, attachments, metadata
+             FROM messages
+            WHERE chat_id = ? AND message_id = ?
+            ORDER BY ts DESC
+            LIMIT 1`,
+        ).get(chat_id, message_id) as RawRow | null
+
+        // Step 2 — album fallback. Album rows are keyed on the first item's
+        // message_id; other items' IDs live only in metadata.message_ids.
+        // Substring-LIKE narrows candidates; then we parse and verify to
+        // avoid false positives (e.g. the digit sequence happens to appear
+        // inside some unrelated metadata value).
+        if (!row) {
+          const needle = `"${message_id}"`
+          const candidates = db.prepare(
+            `SELECT chat_id, message_id, source, ts, text, reply_to,
+                    user_id, user_name, attachments, metadata
+               FROM messages
+              WHERE chat_id = ? AND metadata IS NOT NULL AND metadata LIKE ?
+              ORDER BY ts DESC`,
+          ).all(chat_id, `%${needle}%`) as RawRow[]
+
+          for (const cand of candidates) {
+            const parsed = safeParseMetadata(cand.metadata)
+            const ids = parsed?.message_ids
+            if (Array.isArray(ids) && ids.some(v => String(v) === message_id)) {
+              row = cand
+              break
+            }
+          }
+        }
+
+        if (!row) return null
+        return {
+          chat_id: row.chat_id,
+          message_id: row.message_id,
+          source: row.source as MessageSource,
+          ts: row.ts,
+          text: row.text,
+          reply_to: row.reply_to,
+          user_id: row.user_id,
+          user_name: row.user_name,
+          attachments: row.attachments ? safeParseArray(row.attachments) : null,
+          metadata: safeParseMetadata(row.metadata),
+        }
+      } catch (err) {
+        warn('read', err)
+        return null
       }
     },
     close(): void {
