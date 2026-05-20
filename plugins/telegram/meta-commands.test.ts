@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { tryRouteMetaCommand, tryHandleMetaCallback, __resetDeletePickerForTests, __resetSwitchPickerForTests, __resetArchivePickerForTests, parseEffortInput, EFFORT_LEVELS } from './meta-commands'
+import { tryRouteMetaCommand, tryHandleMetaCallback, __resetDeletePickerForTests, __resetSwitchPickerForTests, __resetArchivePickerForTests, parseEffortInput, EFFORT_LEVELS, extractCurrentEffortLevel } from './meta-commands'
 import { loadArchived } from './archive-store'
 import { listProjectSessions } from './sessions-list'
 import { setName as registrySetName } from './session-names-registry'
@@ -1172,5 +1172,53 @@ describe('meta-commands: parseEffortInput', () => {
 
   test('extra positional args beyond the level → invalid (treats whole rest as token)', () => {
     expect(parseEffortInput('/effort low and high')).toEqual({ kind: 'invalid', token: 'low and high' })
+  })
+})
+
+describe('meta-commands: extractCurrentEffortLevel', () => {
+  let projectDir: string
+  let telegramStateDir: string
+  let cleanup: () => void
+
+  beforeEach(() => {
+    const ctx = mkProject()
+    projectDir = ctx.projectDir
+    telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(telegramStateDir, { recursive: true })
+    cleanup = ctx.cleanup
+  })
+  afterEach(() => cleanup())
+
+  test('returns null when last-status.json is missing', () => {
+    expect(extractCurrentEffortLevel({ CLAUDE_PROJECT_DIR: projectDir })).toBeNull()
+  })
+
+  test('returns null when last-status.json is malformed', () => {
+    writeFileSync(join(telegramStateDir, 'last-status.json'), '{ this is not json')
+    expect(extractCurrentEffortLevel({ CLAUDE_PROJECT_DIR: projectDir })).toBeNull()
+  })
+
+  test('returns level when payload.effort.level is a known value', () => {
+    writeFileSync(
+      join(telegramStateDir, 'last-status.json'),
+      JSON.stringify({ captured_at_ms: 1, payload: { effort: { level: 'high' } } }),
+    )
+    expect(extractCurrentEffortLevel({ CLAUDE_PROJECT_DIR: projectDir })).toBe('high')
+  })
+
+  test('returns null when payload.effort.level is an unknown value', () => {
+    writeFileSync(
+      join(telegramStateDir, 'last-status.json'),
+      JSON.stringify({ captured_at_ms: 1, payload: { effort: { level: 'turbo' } } }),
+    )
+    expect(extractCurrentEffortLevel({ CLAUDE_PROJECT_DIR: projectDir })).toBeNull()
+  })
+
+  test('returns null when payload has no effort field at all', () => {
+    writeFileSync(
+      join(telegramStateDir, 'last-status.json'),
+      JSON.stringify({ captured_at_ms: 1, payload: { session_id: 'abc' } }),
+    )
+    expect(extractCurrentEffortLevel({ CLAUDE_PROJECT_DIR: projectDir })).toBeNull()
   })
 })

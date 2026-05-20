@@ -170,6 +170,37 @@ function readCurrentSessionId(stateDir: string): string | null {
   }
 }
 
+/**
+ * Read `<telegramStateDir>/last-status.json` and return the current effort
+ * level if the payload carries a known value, otherwise null. Tolerant of
+ * missing file, malformed JSON, and unknown level strings.
+ */
+export function extractCurrentEffortLevel(
+  env: Record<string, string | undefined>,
+): EffortLevel | null {
+  const telegramStateDir = resolveTelegramStateDir(env)
+  if (!telegramStateDir) return null
+  const file = join(telegramStateDir, 'last-status.json')
+  let raw: string
+  try {
+    raw = readFileSync(file, 'utf8')
+  } catch {
+    return null
+  }
+  let parsed: { payload?: { effort?: { level?: unknown } } }
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  const level = parsed?.payload?.effort?.level
+  if (typeof level !== 'string') return null
+  if ((EFFORT_LEVELS as readonly string[]).includes(level)) {
+    return level as EffortLevel
+  }
+  return null
+}
+
 function wrapperHeartbeatFresh(stateDir: string): boolean {
   const beat = join(stateDir, 'wrapper.heartbeat')
   if (!existsSync(beat)) return false
