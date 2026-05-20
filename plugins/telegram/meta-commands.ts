@@ -219,7 +219,7 @@ function wrapperHeartbeatFresh(stateDir: string): boolean {
  * switching to a different CC session.
  */
 type WrapperPayload =
-  | { type?: 'slash'; command: string; sessionName?: string }
+  | { type?: 'slash'; command: string; sessionName?: string; confirmAfterMs?: number }
   | { type: 'switch'; sessionId: string; sessionName?: string }
 
 function writeWrapperCommand(stateDir: string, payload: WrapperPayload): void {
@@ -441,7 +441,9 @@ async function handleEffortDirect(
     return true
   }
   try {
-    writeWrapperCommand(stateDir, { command: `/effort ${level}` })
+    // confirmAfterMs: CC's /effort pops up a "Change effort level?" confirm
+    // picker with the "Yes" option pre-selected. A second \r commits it.
+    writeWrapperCommand(stateDir, { command: `/effort ${level}`, confirmAfterMs: 500 })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     await handlers.reply(`⚠️ /effort gagal menulis command ke wrapper: ${msg}`)
@@ -999,7 +1001,9 @@ export async function tryHandleMetaCallback(
       return true
     }
     try {
-      writeWrapperCommand(stateDir, { command: `/effort ${level}` })
+      // confirmAfterMs: see handleEffortDirect for the rationale (auto-accept
+      // CC's confirm picker).
+      writeWrapperCommand(stateDir, { command: `/effort ${level}`, confirmAfterMs: 500 })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       await handlers.ackCallback(`Gagal kirim: ${msg}`)
