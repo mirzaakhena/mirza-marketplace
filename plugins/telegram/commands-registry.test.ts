@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { COMMANDS, toSetMyCommandsPayload, type CommandSpec } from './commands-registry'
+import { COMMANDS, toSetMyCommandsPayload, renderHelpList, type CommandSpec } from './commands-registry'
 
 describe('COMMANDS registry', () => {
   test('contains exactly the 7 commands in the spec, in display order', () => {
@@ -42,5 +42,28 @@ describe('toSetMyCommandsPayload', () => {
   test('preserves COMMANDS order', () => {
     const payload = toSetMyCommandsPayload()
     expect(payload.map(p => p.command)).toEqual(COMMANDS.map(c => c.name))
+  })
+})
+
+describe('renderHelpList', () => {
+  const out = renderHelpList()
+
+  test('starts with the intro paragraph', () => {
+    expect(out.startsWith('This bot bridges Telegram')).toBe(true)
+  })
+
+  test('lists every command with its helpSummary', () => {
+    for (const c of COMMANDS) {
+      expect(out).toContain(`/${c.name}`)
+      expect(out).toContain(c.helpSummary)
+    }
+  })
+
+  test('ends with the troubleshooting tail', () => {
+    expect(out).toContain('Bot not responding?')
+  })
+
+  test('mentions the /help <name> hint', () => {
+    expect(out).toContain('/help <command>')
   })
 })

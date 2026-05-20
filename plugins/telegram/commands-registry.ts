@@ -78,3 +78,22 @@ export const COMMANDS: CommandSpec[] = [
 export function toSetMyCommandsPayload(): { command: string; description: string }[] {
   return COMMANDS.map(c => ({ command: c.name, description: c.menuHint }))
 }
+
+const HELP_INTRO =
+  'This bot bridges Telegram to a Claude Code session. ' +
+  'Text and photos you send here are forwarded to your paired session; ' +
+  'replies and reactions come back.'
+
+const HELP_TROUBLESHOOTING_TAIL =
+  'Bot not responding? Send any DM to check your pairing status.'
+
+/** Renders the /help (no-args) reply: intro + command list + troubleshooting tail. */
+export function renderHelpList(): string {
+  const list = COMMANDS.map(c => `/${c.name} — ${c.helpSummary}`).join('\n')
+  return [
+    HELP_INTRO,
+    `Available commands:\n${list}`,
+    'Type /help <command> for detail.',
+    HELP_TROUBLESHOOTING_TAIL,
+  ].join('\n\n')
+}
