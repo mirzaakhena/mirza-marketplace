@@ -26,6 +26,7 @@ import { createMessagesStore } from './messages-store.ts'
 import { createAlbumBuffer } from './album-buffer'
 import { resolveStateDir } from './state-path.ts'
 import { ensureChannelsGitignore } from './channels-gitignore.ts'
+import { toSetMyCommandsPayload } from './commands-registry.ts'
 import { renderContextReply, type LastStatus } from './context-renderer.ts'
 import { isOurOwnBridge } from './server-helpers.ts'
 import { validateButtons, parseAiCallbackData, buildKeyboard, findButtonLabel } from './buttons.ts'
@@ -1847,17 +1848,7 @@ void (async () => {
           botUsername = info.username
           process.stderr.write(`telegram channel: polling as @${info.username}\n`)
           void bot.api.setMyCommands(
-            [
-              { command: 'start', description: 'Welcome and setup guide' },
-              { command: 'help', description: 'What this bot can do' },
-              { command: 'status', description: 'Check your pairing status' },
-              { command: 'hello', description: 'Say hello to Mirza' },
-              { command: 'context', description: 'Show context & 5h usage' },
-              { command: 'new', description: 'Start a fresh named session' },
-              { command: 'switch', description: 'Switch Claude session' },
-              { command: 'delete', description: 'Delete a session' },
-              { command: 'rename', description: 'Rename current session' },
-            ],
+            toSetMyCommandsPayload(),
             { scope: { type: 'all_private_chats' } },
           ).catch(() => {})
         },
