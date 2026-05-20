@@ -455,9 +455,27 @@ async function handleEffortPicker(
   env: Record<string, string | undefined>,
   handlers: MetaCommandHandlers,
 ): Promise<boolean> {
-  // Real implementation lands in Task 4. Stub keeps the wiring compileable
-  // and lets Task 3's tests exercise the with-arg path independently.
-  await handlers.reply('(picker — implemented in Task 4)')
+  const current = extractCurrentEffortLevel(env)
+  const labelFor = (lvl: EffortLevel): string =>
+    lvl === current ? `→ ${lvl}` : lvl
+  const rows: MetaCommandButton[][] = [
+    [
+      { label: labelFor('low'),    callbackData: 'meta:effort_low' },
+      { label: labelFor('medium'), callbackData: 'meta:effort_medium' },
+    ],
+    [
+      { label: labelFor('high'),  callbackData: 'meta:effort_high' },
+      { label: labelFor('xhigh'), callbackData: 'meta:effort_xhigh' },
+    ],
+    [
+      { label: labelFor('max'),  callbackData: 'meta:effort_max' },
+      { label: labelFor('auto'), callbackData: 'meta:effort_auto' },
+    ],
+    [
+      { label: '❌ Batal', callbackData: 'meta:effort_cancel' },
+    ],
+  ]
+  await handlers.replyWithButtons('🎯 Pilih effort level untuk session ini', rows)
   return true
 }
 

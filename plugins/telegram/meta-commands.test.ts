@@ -1223,6 +1223,70 @@ describe('meta-commands: extractCurrentEffortLevel', () => {
   })
 })
 
+describe('meta-commands: /effort (no-arg picker)', () => {
+  let projectDir: string
+  let stateDir: string
+  let telegramStateDir: string
+  let cleanup: () => void
+
+  beforeEach(() => {
+    const ctx = mkProject()
+    projectDir = ctx.projectDir
+    stateDir = ctx.stateDir
+    telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(telegramStateDir, { recursive: true })
+    cleanup = ctx.cleanup
+    setHeartbeat(stateDir, new Date().toISOString())
+  })
+  afterEach(() => cleanup())
+
+  test('renders six effort buttons + cancel in 3x2 + 1 layout', async () => {
+    const { handler, replies } = makeHandler()
+    const consumed = await tryRouteMetaCommandT('/effort', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    expect(replies.length).toBe(1)
+    const rows = replies[0].buttons!
+    expect(rows.length).toBe(4) // 3 effort rows + 1 cancel row
+    expect(rows[0].length).toBe(2)
+    expect(rows[1].length).toBe(2)
+    expect(rows[2].length).toBe(2)
+    expect(rows[3].length).toBe(1)
+    const labels = rows.slice(0, 3).flatMap(r => r.map(b => b.label.replace(/^→ /, '')))
+    expect(labels).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'auto'])
+    const callbacks = rows.slice(0, 3).flatMap(r => r.map(b => b.callbackData))
+    expect(callbacks).toEqual([
+      'meta:effort_low', 'meta:effort_medium', 'meta:effort_high',
+      'meta:effort_xhigh', 'meta:effort_max', 'meta:effort_auto',
+    ])
+    expect(rows[3][0].callbackData).toBe('meta:effort_cancel')
+  })
+
+  test('marks current effort with → prefix when status payload is available', async () => {
+    writeFileSync(
+      join(telegramStateDir, 'last-status.json'),
+      JSON.stringify({ captured_at_ms: 1, payload: { effort: { level: 'high' } } }),
+    )
+    const { handler, replies } = makeHandler()
+    await tryRouteMetaCommandT('/effort', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const labels = replies[0].buttons!.slice(0, 3).flatMap(r => r.map(b => b.label))
+    expect(labels).toContain('→ high')
+    expect(labels.filter(l => l.startsWith('→ '))).toHaveLength(1)
+  })
+
+  test('no → marker when status payload is missing', async () => {
+    const { handler, replies } = makeHandler()
+    await tryRouteMetaCommandT('/effort', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const labels = replies[0].buttons!.slice(0, 3).flatMap(r => r.map(b => b.label))
+    expect(labels.every(l => !l.startsWith('→ '))).toBe(true)
+  })
+
+  test('does NOT write to wrapper inbox (picker is render-only)', async () => {
+    const { handler } = makeHandler()
+    await tryRouteMetaCommandT('/effort', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(listPending(stateDir).length).toBe(0)
+  })
+})
+
 describe('meta-commands: /effort <level> (direct)', () => {
   let projectDir: string
   let stateDir: string
