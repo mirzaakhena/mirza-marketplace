@@ -976,6 +976,41 @@ export async function tryHandleMetaCallback(
     return true
   }
 
+  if (rest.startsWith('effort_')) {
+    const remainder = rest.slice('effort_'.length)
+    if (remainder === 'cancel') {
+      await handlers.ackCallback('Effort tidak diubah')
+      await handlers.editMessage('❌ Effort tidak diubah.').catch(() => {})
+      return true
+    }
+    if (!(EFFORT_LEVELS as readonly string[]).includes(remainder)) {
+      await handlers.ackCallback('Unknown effort level')
+      return true
+    }
+    const level = remainder as EffortLevel
+    const stateDir = resolvePtyStateDir(env)
+    if (!stateDir) {
+      await handlers.ackCallback('CLAUDE_PROJECT_DIR not set')
+      return true
+    }
+    if (!wrapperHeartbeatFresh(stateDir)) {
+      await handlers.ackCallback('Wrapper not detected')
+      await handlers.editMessage('⚠️ /effort gagal: mirza-cc wrapper tidak terdeteksi.').catch(() => {})
+      return true
+    }
+    try {
+      writeWrapperCommand(stateDir, { command: `/effort ${level}` })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await handlers.ackCallback(`Gagal kirim: ${msg}`)
+      await handlers.editMessage(`⚠️ /effort gagal menulis ke wrapper: ${msg}`).catch(() => {})
+      return true
+    }
+    await handlers.ackCallback(`Effort: ${level}`)
+    await handlers.editMessage(`🎯 Effort: ${level} ✅`).catch(() => {})
+    return true
+  }
+
   // Unknown meta:... — consume so it doesn't fall through to AI, but signal
   // gracefully.
   await handlers.ackCallback('Unknown meta action')

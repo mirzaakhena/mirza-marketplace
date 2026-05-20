@@ -1347,3 +1347,64 @@ describe('meta-commands: /effort <level> (direct)', () => {
     expect(listPending(stateDir).length).toBe(0)
   })
 })
+
+describe('meta-commands: tryHandleMetaCallback effort_*', () => {
+  let projectDir: string
+  let stateDir: string
+  let cleanup: () => void
+
+  beforeEach(() => {
+    const ctx = mkProject()
+    projectDir = ctx.projectDir
+    stateDir = ctx.stateDir
+    cleanup = ctx.cleanup
+    setHeartbeat(stateDir, new Date().toISOString())
+  })
+  afterEach(() => cleanup())
+
+  test('meta:effort_low writes /effort low to wrapper and edits picker to confirmation', async () => {
+    const cb = makeCallbackHandler()
+    const consumed = await tryHandleMetaCallback('meta:effort_low', { CLAUDE_PROJECT_DIR: projectDir }, cb.handler)
+    expect(consumed).toBe(true)
+    const pending = listPending(stateDir)
+    expect(pending.length).toBe(1)
+    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
+    expect(payload.command).toBe('/effort low')
+    expect(cb.acks.length).toBeGreaterThan(0)
+    expect(cb.edits.some(t => t.includes('low'))).toBe(true)
+  })
+
+  test('meta:effort_cancel does NOT write to wrapper; picker edited to "tidak diubah"', async () => {
+    const cb = makeCallbackHandler()
+    const consumed = await tryHandleMetaCallback('meta:effort_cancel', { CLAUDE_PROJECT_DIR: projectDir }, cb.handler)
+    expect(consumed).toBe(true)
+    expect(listPending(stateDir).length).toBe(0)
+    expect(cb.edits.some(t => /tidak diubah/i.test(t))).toBe(true)
+  })
+
+  test('meta:effort_<each-of-6-levels> all write the correct command', async () => {
+    for (const lvl of EFFORT_LEVELS) {
+      const ctx = mkProject()
+      setHeartbeat(ctx.stateDir, new Date().toISOString())
+      const cb = makeCallbackHandler()
+      await tryHandleMetaCallback(`meta:effort_${lvl}`, { CLAUDE_PROJECT_DIR: ctx.projectDir }, cb.handler)
+      const pending = readdirSync(join(ctx.stateDir, 'pending'))
+      const payload = JSON.parse(readFileSync(join(ctx.stateDir, 'pending', pending[0]), 'utf8'))
+      expect(payload.command).toBe(`/effort ${lvl}`)
+      ctx.cleanup()
+    }
+  })
+
+  test('meta:effort_unknown → unknown action ack, no wrapper write', async () => {
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback('meta:effort_turbo', { CLAUDE_PROJECT_DIR: projectDir }, cb.handler)
+    expect(listPending(stateDir).length).toBe(0)
+    expect(cb.acks.some(t => /unknown/i.test(t))).toBe(true)
+  })
+
+  test('wrapper write failure surfaces via ackCallback and edit, no throw', async () => {
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback('meta:effort_low', {}, cb.handler)
+    expect(cb.acks.some(t => /CLAUDE_PROJECT_DIR/i.test(t))).toBe(true)
+  })
+})
