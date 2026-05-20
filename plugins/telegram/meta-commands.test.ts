@@ -1222,3 +1222,64 @@ describe('meta-commands: extractCurrentEffortLevel', () => {
     expect(extractCurrentEffortLevel({ CLAUDE_PROJECT_DIR: projectDir })).toBeNull()
   })
 })
+
+describe('meta-commands: /effort <level> (direct)', () => {
+  let projectDir: string
+  let stateDir: string
+  let cleanup: () => void
+
+  beforeEach(() => {
+    const ctx = mkProject()
+    projectDir = ctx.projectDir
+    stateDir = ctx.stateDir
+    cleanup = ctx.cleanup
+    setHeartbeat(stateDir, new Date().toISOString())
+  })
+  afterEach(() => cleanup())
+
+  test('valid level writes {command:"/effort <level>"} to wrapper inbox', async () => {
+    const { handler, replies } = makeHandler()
+    const consumed = await tryRouteMetaCommandT('/effort low', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    const pending = listPending(stateDir)
+    expect(pending.length).toBe(1)
+    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
+    expect(payload.command).toBe('/effort low')
+    expect(replies.length).toBe(1)
+    expect(replies[0].text).toContain('low')
+  })
+
+  test('invalid level replies usage and does NOT write to wrapper inbox', async () => {
+    const { handler, replies } = makeHandler()
+    const consumed = await tryRouteMetaCommandT('/effort turbo', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    expect(listPending(stateDir).length).toBe(0)
+    expect(replies.length).toBe(1)
+    expect(replies[0].text).toContain('low, medium, high, xhigh, max, auto')
+  })
+
+  test('case-insensitive and whitespace-tolerant', async () => {
+    const { handler, replies } = makeHandler()
+    await tryRouteMetaCommandT('/effort   HIGH  ', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(replies[0].text).toContain('high')
+    const pending = listPending(stateDir)
+    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
+    expect(payload.command).toBe('/effort high')
+  })
+
+  test('warns when CLAUDE_PROJECT_DIR is missing', async () => {
+    const { handler, replies } = makeHandler()
+    const consumed = await tryRouteMetaCommandT('/effort low', {}, handler)
+    expect(consumed).toBe(true)
+    expect(replies[0].text).toMatch(/CLAUDE_PROJECT_DIR/)
+  })
+
+  test('warns when wrapper heartbeat is stale', async () => {
+    rmSync(join(stateDir, 'wrapper.heartbeat'), { force: true })
+    const { handler, replies } = makeHandler()
+    const consumed = await tryRouteMetaCommandT('/effort low', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    expect(replies[0].text).toMatch(/wrapper/i)
+    expect(listPending(stateDir).length).toBe(0)
+  })
+})

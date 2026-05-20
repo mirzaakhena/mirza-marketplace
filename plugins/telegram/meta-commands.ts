@@ -288,6 +288,20 @@ export async function tryRouteMetaCommand(
     const rest = trimmed.slice('/rename'.length).trim()
     return handleRename(env, handlers, rest)
   }
+  // Match `/effort` (exact) or `/effort` followed by whitespace + arg.
+  if (lower === '/effort' || lower.startsWith('/effort ') || lower.startsWith('/effort\t')) {
+    const parsed = parseEffortInput(trimmed)
+    if (parsed.kind === 'picker') {
+      return handleEffortPicker(env, handlers)
+    }
+    if (parsed.kind === 'invalid') {
+      await handlers.reply(
+        `⚠️ /effort butuh salah satu: ${EFFORT_LEVELS.join(', ')}`,
+      )
+      return true
+    }
+    return handleEffortDirect(env, handlers, parsed.level)
+  }
   return false
 }
 
@@ -405,6 +419,45 @@ async function handleRename(
     registrySetName(telegramStateDir, currentSid, newName)
   }
   await handlers.reply(`✏️ Renaming session ke "${newName}".`)
+  return true
+}
+
+async function handleEffortDirect(
+  env: Record<string, string | undefined>,
+  handlers: MetaCommandHandlers,
+  level: EffortLevel,
+): Promise<boolean> {
+  const stateDir = resolvePtyStateDir(env)
+  if (!stateDir) {
+    await handlers.reply(
+      '⚠️ /effort tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.',
+    )
+    return true
+  }
+  if (!wrapperHeartbeatFresh(stateDir)) {
+    await handlers.reply(
+      '⚠️ /effort tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.',
+    )
+    return true
+  }
+  try {
+    writeWrapperCommand(stateDir, { command: `/effort ${level}` })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await handlers.reply(`⚠️ /effort gagal menulis command ke wrapper: ${msg}`)
+    return true
+  }
+  await handlers.reply(`🎯 Effort: ${level}`)
+  return true
+}
+
+async function handleEffortPicker(
+  env: Record<string, string | undefined>,
+  handlers: MetaCommandHandlers,
+): Promise<boolean> {
+  // Real implementation lands in Task 4. Stub keeps the wiring compileable
+  // and lets Task 3's tests exercise the with-arg path independently.
+  await handlers.reply('(picker — implemented in Task 4)')
   return true
 }
 
