@@ -207,7 +207,14 @@ export async function tryRouteMetaCommand(
   if (lower === '/switch') {
     return handleSwitch(env, handlers)
   }
-  if (lower === '/delete') {
+  // /delete bifurcates by trailing arg:
+  //   /delete         → soft (hides the session via the archive store; reversible by manual edit)
+  //   /delete hard    → permanent (rmSync the jsonl; not reversible)
+  // /archive is kept as a backward-compatible alias for the soft form.
+  if (lower === '/delete' || lower === '/delete ' || lower.startsWith('/delete  ')) {
+    return handleArchive(env, handlers)
+  }
+  if (lower === '/delete hard' || lower.startsWith('/delete hard ')) {
     return handleDelete(env, handlers)
   }
   if (lower === '/archive') {

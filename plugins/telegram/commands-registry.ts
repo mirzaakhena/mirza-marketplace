@@ -61,9 +61,12 @@ export const COMMANDS: CommandSpec[] = [
   {
     name: 'delete',
     menuHint: 'Delete a session',
-    helpSummary: 'Delete a Claude session',
+    helpSummary: 'Delete a Claude session (soft by default; /delete hard = permanent)',
     helpDetail:
-      'Shows an inline picker of non-current sessions; tapping one asks for confirmation, then deletes that session\'s jsonl file. The currently active session is excluded from the picker.',
+      'Shows an inline picker of non-current sessions; tapping one asks for confirmation, then applies the chosen variant. Two modes:\n\n' +
+      '/delete (default) — soft delete. Hides the session from the /delete, /switch, and /archive pickers by appending its id to archived-sessions.json. The jsonl on disk is untouched, so `claude --resume` from a terminal can still reach it. To bring a session back into the pickers, edit archived-sessions.json on your laptop.\n\n' +
+      '/delete hard — permanent delete. Removes the session\'s jsonl from disk. Not reversible.\n\n' +
+      'The currently active session is excluded from the picker in both modes.',
   },
   {
     name: 'archive',

@@ -393,9 +393,9 @@ function writeCurrentSessionId(stateDir: string, sid: string): void {
 }
 
 /**
- * Set up a /delete picker state: write `sessionIds` as jsonls under the
+ * Set up a hard-delete picker state: write `sessionIds` as jsonls under the
  * fake home dir, mark `currentSid` (if provided) as the active session,
- * set a fresh heartbeat, then invoke /delete to populate `deletePicker`.
+ * set a fresh heartbeat, then invoke /delete hard to populate `deletePicker`.
  * Returns the shortIds of the sessions that ended up in the picker.
  */
 async function setupAndPopulatePicker(
@@ -409,7 +409,7 @@ async function setupAndPopulatePicker(
   if (currentSid) writeCurrentSessionId(stateDir, currentSid)
   setHeartbeat(stateDir, new Date().toISOString())
   const { handler } = makeHandler()
-  await tryRouteMetaCommandT('/delete', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+  await tryRouteMetaCommandT('/delete hard', { CLAUDE_PROJECT_DIR: projectDir }, handler)
   return sessionIds
     .filter(sid => sid !== currentSid)
     .map(sid => sid.replace(/-/g, '').slice(0, 8).toLowerCase())
@@ -875,7 +875,7 @@ describe('meta-commands: /delete pagination', () => {
       writeProjectJsonl(homeOverride, projectDir, sid)
     }
     const { handler, replies } = makeHandler()
-    await tryRouteMetaCommandT('/delete', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    await tryRouteMetaCommandT('/delete hard', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     const buttons = replies[0]!.buttons!
     expect(buttons.length).toBe(8)
     expect(buttons[6]!.map(b => b.callbackData)).toEqual([
@@ -891,7 +891,7 @@ describe('meta-commands: /delete pagination', () => {
       writeProjectJsonl(homeOverride, projectDir, sid)
     }
     const { handler } = makeHandler()
-    await tryRouteMetaCommandT('/delete', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    await tryRouteMetaCommandT('/delete hard', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     const cb = makeCallbackHandler()
     await tryHandleMetaCallback(
       'meta:delete_page_2',
@@ -913,7 +913,7 @@ describe('meta-commands: /delete pagination', () => {
       writeProjectJsonl(homeOverride, projectDir, sid)
     }
     const { handler } = makeHandler()
-    await tryRouteMetaCommandT('/delete', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    await tryRouteMetaCommandT('/delete hard', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     const cb = makeCallbackHandler()
     await tryHandleMetaCallback(
       'meta:delete_page_noop',
@@ -1063,5 +1063,76 @@ describe('meta-commands: /archive', () => {
       'meta:archive_page_1',
       'meta:archive_page_noop',
     ])
+  })
+
+  test('/delete (no arg) routes to the soft path: confirm writes to archived-sessions.json', async () => {
+    const sids = seedNSessions(2, 'f')
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    const { handler } = makeHandler()
+    const consumed = await tryRouteMetaCommand('/delete', env, handler)
+    expect(consumed).toBe(true)
+    // Tap → confirm → verify archive file changed.
+    const targetShort = sids[1]!.replace(/-/g, '').slice(0, 8).toLowerCase()
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback(`meta:archive_${targetShort}`, env, cb.handler)
+    await tryHandleMetaCallback(`meta:archive_confirm_${targetShort}`, env, cb.handler)
+    expect(loadArchived(telegramStateDir)).toEqual(new Set([sids[1]!]))
+  })
+
+  test('/delete with trailing whitespace still routes soft', async () => {
+    seedNSessions(2, 'a')
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    const { handler, replies } = makeHandler()
+    await tryRouteMetaCommand('/delete  ', env, handler)
+    // Soft path uses 📦 icon in the picker headline.
+    expect(replies[0]!.text.startsWith('📦')).toBe(true)
+  })
+})
+
+describe('meta-commands: /delete hard (explicit permanent variant)', () => {
+  let projectDir: string
+  let stateDir: string
+  let cleanup: () => void
+  let homeOverride: string
+
+  beforeEach(() => {
+    const ctx = mkProject()
+    projectDir = ctx.projectDir
+    stateDir = ctx.stateDir
+    cleanup = ctx.cleanup
+    homeOverride = mkdtempSync(join(tmpdir(), 'meta-cmd-home-'))
+    process.env.USERPROFILE = homeOverride
+    process.env.HOME = homeOverride
+    setHeartbeat(stateDir, new Date().toISOString())
+    __resetDeletePickerForTests()
+  })
+
+  afterEach(() => {
+    try { rmSync(homeOverride, { recursive: true, force: true }) } catch {}
+    cleanup()
+  })
+
+  test('/delete hard shows hard-delete picker with 🗑️ icon and PERMANEN copy on confirm', async () => {
+    const sid = 'aabbccdd-1111-2222-3333-444444444444'
+    writeProjectJsonl(homeOverride, projectDir, sid)
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    const { handler, replies } = makeHandler()
+    await tryRouteMetaCommand('/delete hard', env, handler)
+    expect(replies[0]!.text.startsWith('🗑️')).toBe(true)
+
+    const shortId = sid.replace(/-/g, '').slice(0, 8).toLowerCase()
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback(`meta:delete_${shortId}`, env, cb.handler)
+    expect(cb.replies[0]!.text).toMatch(/PERMANEN/i)
+  })
+
+  test('/delete hard with extra args still routes to hard path', async () => {
+    const sid = '11223344-1111-2222-3333-444444444444'
+    writeProjectJsonl(homeOverride, projectDir, sid)
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    const { handler, replies } = makeHandler()
+    await tryRouteMetaCommand('/delete hard please', env, handler)
+    // Soft path uses 📦; hard path uses 🗑️.
+    expect(replies[0]!.text.startsWith('🗑️')).toBe(true)
   })
 })
