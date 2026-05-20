@@ -23,6 +23,7 @@ import {
   refreshFromPidFiles,
   saveRegistry,
 } from './session-names-registry'
+import { loadArchived } from './archive-store'
 
 /**
  * Indonesian-short relative time formatter for picker labels. Intentionally
@@ -184,7 +185,7 @@ export function listProjectSessions(
   projectDir: string,
   stateDir?: string,
 ): SessionInfo[] {
-  const files = listSessionFiles(projectDir)
+  let files = listSessionFiles(projectDir)
   if (files.length === 0) return []
 
   let registry: Map<string, { name: string; updatedAt: number }> | null = null
@@ -192,6 +193,14 @@ export function listProjectSessions(
     registry = loadRegistry(stateDir)
     refreshFromPidFiles(registry, projectDir)
     saveRegistry(stateDir, registry)
+    // Soft-delete filter: drop sessions the user archived via Telegram.
+    // The jsonl on disk is left alone, so `claude --resume` from a terminal
+    // still works; the filter is purely a picker-visibility concern.
+    const archived = loadArchived(stateDir)
+    if (archived.size > 0) {
+      files = files.filter(f => !archived.has(f.sessionId))
+      if (files.length === 0) return []
+    }
   }
 
   const nameMap = loadNameMap(projectDir)

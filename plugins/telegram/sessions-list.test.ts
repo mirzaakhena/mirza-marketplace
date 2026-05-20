@@ -14,6 +14,7 @@ import {
   listProjectSessions,
 } from './sessions-list'
 import { setName } from './session-names-registry'
+import { addArchived } from './archive-store'
 
 /**
  * The helper reads from ~/.claude/projects/ and ~/.claude/sessions/ on the
@@ -154,6 +155,33 @@ describe('sessions-list: listProjectSessions (integration with tmp project)', ()
     } finally {
       try { rmSync(stateDir, { recursive: true, force: true }) } catch { /* ignore */ }
     }
+  })
+
+  test('archived session IDs are filtered out when stateDir provided', () => {
+    const sidKeep = 'dddddddd-1111-2222-3333-444444444444'
+    const sidDrop = 'eeeeeeee-1111-2222-3333-444444444444'
+    writeSession(sidKeep)
+    writeSession(sidDrop)
+    const stateDir = mkdtempSync(join(tmpdir(), 'sess-list-state-'))
+    try {
+      addArchived(stateDir, sidDrop)
+      const result = listProjectSessions(projectDir, stateDir)
+      expect(result.map(r => r.sessionId)).toEqual([sidKeep])
+    } finally {
+      try { rmSync(stateDir, { recursive: true, force: true }) } catch { /* ignore */ }
+    }
+  })
+
+  test('archived filter is not applied when stateDir is omitted', () => {
+    const sidA = 'ffffffff-1111-2222-3333-444444444444'
+    const sidB = '11111111-1111-2222-3333-444444444444'
+    writeSession(sidA)
+    writeSession(sidB)
+    // Even if a stateDir-bound archive list would drop sidA, omitting stateDir
+    // here means the call has no way to read the archive file and returns
+    // the raw on-disk view.
+    const result = listProjectSessions(projectDir)
+    expect(new Set(result.map(r => r.sessionId))).toEqual(new Set([sidA, sidB]))
   })
 })
 
