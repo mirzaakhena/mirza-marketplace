@@ -35,14 +35,14 @@ export function progressBar(pct: number, width = 10): string {
 }
 
 export function formatRelativeMs(ageMs: number): string {
-  if (ageMs < 0) return 'baru'
+  if (ageMs < 0) return 'just now'
   const sec = Math.floor(ageMs / 1000)
-  if (sec < 60) return `${sec}s lalu`
+  if (sec < 60) return `${sec}s ago`
   const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}m lalu`
+  if (min < 60) return `${min}m ago`
   const hr = Math.floor(min / 60)
   const rm = min % 60
-  return rm ? `${hr}h ${rm}m lalu` : `${hr}h lalu`
+  return rm ? `${hr}h ${rm}m ago` : `${hr}h ago`
 }
 
 // Asia/Jakarta is UTC+7 year-round, no DST — compute directly to avoid Intl.
@@ -55,7 +55,7 @@ export function formatJakartaHM(epochMs: number): string {
 
 export function formatResetRemain(resetsAtSec: number, nowMs: number = Date.now()): string {
   const remainSec = resetsAtSec - Math.floor(nowMs / 1000)
-  if (remainSec <= 0) return 'reset baru saja'
+  if (remainSec <= 0) return 'reset just now'
   const days = Math.floor(remainSec / 86400)
   const hours = Math.floor((remainSec % 86400) / 3600)
   const minutes = Math.floor((remainSec % 3600) / 60)
@@ -107,7 +107,7 @@ export function renderContextReply(
       ctxLines.push(`${formatTokens(used)} / ${formatTokens(total)} tokens`)
     }
   } else {
-    ctxLines.push('(tidak tersedia)')
+    ctxLines.push('(unavailable)')
   }
   sections.push(ctxLines.join('\n'))
 
