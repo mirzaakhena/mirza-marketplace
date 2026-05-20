@@ -323,6 +323,82 @@ describe('messages-store: album logging shape', () => {
   })
 })
 
+describe('messages-store: logInbound quote_text', () => {
+  test('quote_text + quote_is_manual round-trip through metadata column', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    store.logInbound({
+      ts: 1700000005000,
+      chat_id: 'CHAT_Q',
+      message_id: '301',
+      user_id: 'U_Q',
+      user_name: 'mirza',
+      text: 'Ini..',
+      reply_to: '300',
+      quote_text: 'bagian yang dipilih user',
+      quote_is_manual: true,
+    })
+
+    const row = store._dbForTest()
+      .query('SELECT metadata FROM messages WHERE message_id = ?')
+      .get('301') as any
+    expect(JSON.parse(row.metadata)).toEqual({
+      quote_text: 'bagian yang dipilih user',
+      quote_is_manual: true,
+    })
+    store.close()
+  })
+
+  test('quote fields merge with caller-supplied metadata (album case)', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    store.logInbound({
+      ts: 1700000005001,
+      chat_id: 'CHAT_Q',
+      message_id: '302',
+      text: 'reply to album',
+      quote_text: 'caption album asal',
+      quote_is_manual: false,
+      metadata: {
+        media_group_id: 'MG_X',
+        message_ids: ['302', '303'],
+      },
+    })
+
+    const row = store._dbForTest()
+      .query('SELECT metadata FROM messages WHERE message_id = ?')
+      .get('302') as any
+    expect(JSON.parse(row.metadata)).toEqual({
+      media_group_id: 'MG_X',
+      message_ids: ['302', '303'],
+      quote_text: 'caption album asal',
+      quote_is_manual: false,
+    })
+    store.close()
+  })
+
+  test('quote_text omitted → no quote keys in metadata', () => {
+    const store = createMessagesStore({ dbPath: ':memory:' })
+    store.init()
+
+    store.logInbound({
+      ts: 1700000005002,
+      chat_id: 'CHAT_Q',
+      message_id: '303',
+      text: 'plain reply, no quote captured',
+      reply_to: '300',
+    })
+
+    const row = store._dbForTest()
+      .query('SELECT metadata FROM messages WHERE message_id = ?')
+      .get('303') as any
+    expect(row.metadata).toBeNull()
+    store.close()
+  })
+})
+
 describe('messages-store: disable via env var', () => {
   test('TELEGRAM_DISABLE_MESSAGES_STORE=1 → init is no-op, methods silent', () => {
     const original = process.env.TELEGRAM_DISABLE_MESSAGES_STORE

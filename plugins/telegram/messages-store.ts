@@ -22,6 +22,13 @@ export interface InboundLogInput {
   attachments?: unknown[]
   reply_to?: string
   metadata?: Record<string, unknown>
+  /**
+   * Resolved quoted content for replies (see server-helpers.extractQuoteText).
+   * Stored inside the `metadata` JSON column (no schema migration). The store
+   * merges these into `metadata` so callers can pass both freely.
+   */
+  quote_text?: string
+  quote_is_manual?: boolean
 }
 
 export interface OutboundLogInput {
@@ -105,6 +112,11 @@ export function createMessagesStore(opts: { dbPath: string }): MessagesStore {
     logInbound(input: InboundLogInput): void {
       if (!db) return
       try {
+        const mergedMeta: Record<string, unknown> = { ...(input.metadata ?? {}) }
+        if (input.quote_text != null) mergedMeta.quote_text = input.quote_text
+        if (input.quote_is_manual != null) mergedMeta.quote_is_manual = input.quote_is_manual
+        const metaJson = Object.keys(mergedMeta).length > 0 ? JSON.stringify(mergedMeta) : null
+
         const stmt = db.prepare(
           `INSERT INTO messages
             (ts, chat_id, message_id, source, user_id, user_name, text, attachments, reply_to, metadata)
@@ -119,7 +131,7 @@ export function createMessagesStore(opts: { dbPath: string }): MessagesStore {
           input.text ?? null,
           input.attachments ? JSON.stringify(input.attachments) : null,
           input.reply_to ?? null,
-          input.metadata ? JSON.stringify(input.metadata) : null,
+          metaJson,
         )
       } catch (err) {
         warn('write', err)
