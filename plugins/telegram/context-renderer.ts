@@ -1,4 +1,4 @@
-// Renderer for Telegram /context reply.
+// Renderer for Telegram /status reply.
 // Pure functions only — no I/O, no bot, no env access. Lives in its own
 // module so it can be unit-tested without booting server.ts.
 
