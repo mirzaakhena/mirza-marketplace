@@ -34,6 +34,7 @@ import { commonMarkToMarkdownV2 } from './markdown.ts'
 import { tryRouteMetaCommand, tryHandleMetaCallback } from './meta-commands.ts'
 import { readCurrentSessionId, resolveCurrentSessionName } from './current-session-info.ts'
 import { listProjectSessions } from './sessions-list.ts'
+import { readPluginVersion, formatPluginVersionLine } from './plugin-version.ts'
 
 const STATE_DIR = (() => {
   const resolved = resolveStateDir(process.env)
@@ -924,26 +925,46 @@ bot.command('help', async ctx => {
 })
 
 bot.command('status', async ctx => {
-  const gated = dmCommandGate(ctx)
-  if (!gated) return
-  const { access, senderId } = gated
+  if (!dmCommandGate(ctx)) return
 
-  if (access.allowFrom.includes(senderId)) {
-    const name = ctx.from!.username ? `@${ctx.from!.username}` : senderId
-    await ctx.reply(`Paired as ${name}.`)
+  const install = ensureContextBridgeInstalled()
+  if (install.kind === 'error') {
+    await ctx.reply(`Failed to install bridge:\n${install.message}`)
     return
   }
 
-  for (const [code, p] of Object.entries(access.pending)) {
-    if (p.senderId === senderId) {
-      await ctx.reply(
-        `Pending pairing — run in Claude Code:\n\n/telegram:access pair ${code}`
+  const renderNow = () => {
+    const status = loadLastStatus()
+    if (!status) {
+      return (
+        `Bridge installed, but no data yet.\n\n` +
+        `Claude Code's statusLine has not triggered. Be active in Claude Code for a moment, then send /status again.`
       )
-      return
     }
+    const sessionId = readCurrentSessionId(process.env as Record<string, string | undefined>)
+    const sessionName = resolveCurrentSessionName(sessionId, STATE_DIR)
+    return renderContextReply(status, Date.now(), {
+      sessionName,
+      pluginVersion: PLUGIN_VERSION_LINE,
+    })
   }
 
-  await ctx.reply(`Not paired. Send me a message to get a pairing code.`)
+  if (install.kind === 'installed') {
+    const ack = await ctx.reply('⏳ Installing bridge, please wait...')
+    setTimeout(async () => {
+      const text = renderNow()
+      try {
+        await ctx.api.editMessageText(ack.chat.id, ack.message_id, text)
+      } catch {
+        // Edit can fail if message was deleted or too old; fall back to a new reply.
+        await ctx.reply(text)
+      }
+    }, 5000)
+    return
+  }
+
+  // already-installed
+  await ctx.reply(renderNow())
 })
 
 // ---------------------------------------------------------------------------
@@ -958,6 +979,12 @@ const CONTEXT_BRIDGE_SCRIPT = join(import.meta.dir, 'scripts', 'context-bridge.t
 const CONTEXT_BRIDGE_PATH = `bun run "${CONTEXT_BRIDGE_SCRIPT}"`
 
 const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR?.trim() || null
+
+// Resolved once at boot for the /status footer.
+const PLUGIN_VERSION_LINE = (() => {
+  const v = readPluginVersion(import.meta.dir)
+  return formatPluginVersionLine(v.name, v.version, v.sha)
+})()
 
 function loadLastStatus(): LastStatus | null {
   const path = join(STATE_DIR, 'last-status.json')
