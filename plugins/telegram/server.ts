@@ -26,7 +26,7 @@ import { createMessagesStore } from './messages-store.ts'
 import { createAlbumBuffer } from './album-buffer'
 import { resolveStateDir } from './state-path.ts'
 import { ensureChannelsGitignore } from './channels-gitignore.ts'
-import { toSetMyCommandsPayload } from './commands-registry.ts'
+import { toSetMyCommandsPayload, renderHelpList, renderHelpDetail } from './commands-registry.ts'
 import { renderContextReply, type LastStatus } from './context-renderer.ts'
 import { isOurOwnBridge } from './server-helpers.ts'
 import { validateButtons, parseAiCallbackData, buildKeyboard, findButtonLabel } from './buttons.ts'
@@ -882,11 +882,19 @@ bot.command('start', async ctx => {
 
 bot.command('help', async ctx => {
   if (!dmCommandGate(ctx)) return
+  // grammy gives us the argument string in ctx.match for command handlers.
+  const arg = (ctx.match ?? '').toString().trim()
+  if (!arg) {
+    await ctx.reply(renderHelpList())
+    return
+  }
+  const detail = renderHelpDetail(arg)
+  if (detail) {
+    await ctx.reply(detail)
+    return
+  }
   await ctx.reply(
-    `Messages you send here route to a paired Claude Code session. ` +
-    `Text and photos are forwarded; replies and reactions come back.\n\n` +
-    `/start — pairing instructions\n` +
-    `/status — check your pairing state`
+    `Unknown command: /${arg.replace(/^\//, '')}\n\nType /help to see all commands.`,
   )
 })
 
