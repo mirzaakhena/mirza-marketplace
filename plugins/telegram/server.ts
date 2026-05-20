@@ -913,11 +913,6 @@ bot.command('status', async ctx => {
   await ctx.reply(`Not paired. Send me a message to get a pairing code.`)
 })
 
-bot.command('hello', async ctx => {
-  if (!dmCommandGate(ctx)) return
-  await ctx.reply(`Hello, Mirza!`)
-})
-
 // ---------------------------------------------------------------------------
 // /context — surface Claude Code's context window & 5-hour rate-limit usage
 // in the chat. Data is captured by scripts/context-bridge.sh which Claude
