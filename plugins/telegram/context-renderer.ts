@@ -81,7 +81,18 @@ export function shortSession(id: string): string {
   return id.slice(0, 8)
 }
 
-export function renderContextReply(status: LastStatus, nowMs: number = Date.now()): string {
+export interface RenderOptions {
+  /** When set, displays "Session: <name> (<shortId>)" instead of just shortId. */
+  sessionName?: string | null
+  /** Pre-formatted plugin version line (or null/empty to omit). */
+  pluginVersion?: string | null
+}
+
+export function renderContextReply(
+  status: LastStatus,
+  nowMs: number = Date.now(),
+  opts: RenderOptions = {},
+): string {
   const p = status.payload
   const sections: string[] = []
 
@@ -129,7 +140,10 @@ export function renderContextReply(status: LastStatus, nowMs: number = Date.now(
   // --- Metadata block (skip individual lines if missing) ---
   const meta: string[] = []
   if (p.model?.display_name) meta.push(p.model.display_name)
-  if (p.session_id) meta.push(`Session: ${shortSession(p.session_id)}`)
+  if (p.session_id) {
+    const short = shortSession(p.session_id)
+    meta.push(opts.sessionName ? `Session: ${opts.sessionName} (${short})` : `Session: ${short}`)
+  }
   if (p.cwd) meta.push(`CWD: ${shortCwd(p.cwd)}`)
   if (typeof p.cost?.total_cost_usd === 'number') {
     meta.push(`Cost: $${p.cost.total_cost_usd.toFixed(2)}`)
@@ -141,6 +155,11 @@ export function renderContextReply(status: LastStatus, nowMs: number = Date.now(
     meta.push(`Fast: ${p.fast_mode ? 'on' : 'off'}`)
   }
   if (meta.length > 0) sections.push(meta.join('\n'))
+
+  // --- Plugin version (only if caller provided one) ---
+  if (opts.pluginVersion && opts.pluginVersion.length > 0) {
+    sections.push(opts.pluginVersion)
+  }
 
   // --- Last update (always shown) ---
   const age = nowMs - status.captured_at_ms

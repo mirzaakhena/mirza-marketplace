@@ -290,6 +290,41 @@ describe('renderContextReply (new layout)', () => {
   })
 })
 
+describe('renderContextReply — session name and plugin version', () => {
+  const baseStatus: LastStatus = {
+    captured_at_ms: Date.UTC(2026, 4, 17, 10, 0, 0),
+    payload: {
+      session_id: '76b5c187abcdef12',
+      model: { display_name: 'Opus 4.7' },
+    },
+  }
+
+  test('shows "Session: <name> (<shortId>)" when sessionName is provided', () => {
+    const out = renderContextReply(baseStatus, Date.UTC(2026, 4, 17, 10, 0, 0), {
+      sessionName: 'utama',
+    })
+    expect(out).toContain('Session: utama (76b5c187)')
+  })
+
+  test('falls back to "Session: <shortId>" when no sessionName', () => {
+    const out = renderContextReply(baseStatus, Date.UTC(2026, 4, 17, 10, 0, 0))
+    expect(out).toContain('Session: 76b5c187')
+    expect(out).not.toContain('Session: utama')
+  })
+
+  test('appends plugin version line as its own section when provided', () => {
+    const out = renderContextReply(baseStatus, Date.UTC(2026, 4, 17, 10, 0, 0), {
+      pluginVersion: 'Plugin: telegram v1.0.0 (abc1234)',
+    })
+    expect(out).toContain('Plugin: telegram v1.0.0 (abc1234)')
+  })
+
+  test('omits plugin version line when not provided', () => {
+    const out = renderContextReply(baseStatus, Date.UTC(2026, 4, 17, 10, 0, 0))
+    expect(out).not.toContain('Plugin:')
+  })
+})
+
 describe('renderContextReply (real fixture)', () => {
   // Inline copy of sandbox/folder_two/.claude/channels/telegram/last-status.json
   // captured at 1778972545000 (2026-05-16 17:42 UTC+7, i.e. 10:42 UTC).
