@@ -217,6 +217,14 @@ describe('renderContextReply (new layout)', () => {
     expect(renderContextReply(s, nowMs)).toContain('Thinking: off')
   })
 
+  test('effort level high renders "Effort: high"', () => {
+    const s: LastStatus = {
+      ...fullStatus,
+      payload: { ...fullStatus.payload, effort: { level: 'high' } },
+    }
+    expect(renderContextReply(s, nowMs)).toContain('Effort: high')
+  })
+
   test('fast_mode true renders "on"', () => {
     const s: LastStatus = {
       ...fullStatus,

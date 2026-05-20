@@ -17,6 +17,7 @@ export type StatusLinePayload = {
   }
   cost?: { total_cost_usd?: number }
   thinking?: { enabled?: boolean }
+  effort?: { level?: string }
   fast_mode?: boolean
 }
 
@@ -150,6 +151,9 @@ export function renderContextReply(
   }
   if (typeof p.thinking?.enabled === 'boolean') {
     meta.push(`Thinking: ${p.thinking.enabled ? 'on' : 'off'}`)
+  }
+  if (typeof p.effort?.level === 'string' && p.effort.level.length > 0) {
+    meta.push(`Effort: ${p.effort.level}`)
   }
   if (typeof p.fast_mode === 'boolean') {
     meta.push(`Fast: ${p.fast_mode ? 'on' : 'off'}`)
