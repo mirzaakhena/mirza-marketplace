@@ -2,7 +2,7 @@ import { describe, test, expect } from 'bun:test'
 import { COMMANDS, toSetMyCommandsPayload, renderHelpList, renderHelpDetail, type CommandSpec } from './commands-registry'
 
 describe('COMMANDS registry', () => {
-  test('contains exactly the 7 commands in the spec, in display order', () => {
+  test('contains exactly the 8 commands in the spec, in display order', () => {
     expect(COMMANDS.map(c => c.name)).toEqual([
       'start',
       'help',
@@ -10,6 +10,7 @@ describe('COMMANDS registry', () => {
       'new',
       'switch',
       'delete',
+      'archive',
       'rename',
     ])
   })
