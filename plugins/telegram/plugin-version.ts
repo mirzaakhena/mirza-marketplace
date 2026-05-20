@@ -26,3 +26,37 @@ export function formatPluginVersionLine(
   const tail = sha && sha.length > 0 ? ` (${sha})` : ''
   return `Plugin: ${name} v${version}${tail}`
 }
+
+/**
+ * Reads the plugin's name+version from <pluginDir>/package.json and tries
+ * to capture a short git sha by running `git rev-parse --short HEAD` in
+ * pluginDir. Every failure mode falls back silently to "unknown" / null —
+ * this runs at boot in user environments where git may not exist.
+ */
+export function readPluginVersion(pluginDir: string): PluginVersion {
+  let name = 'unknown'
+  let version = 'unknown'
+  try {
+    const raw = readFileSync(join(pluginDir, 'package.json'), 'utf8')
+    const parsed = JSON.parse(raw) as { name?: unknown; version?: unknown }
+    if (typeof parsed.name === 'string') name = parsed.name
+    if (typeof parsed.version === 'string') version = parsed.version
+  } catch {
+    /* fall through with defaults */
+  }
+
+  let sha: string | null = null
+  try {
+    const out = execSync('git rev-parse --short HEAD', {
+      cwd: pluginDir,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf8',
+      timeout: 1000,
+    }).trim()
+    if (/^[0-9a-f]{4,40}$/.test(out)) sha = out
+  } catch {
+    /* not a repo, no git, or other — sha stays null */
+  }
+
+  return { name, version, sha }
+}
