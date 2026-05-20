@@ -500,6 +500,10 @@ function makeCallbackHandler(): {
   handler: {
     ackCallback: (text?: string) => Promise<void>
     editMessage: (text: string) => Promise<void>
+    editMessageWithButtons: (
+      text: string,
+      rows: { label: string; callbackData: string }[][],
+    ) => Promise<void>
     reply: (text: string) => Promise<void>
     replyWithButtons: (
       text: string,
@@ -508,16 +512,21 @@ function makeCallbackHandler(): {
   }
   acks: string[]
   edits: string[]
+  editsWithButtons: RecordedReply[]
   replies: RecordedReply[]
 } {
   const acks: string[] = []
   const edits: string[] = []
+  const editsWithButtons: RecordedReply[] = []
   const replies: RecordedReply[] = []
   return {
-    acks, edits, replies,
+    acks, edits, editsWithButtons, replies,
     handler: {
       ackCallback: async (text?: string) => { acks.push(text ?? '') },
       editMessage: async (text: string) => { edits.push(text) },
+      editMessageWithButtons: async (text, rows) => {
+        editsWithButtons.push({ text, buttons: rows })
+      },
       reply: async (text: string) => { replies.push({ text }) },
       replyWithButtons: async (text, rows) => { replies.push({ text, buttons: rows }) },
     },
@@ -713,5 +722,204 @@ describe('meta-commands: tryHandleMetaCallback for switch', () => {
     expect(payload.type).toBe('switch')
     expect(payload.sessionId).toBe(sidB)
     expect(payload.sessionName).toBe('utama')
+  })
+})
+
+/**
+ * Pagination tests for the /switch and /delete pickers. Both pickers share
+ * the same paginated-picker helper; these tests exercise the new
+ * meta:<cmd>_page_<N> callbacks and verify all sessions remain tappable on
+ * later pages.
+ */
+describe('meta-commands: /switch pagination', () => {
+  let projectDir: string
+  let stateDir: string
+  let cleanup: () => void
+  let homeOverride: string
+
+  beforeEach(() => {
+    const ctx = mkProject()
+    projectDir = ctx.projectDir
+    stateDir = ctx.stateDir
+    cleanup = ctx.cleanup
+    homeOverride = mkdtempSync(join(tmpdir(), 'meta-cmd-home-'))
+    process.env.USERPROFILE = homeOverride
+    process.env.HOME = homeOverride
+    setHeartbeat(stateDir, new Date().toISOString())
+    __resetSwitchPickerForTests()
+  })
+
+  afterEach(() => {
+    try { rmSync(homeOverride, { recursive: true, force: true }) } catch {}
+    cleanup()
+  })
+
+  function seedNSessions(n: number): string[] {
+    const sids: string[] = []
+    for (let i = 0; i < n; i++) {
+      const sid = `${'a'.repeat(7)}${i.toString(16)}-1111-2222-3333-444444444444`
+      sids.push(sid)
+      writeProjectJsonl(homeOverride, projectDir, sid)
+    }
+    return sids
+  }
+
+  test('9 sessions → page 1 shows 6 sessions + nav row + cancel', async () => {
+    seedNSessions(9)
+    const { handler, replies } = makeHandler()
+    await tryRouteMetaCommandT('/switch', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const buttons = replies[0]!.buttons!
+    expect(buttons.length).toBe(8) // 6 sessions + nav + cancel
+    const navRow = buttons[6]!
+    expect(navRow.map(b => b.callbackData)).toEqual([
+      'meta:switch_page_noop',
+      'meta:switch_page_2',
+    ])
+    expect(buttons[7]).toEqual([{ label: '❌ Cancel', callbackData: 'meta:cancel' }])
+  })
+
+  test('meta:switch_page_2 re-renders page 2 via editMessageWithButtons', async () => {
+    seedNSessions(9)
+    const { handler } = makeHandler()
+    await tryRouteMetaCommandT('/switch', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const cb = makeCallbackHandler()
+    const consumed = await tryHandleMetaCallback(
+      'meta:switch_page_2',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      cb.handler,
+    )
+    expect(consumed).toBe(true)
+    expect(cb.editsWithButtons.length).toBe(1)
+    const rows = cb.editsWithButtons[0]!.buttons!
+    // 3 sessions on page 2 + nav row + cancel = 5 rows
+    expect(rows.length).toBe(5)
+    expect(rows[3]!.map(b => b.callbackData)).toEqual([
+      'meta:switch_page_1',
+      'meta:switch_page_noop',
+    ])
+  })
+
+  test('meta:switch_page_noop just acks, no edit', async () => {
+    seedNSessions(9)
+    const { handler } = makeHandler()
+    await tryRouteMetaCommandT('/switch', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback(
+      'meta:switch_page_noop',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      cb.handler,
+    )
+    expect(cb.acks.length).toBe(1)
+    expect(cb.editsWithButtons.length).toBe(0)
+    expect(cb.edits.length).toBe(0)
+  })
+
+  test('tap on page-2 session still resolves (picker holds all sessions)', async () => {
+    const sids = seedNSessions(9)
+    const { handler } = makeHandler()
+    await tryRouteMetaCommandT('/switch', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    // 9th session — would land on page 2 (index 6 onwards).
+    const lastSid = sids[sids.length - 1]!
+    const lastShort = lastSid.replace(/-/g, '').slice(0, 8).toLowerCase()
+    const cb = makeCallbackHandler()
+    const consumed = await tryHandleMetaCallback(
+      `meta:switch_${lastShort}`,
+      { CLAUDE_PROJECT_DIR: projectDir },
+      cb.handler,
+    )
+    expect(consumed).toBe(true)
+    expect(listPending(stateDir).length).toBe(1)
+  })
+
+  test('expired picker returns helpful message on page callback', async () => {
+    __resetSwitchPickerForTests() // simulate stale state
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback(
+      'meta:switch_page_2',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      cb.handler,
+    )
+    expect(cb.acks[0]).toContain('expired')
+  })
+})
+
+describe('meta-commands: /delete pagination', () => {
+  let projectDir: string
+  let stateDir: string
+  let cleanup: () => void
+  let homeOverride: string
+
+  beforeEach(() => {
+    const ctx = mkProject()
+    projectDir = ctx.projectDir
+    stateDir = ctx.stateDir
+    cleanup = ctx.cleanup
+    homeOverride = mkdtempSync(join(tmpdir(), 'meta-cmd-home-'))
+    process.env.USERPROFILE = homeOverride
+    process.env.HOME = homeOverride
+    setHeartbeat(stateDir, new Date().toISOString())
+    __resetDeletePickerForTests()
+  })
+
+  afterEach(() => {
+    try { rmSync(homeOverride, { recursive: true, force: true }) } catch {}
+    cleanup()
+  })
+
+  test('9 sessions → page 1 shows nav row with Next', async () => {
+    const sids: string[] = []
+    for (let i = 0; i < 9; i++) {
+      const sid = `${'b'.repeat(7)}${i.toString(16)}-1111-2222-3333-444444444444`
+      sids.push(sid)
+      writeProjectJsonl(homeOverride, projectDir, sid)
+    }
+    const { handler, replies } = makeHandler()
+    await tryRouteMetaCommandT('/delete', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const buttons = replies[0]!.buttons!
+    expect(buttons.length).toBe(8)
+    expect(buttons[6]!.map(b => b.callbackData)).toEqual([
+      'meta:delete_page_noop',
+      'meta:delete_page_2',
+    ])
+    expect(buttons[7]).toEqual([{ label: '❌ Cancel', callbackData: 'meta:delete_cancel' }])
+  })
+
+  test('meta:delete_page_2 re-renders via editMessageWithButtons', async () => {
+    for (let i = 0; i < 9; i++) {
+      const sid = `${'c'.repeat(7)}${i.toString(16)}-1111-2222-3333-444444444444`
+      writeProjectJsonl(homeOverride, projectDir, sid)
+    }
+    const { handler } = makeHandler()
+    await tryRouteMetaCommandT('/delete', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback(
+      'meta:delete_page_2',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      cb.handler,
+    )
+    expect(cb.editsWithButtons.length).toBe(1)
+    const rows = cb.editsWithButtons[0]!.buttons!
+    expect(rows.length).toBe(5)
+    expect(rows[3]!.map(b => b.callbackData)).toEqual([
+      'meta:delete_page_1',
+      'meta:delete_page_noop',
+    ])
+  })
+
+  test('meta:delete_page_noop just acks', async () => {
+    for (let i = 0; i < 9; i++) {
+      const sid = `${'d'.repeat(7)}${i.toString(16)}-1111-2222-3333-444444444444`
+      writeProjectJsonl(homeOverride, projectDir, sid)
+    }
+    const { handler } = makeHandler()
+    await tryRouteMetaCommandT('/delete', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback(
+      'meta:delete_page_noop',
+      { CLAUDE_PROJECT_DIR: projectDir },
+      cb.handler,
+    )
+    expect(cb.acks.length).toBe(1)
+    expect(cb.editsWithButtons.length).toBe(0)
   })
 })

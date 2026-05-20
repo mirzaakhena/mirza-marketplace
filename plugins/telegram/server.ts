@@ -1092,6 +1092,20 @@ bot.on('callback_query:data', async ctx => {
       editMessage: async (text: string) => {
         await ctx.editMessageText(text)
       },
+      editMessageWithButtons: async (msgText, rows) => {
+        const kb = new InlineKeyboard()
+        for (let r = 0; r < rows.length; r++) {
+          for (const btn of rows[r]) {
+            kb.text(btn.label, btn.callbackData)
+          }
+          if (r < rows.length - 1) kb.row()
+        }
+        try {
+          await ctx.editMessageText(msgText, { reply_markup: kb })
+        } catch (err) {
+          process.stderr.write(`telegram channel: meta callback edit-with-buttons failed: ${err}\n`)
+        }
+      },
       reply: async (text: string) => {
         try {
           await ctx.reply(text)

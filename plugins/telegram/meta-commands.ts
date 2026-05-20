@@ -35,9 +35,9 @@ import {
   findSessionIdByName,
 } from './session-names-registry.ts'
 import { resolveStateDir as resolveTelegramStateDir } from './state-path.ts'
+import { renderPickerPage } from './paginated-picker.ts'
 
 const HEARTBEAT_FRESH_MS = 30_000
-const MAX_SWITCH_BUTTONS = 7 // Telegram allows 8 rows, we reserve 1 for cancel
 const SHORT_ID_RE = /^[0-9a-f]{8}$/
 
 export interface MetaCommandButton {
@@ -66,6 +66,8 @@ export interface MetaCallbackHandlers {
   ackCallback: (text?: string) => Promise<void>
   /** Edit the message that contained the buttons (strips keyboard implicitly). */
   editMessage: (text: string) => Promise<void>
+  /** Edit the message in place, replacing its keyboard with a new one. */
+  editMessageWithButtons: (text: string, rows: MetaCommandButton[][]) => Promise<void>
   /** Send a plain-text Telegram reply (used for follow-up prompts). */
   reply: (text: string) => Promise<void>
   /** Send a Telegram reply with an inline keyboard (used for confirm prompts). */
@@ -82,16 +84,24 @@ export interface MetaCallbackHandlers {
 interface SwitchPickerEntry {
   sessionId: string
   label: string
+  shortId: string
 }
+/**
+ * The picker map now keeps every session that /switch found (not just the
+ * first visible page), so a tap on page 2 still resolves without needing
+ * the picker to be re-rendered. Page changes flow through
+ * meta:switch_page_<N> which re-renders the keyboard from this same set.
+ */
 const switchPicker = new Map<string, SwitchPickerEntry>()
-
-const MAX_DELETE_BUTTONS = 7 // same as /switch — reserve 1 row for cancel
+let switchPickerSessions: SwitchPickerEntry[] = []
 
 interface DeletePickerEntry {
   sessionId: string
   label: string
+  shortId: string
 }
 const deletePicker = new Map<string, DeletePickerEntry>()
+let deletePickerSessions: DeletePickerEntry[] = []
 
 /** Resolve the per-project state dir pty-controller agrees on. */
 function resolvePtyStateDir(env: Record<string, string | undefined>): string | null {
@@ -316,6 +326,17 @@ async function handleRename(
   return true
 }
 
+function switchHeadline(
+  currentLabel: string | null,
+  page: number,
+  totalPages: number,
+): string {
+  const pageNote = totalPages > 1 ? ` (page ${page}/${totalPages})` : ''
+  return currentLabel
+    ? `🔀 Pilih session untuk diswitch (sekarang di "${currentLabel}")${pageNote}:`
+    : `🔀 Pilih session untuk diswitch${pageNote}:`
+}
+
 async function handleSwitch(
   env: Record<string, string | undefined>,
   handlers: MetaCommandHandlers,
@@ -350,34 +371,31 @@ async function handleSwitch(
     return true
   }
 
-  // Repopulate the picker map. Older entries are dropped — only the latest
-  // /switch call's sessions are tappable, which avoids stale taps after the
-  // user issues a new /switch.
   switchPicker.clear()
-  for (const s of sessions.slice(0, MAX_SWITCH_BUTTONS)) {
-    switchPicker.set(s.shortId, { sessionId: s.sessionId, label: s.label })
+  switchPickerSessions = sessions.map(s => ({
+    sessionId: s.sessionId,
+    label: s.label,
+    shortId: s.shortId,
+  }))
+  for (const s of switchPickerSessions) {
+    switchPicker.set(s.shortId, s)
   }
 
-  const rows: MetaCommandButton[][] = []
-  for (const s of sessions.slice(0, MAX_SWITCH_BUTTONS)) {
-    // Trim label to ~60 chars so it fits Telegram's button width on mobile.
-    const label = s.label.length > 60 ? s.label.slice(0, 59) + '…' : s.label
-    rows.push([{ label, callbackData: `meta:switch_${s.shortId}` }])
-  }
-  rows.push([{ label: '❌ Cancel', callbackData: 'meta:cancel' }])
-
-  const moreNote =
-    sessions.length > MAX_SWITCH_BUTTONS
-      ? ` (showing ${MAX_SWITCH_BUTTONS} terbaru dari ${sessions.length})`
-      : ''
-  const headline = currentLabel
-    ? `🔀 Pilih session untuk diswitch (sekarang di "${currentLabel}")${moreNote}:`
-    : `🔀 Pilih session untuk diswitch${moreNote}:`
-  await handlers.replyWithButtons(
-    headline,
-    rows,
-  )
+  const { rows, currentPage, totalPages } = renderPickerPage({
+    sessions: switchPickerSessions,
+    page: 1,
+    callbackPrefix: 'meta:switch',
+    cancelCallback: 'meta:cancel',
+    labelOf: s => s.label,
+    sessionCallbackOf: s => `meta:switch_${s.shortId}`,
+  })
+  await handlers.replyWithButtons(switchHeadline(currentLabel, currentPage, totalPages), rows)
   return true
+}
+
+function deleteHeadline(page: number, totalPages: number): string {
+  const pageNote = totalPages > 1 ? ` (page ${page}/${totalPages})` : ''
+  return `🗑️ Pilih session untuk dihapus${pageNote}:`
 }
 
 async function handleDelete(
@@ -386,25 +404,19 @@ async function handleDelete(
 ): Promise<boolean> {
   const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
   if (!projectDir) {
-    await handlers.reply(
-      '⚠️ /delete tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.',
-    )
+    await handlers.reply('⚠️ /delete tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.')
     return true
   }
   const stateDir = resolvePtyStateDir(env)
   if (!stateDir || !wrapperHeartbeatFresh(stateDir)) {
-    await handlers.reply(
-      '⚠️ /delete tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.',
-    )
+    await handlers.reply('⚠️ /delete tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.')
     return true
   }
 
   const currentSid = readCurrentSessionId(stateDir)
   const telegramStateDir = resolveTelegramStateDir(env)
   const all = listProjectSessions(projectDir, telegramStateDir ?? undefined)
-  const sessions = currentSid
-    ? all.filter(s => s.sessionId !== currentSid)
-    : all
+  const sessions = currentSid ? all.filter(s => s.sessionId !== currentSid) : all
 
   if (sessions.length === 0) {
     await handlers.reply('Tidak ada session lain yang bisa dihapus.')
@@ -412,25 +424,24 @@ async function handleDelete(
   }
 
   deletePicker.clear()
-  for (const s of sessions.slice(0, MAX_DELETE_BUTTONS)) {
-    deletePicker.set(s.shortId, { sessionId: s.sessionId, label: s.label })
+  deletePickerSessions = sessions.map(s => ({
+    sessionId: s.sessionId,
+    label: s.label,
+    shortId: s.shortId,
+  }))
+  for (const s of deletePickerSessions) {
+    deletePicker.set(s.shortId, s)
   }
 
-  const rows: MetaCommandButton[][] = []
-  for (const s of sessions.slice(0, MAX_DELETE_BUTTONS)) {
-    const label = s.label.length > 60 ? s.label.slice(0, 59) + '…' : s.label
-    rows.push([{ label, callbackData: `meta:delete_${s.shortId}` }])
-  }
-  rows.push([{ label: '❌ Cancel', callbackData: 'meta:delete_cancel' }])
-
-  const moreNote =
-    sessions.length > MAX_DELETE_BUTTONS
-      ? ` (showing ${MAX_DELETE_BUTTONS} terbaru dari ${sessions.length})`
-      : ''
-  await handlers.replyWithButtons(
-    `🗑️ Pilih session untuk dihapus${moreNote}:`,
-    rows,
-  )
+  const { rows, currentPage, totalPages } = renderPickerPage({
+    sessions: deletePickerSessions,
+    page: 1,
+    callbackPrefix: 'meta:delete',
+    cancelCallback: 'meta:delete_cancel',
+    labelOf: s => s.label,
+    sessionCallbackOf: s => `meta:delete_${s.shortId}`,
+  })
+  await handlers.replyWithButtons(deleteHeadline(currentPage, totalPages), rows)
   return true
 }
 
@@ -457,6 +468,44 @@ export async function tryHandleMetaCallback(
   if (rest === 'cancel') {
     await handlers.ackCallback('Cancelled')
     await handlers.editMessage('(switch cancelled)').catch(() => {})
+    return true
+  }
+
+  if (rest.startsWith('switch_page_')) {
+    const arg = rest.slice('switch_page_'.length)
+    if (arg === 'noop') {
+      await handlers.ackCallback()
+      return true
+    }
+    const page = Number.parseInt(arg, 10)
+    if (!Number.isFinite(page) || page < 1) {
+      await handlers.ackCallback('Bad page')
+      return true
+    }
+    if (switchPickerSessions.length === 0) {
+      await handlers.ackCallback('Picker expired, /switch lagi')
+      await handlers.editMessage('(picker expired — please run /switch again)').catch(() => {})
+      return true
+    }
+    const stateDir = resolvePtyStateDir(env)
+    const currentSid = stateDir ? readCurrentSessionId(stateDir) : null
+    const currentLabel = (() => {
+      if (!currentSid) return null
+      const e = switchPickerSessions.find(s => s.sessionId === currentSid)
+      return e?.label ?? `session ${currentSid.slice(0, 8)}`
+    })()
+    const { rows, currentPage, totalPages } = renderPickerPage({
+      sessions: switchPickerSessions,
+      page,
+      callbackPrefix: 'meta:switch',
+      cancelCallback: 'meta:cancel',
+      labelOf: s => s.label,
+      sessionCallbackOf: s => `meta:switch_${s.shortId}`,
+    })
+    await handlers.ackCallback()
+    await handlers
+      .editMessageWithButtons(switchHeadline(currentLabel, currentPage, totalPages), rows)
+      .catch(() => {})
     return true
   }
 
@@ -507,9 +556,40 @@ export async function tryHandleMetaCallback(
   }
 
   if (rest.startsWith('delete_')) {
-    // Branches: `delete_<shortId>` (picker tap, Task 6),
-    // `delete_confirm_<shortId>` (Task 7), `delete_cancel` (Task 8)
+    // Branches: `delete_<shortId>` (picker tap), `delete_confirm_<shortId>`,
+    // `delete_cancel`, `delete_page_<N>` (pagination).
     const remainder = rest.slice('delete_'.length)
+
+    if (remainder.startsWith('page_')) {
+      const arg = remainder.slice('page_'.length)
+      if (arg === 'noop') {
+        await handlers.ackCallback()
+        return true
+      }
+      const page = Number.parseInt(arg, 10)
+      if (!Number.isFinite(page) || page < 1) {
+        await handlers.ackCallback('Bad page')
+        return true
+      }
+      if (deletePickerSessions.length === 0) {
+        await handlers.ackCallback('Picker expired, /delete lagi')
+        await handlers.editMessage('(picker expired — please run /delete again)').catch(() => {})
+        return true
+      }
+      const { rows, currentPage, totalPages } = renderPickerPage({
+        sessions: deletePickerSessions,
+        page,
+        callbackPrefix: 'meta:delete',
+        cancelCallback: 'meta:delete_cancel',
+        labelOf: s => s.label,
+        sessionCallbackOf: s => `meta:delete_${s.shortId}`,
+      })
+      await handlers.ackCallback()
+      await handlers
+        .editMessageWithButtons(deleteHeadline(currentPage, totalPages), rows)
+        .catch(() => {})
+      return true
+    }
 
     if (remainder === 'cancel') {
       await handlers.ackCallback('Cancelled')
@@ -604,9 +684,11 @@ export async function tryHandleMetaCallback(
  */
 export function __resetSwitchPickerForTests(): void {
   switchPicker.clear()
+  switchPickerSessions = []
 }
 
 // Export for test resets — parallel to __resetSwitchPickerForTests
 export function __resetDeletePickerForTests(): void {
   deletePicker.clear()
+  deletePickerSessions = []
 }
