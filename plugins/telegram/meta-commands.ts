@@ -41,6 +41,39 @@ import { addArchived } from './archive-store.ts'
 const HEARTBEAT_FRESH_MS = 30_000
 const SHORT_ID_RE = /^[0-9a-f]{8}$/
 
+export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max', 'auto'] as const
+export type EffortLevel = typeof EFFORT_LEVELS[number]
+
+export type EffortInput =
+  | { kind: 'picker' }
+  | { kind: 'direct'; level: EffortLevel }
+  | { kind: 'invalid'; token: string }
+
+/**
+ * Parse a raw "/effort ..." Telegram input. Whitespace is collapsed,
+ * embedded CR/LF stripped, the level is lowercased. Returns:
+ *   - { kind:'picker' }      → no argument, render the picker
+ *   - { kind:'direct', level } → valid effort level, apply directly
+ *   - { kind:'invalid', token } → anything else; caller replies with usage
+ *
+ * Assumes the input already matched the "/effort" prefix in the router.
+ */
+export function parseEffortInput(text: string): EffortInput {
+  const stripped = text.replace(/[\r\n]+/g, ' ')
+  const lower = stripped.toLowerCase().trim()
+  if (lower === '/effort') return { kind: 'picker' }
+  if (!lower.startsWith('/effort ') && !lower.startsWith('/effort\t')) {
+    // Defensive — the caller should only hand us "/effort..." strings.
+    return { kind: 'invalid', token: lower }
+  }
+  const rest = stripped.slice('/effort'.length).trim().toLowerCase()
+  if (rest.length === 0) return { kind: 'picker' }
+  if ((EFFORT_LEVELS as readonly string[]).includes(rest)) {
+    return { kind: 'direct', level: rest as EffortLevel }
+  }
+  return { kind: 'invalid', token: rest }
+}
+
 export interface MetaCommandButton {
   label: string
   callbackData: string

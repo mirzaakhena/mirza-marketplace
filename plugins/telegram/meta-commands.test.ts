@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { tryRouteMetaCommand, tryHandleMetaCallback, __resetDeletePickerForTests, __resetSwitchPickerForTests, __resetArchivePickerForTests } from './meta-commands'
+import { tryRouteMetaCommand, tryHandleMetaCallback, __resetDeletePickerForTests, __resetSwitchPickerForTests, __resetArchivePickerForTests, parseEffortInput, EFFORT_LEVELS } from './meta-commands'
 import { loadArchived } from './archive-store'
 import { listProjectSessions } from './sessions-list'
 import { setName as registrySetName } from './session-names-registry'
@@ -1138,5 +1138,39 @@ describe('meta-commands: /delete hard (explicit permanent variant)', () => {
     await tryRouteMetaCommand('/delete hard please', env, handler)
     // Soft path uses 📦; hard path uses 🗑️.
     expect(replies[0]!.text.startsWith('🗑️')).toBe(true)
+  })
+})
+
+describe('meta-commands: parseEffortInput', () => {
+  test('exposes the six valid effort levels', () => {
+    expect(EFFORT_LEVELS).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'auto'])
+  })
+
+  test('"/effort" alone → picker request', () => {
+    expect(parseEffortInput('/effort')).toEqual({ kind: 'picker' })
+  })
+
+  test('trailing whitespace after "/effort" → picker request', () => {
+    expect(parseEffortInput('/effort   ')).toEqual({ kind: 'picker' })
+  })
+
+  test('"/effort <valid>" → direct apply with normalised level', () => {
+    expect(parseEffortInput('/effort low')).toEqual({ kind: 'direct', level: 'low' })
+    expect(parseEffortInput('/effort  HIGH  ')).toEqual({ kind: 'direct', level: 'high' })
+    expect(parseEffortInput('/effort\tauto')).toEqual({ kind: 'direct', level: 'auto' })
+  })
+
+  test('"/effort <invalid>" → invalid', () => {
+    expect(parseEffortInput('/effort sometimes')).toEqual({ kind: 'invalid', token: 'sometimes' })
+    expect(parseEffortInput('/effort 5')).toEqual({ kind: 'invalid', token: '5' })
+  })
+
+  test('newline/CR in arg is stripped before validation', () => {
+    expect(parseEffortInput('/effort low\n')).toEqual({ kind: 'direct', level: 'low' })
+    expect(parseEffortInput('/effort\nhigh')).toEqual({ kind: 'direct', level: 'high' })
+  })
+
+  test('extra positional args beyond the level → invalid (treats whole rest as token)', () => {
+    expect(parseEffortInput('/effort low and high')).toEqual({ kind: 'invalid', token: 'low and high' })
   })
 })
