@@ -967,14 +967,6 @@ bot.command('status', async ctx => {
   await ctx.reply(renderNow())
 })
 
-// ---------------------------------------------------------------------------
-// /context — surface Claude Code's context window & 5-hour rate-limit usage
-// in the chat. Data is captured by scripts/context-bridge.sh which Claude
-// Code runs as statusLine; on first /context we patch <project>/.claude/
-// settings.json so the bridge becomes the statusLine command (chained to the
-// previous one so the terminal display is preserved).
-// ---------------------------------------------------------------------------
-
 const CONTEXT_BRIDGE_SCRIPT = join(import.meta.dir, 'scripts', 'context-bridge.ts')
 const CONTEXT_BRIDGE_PATH = `bun run "${CONTEXT_BRIDGE_SCRIPT}"`
 
@@ -986,6 +978,8 @@ const PLUGIN_VERSION_LINE = (() => {
   return formatPluginVersionLine(v.name, v.version, v.sha)
 })()
 
+// /status helper: load the most recent statusLine payload (written by
+// scripts/context-bridge.ts). Returns null if Claude Code hasn't run yet.
 function loadLastStatus(): LastStatus | null {
   const path = join(STATE_DIR, 'last-status.json')
   try {
@@ -1004,7 +998,7 @@ function ensureContextBridgeInstalled(): InstallResult {
   if (!PROJECT_DIR) {
     return {
       kind: 'error',
-      message: 'CLAUDE_PROJECT_DIR is not set; /context needs a project context. Run Claude Code from your project root.'
+      message: 'CLAUDE_PROJECT_DIR is not set; /status needs a project context. Run Claude Code from your project root.'
     }
   }
   const channelsDir = join(PROJECT_DIR, '.claude', 'channels')
@@ -1021,7 +1015,7 @@ function ensureContextBridgeInstalled(): InstallResult {
     try {
       settings = JSON.parse(raw)
     } catch (err) {
-      return { kind: 'error', message: `${settingsPath} bukan JSON valid (mungkin ada komentar?). Perbaiki manual lalu coba lagi. (${(err as Error).message})` }
+      return { kind: 'error', message: `${settingsPath} is not valid JSON (comments?). Fix manually and try again. (${(err as Error).message})` }
     }
   }
 
@@ -1048,14 +1042,14 @@ function ensureContextBridgeInstalled(): InstallResult {
   // Ensure the channels-level .gitignore exists before writing any state.
   const giResult = ensureChannelsGitignore(channelsDir)
   if (!giResult.ok) {
-    return { kind: 'error', message: `gagal menyiapkan channels dir: ${giResult.reason ?? 'unknown error'}` }
+    return { kind: 'error', message: `failed to prepare channels dir: ${giResult.reason ?? 'unknown error'}` }
   }
 
   try {
     mkdirSync(STATE_DIR, { recursive: true })
     writeFileSync(join(STATE_DIR, 'chained-statusline'), previousCommand ?? '')
   } catch (err) {
-    return { kind: 'error', message: `gagal menulis ${STATE_DIR}: ${(err as Error).message}` }
+    return { kind: 'error', message: `failed to write ${STATE_DIR}: ${(err as Error).message}` }
   }
 
   settings.statusLine = { type: 'command', command: CONTEXT_BRIDGE_PATH }
@@ -1063,48 +1057,11 @@ function ensureContextBridgeInstalled(): InstallResult {
     mkdirSync(join(PROJECT_DIR, '.claude'), { recursive: true })
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n')
   } catch (err) {
-    return { kind: 'error', message: `gagal menulis ${settingsPath}: ${(err as Error).message}` }
+    return { kind: 'error', message: `failed to write ${settingsPath}: ${(err as Error).message}` }
   }
 
   return { kind: 'installed', backupPath, previousCommand }
 }
-
-bot.command('context', async ctx => {
-  if (!dmCommandGate(ctx)) return
-
-  const install = ensureContextBridgeInstalled()
-  if (install.kind === 'error') {
-    await ctx.reply(`Gagal pasang bridge:\n${install.message}`)
-    return
-  }
-  if (install.kind === 'installed') {
-    const ack = await ctx.reply('⏳ Menyiapkan bridge, mohon tunggu...')
-    setTimeout(async () => {
-      const status = loadLastStatus()
-      const text = status
-        ? renderContextReply(status)
-        : '⚠️ Statusline Claude Code belum trigger. Aktif sebentar di Claude Code lalu kirim /context lagi.'
-      try {
-        await ctx.api.editMessageText(ack.chat.id, ack.message_id, text)
-      } catch (err) {
-        // Edit can fail if message was deleted or too old; fall back to a new reply.
-        await ctx.reply(text)
-      }
-    }, 5000)
-    return
-  }
-
-  const status = loadLastStatus()
-  if (!status) {
-    await ctx.reply(
-      `Bridge terpasang tapi belum ada data.\n\n` +
-      `Statusline Claude Code belum sempat trigger. Aktif di Claude Code sebentar lalu kirim /context lagi.`,
-    )
-    return
-  }
-
-  await ctx.reply(renderContextReply(status))
-})
 
 // Inline-button handlers. Two namespaces:
 //   - `ai:<callback_id>` — buttons rendered by the AI via reply/edit_message
