@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "telegram",
-      "description": "Custom Telegram channel for Claude Code with a /hello command. Forked from the official Telegram plugin.",
+      "description": "Custom Telegram channel for Claude Code. Forked from the official Telegram plugin, with per-project state, a registry-driven slash menu, and /status that shows context window plus session info.",
       "category": "productivity",
       "source": "./plugins/telegram"
     },
