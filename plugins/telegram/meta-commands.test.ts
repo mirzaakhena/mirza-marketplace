@@ -2,7 +2,8 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { tryRouteMetaCommand, tryHandleMetaCallback, __resetDeletePickerForTests, __resetSwitchPickerForTests } from './meta-commands'
+import { tryRouteMetaCommand, tryHandleMetaCallback, __resetDeletePickerForTests, __resetSwitchPickerForTests, __resetArchivePickerForTests } from './meta-commands'
+import { loadArchived } from './archive-store'
 import { listProjectSessions } from './sessions-list'
 import { setName as registrySetName } from './session-names-registry'
 
@@ -921,5 +922,146 @@ describe('meta-commands: /delete pagination', () => {
     )
     expect(cb.acks.length).toBe(1)
     expect(cb.editsWithButtons.length).toBe(0)
+  })
+})
+
+describe('meta-commands: /archive', () => {
+  let projectDir: string
+  let stateDir: string
+  let telegramStateDir: string
+  let cleanup: () => void
+  let homeOverride: string
+
+  beforeEach(() => {
+    const ctx = mkProject()
+    projectDir = ctx.projectDir
+    stateDir = ctx.stateDir
+    cleanup = ctx.cleanup
+    homeOverride = mkdtempSync(join(tmpdir(), 'meta-cmd-home-'))
+    process.env.USERPROFILE = homeOverride
+    process.env.HOME = homeOverride
+    telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(telegramStateDir, { recursive: true })
+    setHeartbeat(stateDir, new Date().toISOString())
+    __resetArchivePickerForTests()
+    __resetSwitchPickerForTests()
+  })
+
+  afterEach(() => {
+    try { rmSync(homeOverride, { recursive: true, force: true }) } catch {}
+    cleanup()
+  })
+
+  function seedNSessions(n: number, marker = 'e'): string[] {
+    // marker MUST be a single hex char so the resulting shortId passes the
+    // SHORT_ID_RE check (/^[0-9a-f]{8}$/) in the meta callback handler.
+    const sids: string[] = []
+    for (let i = 0; i < n; i++) {
+      const sid = `${marker.repeat(7)}${i.toString(16)}-1111-2222-3333-444444444444`
+      sids.push(sid)
+      writeProjectJsonl(homeOverride, projectDir, sid)
+    }
+    return sids
+  }
+
+  test('/archive replies with picker excluding current session', async () => {
+    const sids = seedNSessions(3, 'e')
+    writeCurrentSessionId(stateDir, sids[0]!)
+    const { handler, replies } = makeHandler()
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    const consumed = await tryRouteMetaCommand('/archive', env, handler)
+    expect(consumed).toBe(true)
+    expect(replies).toHaveLength(1)
+    const labels = replies[0]!.buttons!.flat().map(b => b.label)
+    expect(labels.some(l => l === '❌ Cancel')).toBe(true)
+    // current session must not be in the picker
+    const currentShort = sids[0]!.replace(/-/g, '').slice(0, 8).toLowerCase()
+    const callbacks = replies[0]!.buttons!.flatMap(r => r.map(b => b.callbackData))
+    expect(callbacks).not.toContain(`meta:archive_${currentShort}`)
+  })
+
+  test('replies with empty-state message when there are no archivable sessions', async () => {
+    const sids = seedNSessions(1, 'f')
+    writeCurrentSessionId(stateDir, sids[0]!)
+    const { handler, replies } = makeHandler()
+    await tryRouteMetaCommand('/archive', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(replies).toHaveLength(1)
+    expect(replies[0]!.text).toContain('Tidak ada session lain')
+  })
+
+  test('tap session → confirmation prompt with archive-specific copy', async () => {
+    const sids = seedNSessions(2, 'a')
+    const { handler } = makeHandler()
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    await tryRouteMetaCommand('/archive', env, handler)
+    const targetShort = sids[1]!.replace(/-/g, '').slice(0, 8).toLowerCase()
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback(`meta:archive_${targetShort}`, env, cb.handler)
+    expect(cb.replies.length).toBe(1)
+    expect(cb.replies[0]!.text).toContain('Archive')
+    expect(cb.replies[0]!.text).toContain('untuk unarchive, edit file manual')
+    expect(cb.replies[0]!.buttons![0]!.map(b => b.callbackData)).toEqual([
+      `meta:archive_confirm_${targetShort}`,
+      'meta:archive_cancel',
+    ])
+  })
+
+  test('confirm writes session ID to archived-sessions.json', async () => {
+    const sids = seedNSessions(2, 'b')
+    const { handler } = makeHandler()
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    await tryRouteMetaCommand('/archive', env, handler)
+    const target = sids[1]!
+    const targetShort = target.replace(/-/g, '').slice(0, 8).toLowerCase()
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback(`meta:archive_${targetShort}`, env, cb.handler)
+    await tryHandleMetaCallback(`meta:archive_confirm_${targetShort}`, env, cb.handler)
+
+    expect(loadArchived(telegramStateDir)).toEqual(new Set([target]))
+  })
+
+  test('after archive, next /switch picker filters out that session', async () => {
+    const sids = seedNSessions(3, 'c')
+    writeCurrentSessionId(stateDir, sids[0]!)
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+
+    // Archive sids[2] via the /archive flow.
+    const { handler: h1 } = makeHandler()
+    await tryRouteMetaCommand('/archive', env, h1)
+    const targetShort = sids[2]!.replace(/-/g, '').slice(0, 8).toLowerCase()
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback(`meta:archive_${targetShort}`, env, cb.handler)
+    await tryHandleMetaCallback(`meta:archive_confirm_${targetShort}`, env, cb.handler)
+
+    // Now /switch — sids[2] must not appear in the keyboard.
+    __resetSwitchPickerForTests()
+    const { handler: h2, replies } = makeHandler()
+    await tryRouteMetaCommand('/switch', env, h2)
+    const callbacks = replies[0]!.buttons!.flatMap(r => r.map(b => b.callbackData))
+    expect(callbacks).not.toContain(`meta:switch_${targetShort}`)
+  })
+
+  test('archive_cancel branch closes picker cleanly', async () => {
+    seedNSessions(2, 'd')
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    const cb = makeCallbackHandler()
+    const consumed = await tryHandleMetaCallback('meta:archive_cancel', env, cb.handler)
+    expect(consumed).toBe(true)
+    expect(cb.edits[0]).toBe('(archive cancelled)')
+  })
+
+  test('archive page navigation re-renders via editMessageWithButtons', async () => {
+    seedNSessions(9, 'e')
+    const { handler } = makeHandler()
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    await tryRouteMetaCommand('/archive', env, handler)
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback('meta:archive_page_2', env, cb.handler)
+    expect(cb.editsWithButtons.length).toBe(1)
+    const rows = cb.editsWithButtons[0]!.buttons!
+    expect(rows[3]!.map(b => b.callbackData)).toEqual([
+      'meta:archive_page_1',
+      'meta:archive_page_noop',
+    ])
   })
 })

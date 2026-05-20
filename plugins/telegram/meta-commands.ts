@@ -36,6 +36,7 @@ import {
 } from './session-names-registry.ts'
 import { resolveStateDir as resolveTelegramStateDir } from './state-path.ts'
 import { renderPickerPage } from './paginated-picker.ts'
+import { addArchived } from './archive-store.ts'
 
 const HEARTBEAT_FRESH_MS = 30_000
 const SHORT_ID_RE = /^[0-9a-f]{8}$/
@@ -102,6 +103,14 @@ interface DeletePickerEntry {
 }
 const deletePicker = new Map<string, DeletePickerEntry>()
 let deletePickerSessions: DeletePickerEntry[] = []
+
+interface ArchivePickerEntry {
+  sessionId: string
+  label: string
+  shortId: string
+}
+const archivePicker = new Map<string, ArchivePickerEntry>()
+let archivePickerSessions: ArchivePickerEntry[] = []
 
 /** Resolve the per-project state dir pty-controller agrees on. */
 function resolvePtyStateDir(env: Record<string, string | undefined>): string | null {
@@ -200,6 +209,9 @@ export async function tryRouteMetaCommand(
   }
   if (lower === '/delete') {
     return handleDelete(env, handlers)
+  }
+  if (lower === '/archive') {
+    return handleArchive(env, handlers)
   }
   // Match `/rename` (exact) or `/rename` followed by whitespace + arg.
   if (lower === '/rename' || lower.startsWith('/rename ') || lower.startsWith('/rename\t')) {
@@ -396,6 +408,58 @@ async function handleSwitch(
 function deleteHeadline(page: number, totalPages: number): string {
   const pageNote = totalPages > 1 ? ` (page ${page}/${totalPages})` : ''
   return `🗑️ Pilih session untuk dihapus${pageNote}:`
+}
+
+function archiveHeadline(page: number, totalPages: number): string {
+  const pageNote = totalPages > 1 ? ` (page ${page}/${totalPages})` : ''
+  return `📦 Pilih session untuk diarchive${pageNote}:`
+}
+
+async function handleArchive(
+  env: Record<string, string | undefined>,
+  handlers: MetaCommandHandlers,
+): Promise<boolean> {
+  const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
+  if (!projectDir) {
+    await handlers.reply('⚠️ /archive tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.')
+    return true
+  }
+  const stateDir = resolvePtyStateDir(env)
+  if (!stateDir || !wrapperHeartbeatFresh(stateDir)) {
+    await handlers.reply('⚠️ /archive tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.')
+    return true
+  }
+
+  const currentSid = readCurrentSessionId(stateDir)
+  const telegramStateDir = resolveTelegramStateDir(env)
+  const all = listProjectSessions(projectDir, telegramStateDir ?? undefined)
+  const sessions = currentSid ? all.filter(s => s.sessionId !== currentSid) : all
+
+  if (sessions.length === 0) {
+    await handlers.reply('Tidak ada session lain yang bisa diarchive.')
+    return true
+  }
+
+  archivePicker.clear()
+  archivePickerSessions = sessions.map(s => ({
+    sessionId: s.sessionId,
+    label: s.label,
+    shortId: s.shortId,
+  }))
+  for (const s of archivePickerSessions) {
+    archivePicker.set(s.shortId, s)
+  }
+
+  const { rows, currentPage, totalPages } = renderPickerPage({
+    sessions: archivePickerSessions,
+    page: 1,
+    callbackPrefix: 'meta:archive',
+    cancelCallback: 'meta:archive_cancel',
+    labelOf: s => s.label,
+    sessionCallbackOf: s => `meta:archive_${s.shortId}`,
+  })
+  await handlers.replyWithButtons(archiveHeadline(currentPage, totalPages), rows)
+  return true
 }
 
 async function handleDelete(
@@ -672,6 +736,105 @@ export async function tryHandleMetaCallback(
     return true
   }
 
+  if (rest.startsWith('archive_')) {
+    // Branches: `archive_<shortId>` (picker tap), `archive_confirm_<shortId>`,
+    // `archive_cancel`, `archive_page_<N>` (pagination).
+    const remainder = rest.slice('archive_'.length)
+
+    if (remainder.startsWith('page_')) {
+      const arg = remainder.slice('page_'.length)
+      if (arg === 'noop') {
+        await handlers.ackCallback()
+        return true
+      }
+      const page = Number.parseInt(arg, 10)
+      if (!Number.isFinite(page) || page < 1) {
+        await handlers.ackCallback('Bad page')
+        return true
+      }
+      if (archivePickerSessions.length === 0) {
+        await handlers.ackCallback('Picker expired, /archive lagi')
+        await handlers.editMessage('(picker expired — please run /archive again)').catch(() => {})
+        return true
+      }
+      const { rows, currentPage, totalPages } = renderPickerPage({
+        sessions: archivePickerSessions,
+        page,
+        callbackPrefix: 'meta:archive',
+        cancelCallback: 'meta:archive_cancel',
+        labelOf: s => s.label,
+        sessionCallbackOf: s => `meta:archive_${s.shortId}`,
+      })
+      await handlers.ackCallback()
+      await handlers
+        .editMessageWithButtons(archiveHeadline(currentPage, totalPages), rows)
+        .catch(() => {})
+      return true
+    }
+
+    if (remainder === 'cancel') {
+      await handlers.ackCallback('Cancelled')
+      await handlers.editMessage('(archive cancelled)').catch(() => {})
+      return true
+    }
+
+    if (remainder.startsWith('confirm_')) {
+      const shortId = remainder.slice('confirm_'.length)
+      if (!SHORT_ID_RE.test(shortId)) {
+        await handlers.ackCallback('Bad short id')
+        return true
+      }
+      const entry = archivePicker.get(shortId)
+      if (!entry) {
+        await handlers.ackCallback('Prompt expired')
+        await handlers.editMessage('(prompt expired — /archive lagi)').catch(() => {})
+        return true
+      }
+      const telegramStateDir = resolveTelegramStateDir(env)
+      if (!telegramStateDir) {
+        await handlers.ackCallback('TELEGRAM_STATE_DIR not set')
+        return true
+      }
+      try {
+        addArchived(telegramStateDir, entry.sessionId)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        await handlers.ackCallback(`Gagal archive: ${msg}`)
+        return true
+      }
+      await handlers.ackCallback('session diarchive')
+      await handlers.editMessage(`📦 session "${entry.label}" diarchive.`).catch(() => {})
+      archivePicker.delete(shortId)
+      return true
+    }
+
+    // Plain picker tap: `archive_<shortId>` → confirmation prompt
+    const shortId = remainder
+    if (!SHORT_ID_RE.test(shortId)) {
+      await handlers.ackCallback('Bad short id')
+      return true
+    }
+    const entry = archivePicker.get(shortId)
+    if (!entry) {
+      await handlers.ackCallback('Picker expired')
+      await handlers.editMessage('(picker expired — /archive lagi)').catch(() => {})
+      return true
+    }
+
+    await handlers.ackCallback('Konfirmasi diperlukan')
+    await handlers
+      .editMessage(`📦 Pilih session untuk diarchive → ${entry.label}`)
+      .catch(() => {})
+    await handlers.replyWithButtons(
+      `Archive session "${entry.label}"? (untuk unarchive, edit file manual)`,
+      [[
+        { label: '✅ Confirm', callbackData: `meta:archive_confirm_${shortId}` },
+        { label: '❌ Cancel', callbackData: 'meta:archive_cancel' },
+      ]],
+    )
+    return true
+  }
+
   // Unknown meta:... — consume so it doesn't fall through to AI, but signal
   // gracefully.
   await handlers.ackCallback('Unknown meta action')
@@ -691,4 +854,9 @@ export function __resetSwitchPickerForTests(): void {
 export function __resetDeletePickerForTests(): void {
   deletePicker.clear()
   deletePickerSessions = []
+}
+
+export function __resetArchivePickerForTests(): void {
+  archivePicker.clear()
+  archivePickerSessions = []
 }
