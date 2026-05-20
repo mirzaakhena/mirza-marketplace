@@ -97,3 +97,15 @@ export function renderHelpList(): string {
     HELP_TROUBLESHOOTING_TAIL,
   ].join('\n\n')
 }
+
+/**
+ * Renders /help <name> for one command, or null if no command matches.
+ * Tolerates leading slash and any case in the argument.
+ */
+export function renderHelpDetail(arg: string): string | null {
+  const key = arg.trim().toLowerCase().replace(/^\//, '')
+  if (!key) return null
+  const spec = COMMANDS.find(c => c.name === key)
+  if (!spec) return null
+  return `/${spec.name} — ${spec.helpSummary}\n\n${spec.helpDetail}`
+}

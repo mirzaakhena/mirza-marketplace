@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { COMMANDS, toSetMyCommandsPayload, renderHelpList, type CommandSpec } from './commands-registry'
+import { COMMANDS, toSetMyCommandsPayload, renderHelpList, renderHelpDetail, type CommandSpec } from './commands-registry'
 
 describe('COMMANDS registry', () => {
   test('contains exactly the 7 commands in the spec, in display order', () => {
@@ -65,5 +65,31 @@ describe('renderHelpList', () => {
 
   test('mentions the /help <name> hint', () => {
     expect(out).toContain('/help <command>')
+  })
+})
+
+describe('renderHelpDetail', () => {
+  test('returns the helpDetail for an exact match (lowercase)', () => {
+    const out = renderHelpDetail('status')
+    expect(out).not.toBeNull()
+    expect(out).toContain('context-window usage')
+  })
+
+  test('accepts a leading slash', () => {
+    expect(renderHelpDetail('/status')).toBe(renderHelpDetail('status'))
+  })
+
+  test('is case-insensitive', () => {
+    expect(renderHelpDetail('STATUS')).toBe(renderHelpDetail('status'))
+  })
+
+  test('returns null for an unknown command', () => {
+    expect(renderHelpDetail('nope')).toBeNull()
+    expect(renderHelpDetail('')).toBeNull()
+  })
+
+  test('prefixes the body with the command name as a header', () => {
+    const out = renderHelpDetail('rename')!
+    expect(out.startsWith('/rename')).toBe(true)
   })
 })
