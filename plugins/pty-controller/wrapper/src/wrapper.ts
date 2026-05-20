@@ -536,6 +536,7 @@ async function consumePending(filename: string): Promise<void> {
     command?: string
     sessionId?: string
     sessionName?: string
+    confirmAfterMs?: number
   }
   try {
     payload = JSON.parse(raw)
@@ -553,6 +554,18 @@ async function consumePending(filename: string): Promise<void> {
     }
     log(`injecting "${command}" (id: ${payload.id ?? '?'})`)
     injectSlashCommand(command)
+    // Optional confirm-after: some CC slash commands (e.g. /effort) pop up a
+    // confirmation picker with the default option pre-selected. A single \r
+    // commits it. If no picker appears, the extra \r is a harmless empty
+    // submit at the CC prompt. Delay clamped to a sane window so a typo on
+    // the caller side can't stall the wrapper.
+    if (typeof payload.confirmAfterMs === 'number' && payload.confirmAfterMs > 0) {
+      const delay = Math.min(Math.max(payload.confirmAfterMs, 50), 5_000)
+      setTimeout(() => {
+        log(`sending confirm \\r after ${delay}ms (for "${command}")`)
+        currentPty.write('\r')
+      }, delay)
+    }
     // After /clear, CC will materialise a new session jsonl. Snapshot
     // existing sessions now so the poll loop can spot the new one and
     // chain /notify-user into the fresh AI session. The snapshot is
