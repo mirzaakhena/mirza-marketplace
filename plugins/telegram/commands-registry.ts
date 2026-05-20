@@ -73,3 +73,8 @@ export const COMMANDS: CommandSpec[] = [
       'Renames the currently active session. Usage: /rename <name>. Example: /rename utama. Names must be unique within the project; the command rejects duplicates.',
   },
 ]
+
+/** Maps the registry to grammy's setMyCommands payload shape. */
+export function toSetMyCommandsPayload(): { command: string; description: string }[] {
+  return COMMANDS.map(c => ({ command: c.name, description: c.menuHint }))
+}

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { COMMANDS, type CommandSpec } from './commands-registry'
+import { COMMANDS, toSetMyCommandsPayload, type CommandSpec } from './commands-registry'
 
 describe('COMMANDS registry', () => {
   test('contains exactly the 7 commands in the spec, in display order', () => {
@@ -26,5 +26,21 @@ describe('COMMANDS registry', () => {
     for (const c of COMMANDS) {
       expect(c.menuHint.length).toBeLessThanOrEqual(50)
     }
+  })
+})
+
+describe('toSetMyCommandsPayload', () => {
+  test('maps each spec to {command, description}', () => {
+    const payload = toSetMyCommandsPayload()
+    expect(payload).toHaveLength(COMMANDS.length)
+    expect(payload[0]).toEqual({
+      command: 'start',
+      description: 'Welcome and pairing guide',
+    })
+  })
+
+  test('preserves COMMANDS order', () => {
+    const payload = toSetMyCommandsPayload()
+    expect(payload.map(p => p.command)).toEqual(COMMANDS.map(c => c.name))
   })
 })
