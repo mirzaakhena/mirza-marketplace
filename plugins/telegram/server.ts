@@ -32,6 +32,7 @@ import { isOurOwnBridge } from './server-helpers.ts'
 import { validateButtons, parseAiCallbackData, buildKeyboard, findButtonLabel } from './buttons.ts'
 import { commonMarkToMarkdownV2 } from './markdown.ts'
 import { tryRouteMetaCommand, tryHandleMetaCallback } from './meta-commands.ts'
+import { readCurrentSessionId, resolveCurrentSessionName } from './current-session-info.ts'
 import { listProjectSessions } from './sessions-list.ts'
 
 const STATE_DIR = (() => {
@@ -870,13 +871,37 @@ setInterval(() => {
 // the gate's behavior for unrecognized groups.
 
 bot.command('start', async ctx => {
-  if (!dmCommandGate(ctx)) return
+  const gated = dmCommandGate(ctx)
+  if (!gated) return
+  const { access, senderId } = gated
+
+  if (!access.allowFrom.includes(senderId)) {
+    // Same unpaired guidance as before — pairing handshake is unchanged.
+    await ctx.reply(
+      `This bot bridges Telegram to a Claude Code session.\n\n` +
+      `To pair:\n` +
+      `1. DM me anything — you'll get a 6-char code\n` +
+      `2. In Claude Code: /telegram:access pair <code>\n\n` +
+      `After that, DMs here reach that session.`,
+    )
+    return
+  }
+
+  // Paired branch — show identity.
+  const userLabel = ctx.from!.username ? `@${ctx.from!.username}` : senderId
+  const projectDir = PROJECT_DIR ?? '(no project)'
+  const sessionId = readCurrentSessionId(process.env as Record<string, string | undefined>)
+  const sessionName = resolveCurrentSessionName(sessionId, STATE_DIR)
+  const sessionLine = sessionId
+    ? (sessionName ? `Session: ${sessionName} (${sessionId.slice(0, 8)})` : `Session: ${sessionId.slice(0, 8)}`)
+    : 'Session: (none active)'
+
   await ctx.reply(
-    `This bot bridges Telegram to a Claude Code session.\n\n` +
-    `To pair:\n` +
-    `1. DM me anything — you'll get a 6-char code\n` +
-    `2. In Claude Code: /telegram:access pair <code>\n\n` +
-    `After that, DMs here reach that session.`
+    `Welcome back. You are paired and ready.\n\n` +
+    `Paired as: ${userLabel}\n` +
+    `Project: ${projectDir}\n` +
+    sessionLine + `\n\n` +
+    `Type /help for the command list, or just send a message to talk to Claude.`,
   )
 })
 
