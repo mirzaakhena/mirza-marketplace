@@ -75,6 +75,13 @@ export const COMMANDS: CommandSpec[] = [
     helpDetail:
       'Renames the currently active session. Usage: /rename <name>. Example: /rename utama. Names must be unique within the project; the command rejects duplicates.',
   },
+  {
+    name: 'effort',
+    menuHint: 'Set effort level (low..max, auto)',
+    helpSummary: 'Change Claude\'s effort level for this session',
+    helpDetail:
+      'Without an argument, shows a picker with the six effort levels: low, medium, high, xhigh, max, auto. The currently-active level (read from the statusLine bridge) is marked with a "→ " prefix. Tap to apply. With an argument (e.g. /effort low), applies directly without the picker. Effort is session-scoped in Claude Code — /new resets to the CC default; this command does not persist the choice across sessions. Requires the mirza-cc wrapper to be running.',
+  },
 ]
 
 /** Maps the registry to grammy's setMyCommands payload shape. */
