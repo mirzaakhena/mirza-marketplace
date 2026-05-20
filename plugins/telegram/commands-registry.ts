@@ -69,13 +69,6 @@ export const COMMANDS: CommandSpec[] = [
       'The currently active session is excluded from the picker in both modes.',
   },
   {
-    name: 'archive',
-    menuHint: 'Hide a session from the pickers',
-    helpSummary: 'Archive (soft-delete) a Claude session',
-    helpDetail:
-      'Shows an inline picker of non-current sessions; tapping one asks for confirmation, then adds that session to archived-sessions.json instead of deleting the jsonl. Archived sessions disappear from /switch, /delete, and /archive. The jsonl on disk is left untouched, so `claude --resume` from a terminal can still reach it. To un-archive, open the laptop and edit archived-sessions.json by hand.',
-  },
-  {
     name: 'rename',
     menuHint: 'Rename the current session',
     helpSummary: 'Rename the active session',

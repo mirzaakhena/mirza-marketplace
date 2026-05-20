@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "telegram",
-      "description": "Custom Telegram channel for Claude Code. Forked from the official Telegram plugin, with per-project state, a registry-driven slash menu, /status that shows context window plus session info, /archive for soft-deleting sessions, and Prev/Next pagination across the session pickers.",
+      "description": "Custom Telegram channel for Claude Code. Forked from the official Telegram plugin, with per-project state, a registry-driven slash menu, /status that shows context window plus session info, /delete (safe-default soft delete; /delete hard for permanent), and Prev/Next pagination across the session pickers.",
       "category": "productivity",
       "source": "./plugins/telegram"
     },

@@ -210,15 +210,14 @@ export async function tryRouteMetaCommand(
   // /delete bifurcates by trailing arg:
   //   /delete         → soft (hides the session via the archive store; reversible by manual edit)
   //   /delete hard    → permanent (rmSync the jsonl; not reversible)
-  // /archive is kept as a backward-compatible alias for the soft form.
+  // The handler functions are still named handleArchive/handleDelete and the
+  // callback prefixes are still meta:archive_/meta:delete_ for historical
+  // reasons — this is purely internal and slated for a future rename pass.
   if (lower === '/delete' || lower === '/delete ' || lower.startsWith('/delete  ')) {
     return handleArchive(env, handlers)
   }
   if (lower === '/delete hard' || lower.startsWith('/delete hard ')) {
     return handleDelete(env, handlers)
-  }
-  if (lower === '/archive') {
-    return handleArchive(env, handlers)
   }
   // Match `/rename` (exact) or `/rename` followed by whitespace + arg.
   if (lower === '/rename' || lower.startsWith('/rename ') || lower.startsWith('/rename\t')) {

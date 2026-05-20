@@ -925,7 +925,7 @@ describe('meta-commands: /delete pagination', () => {
   })
 })
 
-describe('meta-commands: /archive', () => {
+describe('meta-commands: /delete (soft / default)', () => {
   let projectDir: string
   let stateDir: string
   let telegramStateDir: string
@@ -964,14 +964,15 @@ describe('meta-commands: /archive', () => {
     return sids
   }
 
-  test('/archive replies with picker excluding current session', async () => {
+  test('/delete (no arg) replies with picker excluding current session', async () => {
     const sids = seedNSessions(3, 'e')
     writeCurrentSessionId(stateDir, sids[0]!)
     const { handler, replies } = makeHandler()
     const env = { CLAUDE_PROJECT_DIR: projectDir }
-    const consumed = await tryRouteMetaCommand('/archive', env, handler)
+    const consumed = await tryRouteMetaCommand('/delete', env, handler)
     expect(consumed).toBe(true)
     expect(replies).toHaveLength(1)
+    expect(replies[0]!.text.startsWith('📦')).toBe(true) // soft path uses 📦 headline
     const labels = replies[0]!.buttons!.flat().map(b => b.label)
     expect(labels.some(l => l === '❌ Cancel')).toBe(true)
     // current session must not be in the picker
@@ -980,20 +981,20 @@ describe('meta-commands: /archive', () => {
     expect(callbacks).not.toContain(`meta:archive_${currentShort}`)
   })
 
-  test('replies with empty-state message when there are no archivable sessions', async () => {
+  test('replies with empty-state message when there are no soft-deletable sessions', async () => {
     const sids = seedNSessions(1, 'f')
     writeCurrentSessionId(stateDir, sids[0]!)
     const { handler, replies } = makeHandler()
-    await tryRouteMetaCommand('/archive', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    await tryRouteMetaCommand('/delete', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(replies).toHaveLength(1)
     expect(replies[0]!.text).toContain('Tidak ada session lain')
   })
 
-  test('tap session → confirmation prompt with archive-specific copy', async () => {
+  test('soft /delete tap session → confirmation prompt mentions manual unarchive', async () => {
     const sids = seedNSessions(2, 'a')
     const { handler } = makeHandler()
     const env = { CLAUDE_PROJECT_DIR: projectDir }
-    await tryRouteMetaCommand('/archive', env, handler)
+    await tryRouteMetaCommand('/delete', env, handler)
     const targetShort = sids[1]!.replace(/-/g, '').slice(0, 8).toLowerCase()
     const cb = makeCallbackHandler()
     await tryHandleMetaCallback(`meta:archive_${targetShort}`, env, cb.handler)
@@ -1010,7 +1011,7 @@ describe('meta-commands: /archive', () => {
     const sids = seedNSessions(2, 'b')
     const { handler } = makeHandler()
     const env = { CLAUDE_PROJECT_DIR: projectDir }
-    await tryRouteMetaCommand('/archive', env, handler)
+    await tryRouteMetaCommand('/delete', env, handler)
     const target = sids[1]!
     const targetShort = target.replace(/-/g, '').slice(0, 8).toLowerCase()
     const cb = makeCallbackHandler()
@@ -1025,13 +1026,16 @@ describe('meta-commands: /archive', () => {
     writeCurrentSessionId(stateDir, sids[0]!)
     const env = { CLAUDE_PROJECT_DIR: projectDir }
 
-    // Archive sids[2] via the /archive flow.
+    // Archive sids[2] via the soft-delete (/delete) flow.
     const { handler: h1 } = makeHandler()
-    await tryRouteMetaCommand('/archive', env, h1)
+    await tryRouteMetaCommand('/delete', env, h1)
     const targetShort = sids[2]!.replace(/-/g, '').slice(0, 8).toLowerCase()
     const cb = makeCallbackHandler()
     await tryHandleMetaCallback(`meta:archive_${targetShort}`, env, cb.handler)
     await tryHandleMetaCallback(`meta:archive_confirm_${targetShort}`, env, cb.handler)
+
+    // Sanity check: archive file should now contain sids[2].
+    expect(loadArchived(telegramStateDir)).toEqual(new Set([sids[2]!]))
 
     // Now /switch — sids[2] must not appear in the keyboard.
     __resetSwitchPickerForTests()
@@ -1041,7 +1045,7 @@ describe('meta-commands: /archive', () => {
     expect(callbacks).not.toContain(`meta:switch_${targetShort}`)
   })
 
-  test('archive_cancel branch closes picker cleanly', async () => {
+  test('meta:archive_cancel branch closes picker cleanly', async () => {
     seedNSessions(2, 'd')
     const env = { CLAUDE_PROJECT_DIR: projectDir }
     const cb = makeCallbackHandler()
@@ -1050,11 +1054,11 @@ describe('meta-commands: /archive', () => {
     expect(cb.edits[0]).toBe('(archive cancelled)')
   })
 
-  test('archive page navigation re-renders via editMessageWithButtons', async () => {
+  test('soft /delete picker page navigation re-renders via editMessageWithButtons', async () => {
     seedNSessions(9, 'e')
     const { handler } = makeHandler()
     const env = { CLAUDE_PROJECT_DIR: projectDir }
-    await tryRouteMetaCommand('/archive', env, handler)
+    await tryRouteMetaCommand('/delete', env, handler)
     const cb = makeCallbackHandler()
     await tryHandleMetaCallback('meta:archive_page_2', env, cb.handler)
     expect(cb.editsWithButtons.length).toBe(1)
