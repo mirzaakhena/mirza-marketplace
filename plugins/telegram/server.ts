@@ -26,12 +26,15 @@ import { createMessagesStore } from './messages-store.ts'
 import { createAlbumBuffer } from './album-buffer'
 import { resolveStateDir } from './state-path.ts'
 import { ensureChannelsGitignore } from './channels-gitignore.ts'
+import { toSetMyCommandsPayload, renderHelpList, renderHelpDetail } from './commands-registry.ts'
 import { renderContextReply, type LastStatus } from './context-renderer.ts'
 import { isOurOwnBridge } from './server-helpers.ts'
 import { validateButtons, parseAiCallbackData, buildKeyboard, findButtonLabel } from './buttons.ts'
 import { commonMarkToMarkdownV2 } from './markdown.ts'
 import { tryRouteMetaCommand, tryHandleMetaCallback } from './meta-commands.ts'
+import { readCurrentSessionId, resolveCurrentSessionName } from './current-session-info.ts'
 import { listProjectSessions } from './sessions-list.ts'
+import { readPluginVersion, formatPluginVersionLine } from './plugin-version.ts'
 
 const STATE_DIR = (() => {
   const resolved = resolveStateDir(process.env)
@@ -869,67 +872,114 @@ setInterval(() => {
 // the gate's behavior for unrecognized groups.
 
 bot.command('start', async ctx => {
-  if (!dmCommandGate(ctx)) return
+  const gated = dmCommandGate(ctx)
+  if (!gated) return
+  const { access, senderId } = gated
+
+  if (!access.allowFrom.includes(senderId)) {
+    // Same unpaired guidance as before — pairing handshake is unchanged.
+    await ctx.reply(
+      `This bot bridges Telegram to a Claude Code session.\n\n` +
+      `To pair:\n` +
+      `1. DM me anything — you'll get a 6-char code\n` +
+      `2. In Claude Code: /telegram:access pair <code>\n\n` +
+      `After that, DMs here reach that session.`,
+    )
+    return
+  }
+
+  // Paired branch — show identity.
+  const userLabel = ctx.from!.username ? `@${ctx.from!.username}` : senderId
+  const projectDir = PROJECT_DIR ?? '(no project)'
+  const sessionId = readCurrentSessionId(process.env as Record<string, string | undefined>)
+  const sessionName = resolveCurrentSessionName(sessionId, STATE_DIR)
+  const sessionLine = sessionId
+    ? (sessionName ? `Session: ${sessionName} (${sessionId.slice(0, 8)})` : `Session: ${sessionId.slice(0, 8)}`)
+    : 'Session: (none active)'
+
   await ctx.reply(
-    `This bot bridges Telegram to a Claude Code session.\n\n` +
-    `To pair:\n` +
-    `1. DM me anything — you'll get a 6-char code\n` +
-    `2. In Claude Code: /telegram:access pair <code>\n\n` +
-    `After that, DMs here reach that session.`
+    `Welcome back. You are paired and ready.\n\n` +
+    `Paired as: ${userLabel}\n` +
+    `Project: ${projectDir}\n` +
+    sessionLine + `\n\n` +
+    `Type /help for the command list, or just send a message to talk to Claude.`,
   )
 })
 
 bot.command('help', async ctx => {
   if (!dmCommandGate(ctx)) return
+  // grammy gives us the argument string in ctx.match for command handlers.
+  const arg = (ctx.match ?? '').toString().trim()
+  if (!arg) {
+    await ctx.reply(renderHelpList())
+    return
+  }
+  const detail = renderHelpDetail(arg)
+  if (detail) {
+    await ctx.reply(detail)
+    return
+  }
   await ctx.reply(
-    `Messages you send here route to a paired Claude Code session. ` +
-    `Text and photos are forwarded; replies and reactions come back.\n\n` +
-    `/start — pairing instructions\n` +
-    `/status — check your pairing state`
+    `Unknown command: /${arg.replace(/^\//, '')}\n\nType /help to see all commands.`,
   )
 })
 
 bot.command('status', async ctx => {
-  const gated = dmCommandGate(ctx)
-  if (!gated) return
-  const { access, senderId } = gated
+  if (!dmCommandGate(ctx)) return
 
-  if (access.allowFrom.includes(senderId)) {
-    const name = ctx.from!.username ? `@${ctx.from!.username}` : senderId
-    await ctx.reply(`Paired as ${name}.`)
+  const install = ensureContextBridgeInstalled()
+  if (install.kind === 'error') {
+    await ctx.reply(`Failed to install bridge:\n${install.message}`)
     return
   }
 
-  for (const [code, p] of Object.entries(access.pending)) {
-    if (p.senderId === senderId) {
-      await ctx.reply(
-        `Pending pairing — run in Claude Code:\n\n/telegram:access pair ${code}`
+  const renderNow = () => {
+    const status = loadLastStatus()
+    if (!status) {
+      return (
+        `Bridge installed, but no data yet.\n\n` +
+        `Claude Code's statusLine has not triggered. Be active in Claude Code for a moment, then send /status again.`
       )
-      return
     }
+    const sessionId = readCurrentSessionId(process.env as Record<string, string | undefined>)
+    const sessionName = resolveCurrentSessionName(sessionId, STATE_DIR)
+    return renderContextReply(status, Date.now(), {
+      sessionName,
+      pluginVersion: PLUGIN_VERSION_LINE,
+    })
   }
 
-  await ctx.reply(`Not paired. Send me a message to get a pairing code.`)
-})
+  if (install.kind === 'installed') {
+    const ack = await ctx.reply('⏳ Installing bridge, please wait...')
+    setTimeout(async () => {
+      const text = renderNow()
+      try {
+        await ctx.api.editMessageText(ack.chat.id, ack.message_id, text)
+      } catch {
+        // Edit can fail if message was deleted or too old; fall back to a new reply.
+        await ctx.reply(text)
+      }
+    }, 5000)
+    return
+  }
 
-bot.command('hello', async ctx => {
-  if (!dmCommandGate(ctx)) return
-  await ctx.reply(`Hello, Mirza!`)
+  // already-installed
+  await ctx.reply(renderNow())
 })
-
-// ---------------------------------------------------------------------------
-// /context — surface Claude Code's context window & 5-hour rate-limit usage
-// in the chat. Data is captured by scripts/context-bridge.sh which Claude
-// Code runs as statusLine; on first /context we patch <project>/.claude/
-// settings.json so the bridge becomes the statusLine command (chained to the
-// previous one so the terminal display is preserved).
-// ---------------------------------------------------------------------------
 
 const CONTEXT_BRIDGE_SCRIPT = join(import.meta.dir, 'scripts', 'context-bridge.ts')
 const CONTEXT_BRIDGE_PATH = `bun run "${CONTEXT_BRIDGE_SCRIPT}"`
 
 const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR?.trim() || null
 
+// Resolved once at boot for the /status footer.
+const PLUGIN_VERSION_LINE = (() => {
+  const v = readPluginVersion(import.meta.dir)
+  return formatPluginVersionLine(v.name, v.version, v.sha)
+})()
+
+// /status helper: load the most recent statusLine payload (written by
+// scripts/context-bridge.ts). Returns null if Claude Code hasn't run yet.
 function loadLastStatus(): LastStatus | null {
   const path = join(STATE_DIR, 'last-status.json')
   try {
@@ -948,7 +998,7 @@ function ensureContextBridgeInstalled(): InstallResult {
   if (!PROJECT_DIR) {
     return {
       kind: 'error',
-      message: 'CLAUDE_PROJECT_DIR is not set; /context needs a project context. Run Claude Code from your project root.'
+      message: 'CLAUDE_PROJECT_DIR is not set; /status needs a project context. Run Claude Code from your project root.'
     }
   }
   const channelsDir = join(PROJECT_DIR, '.claude', 'channels')
@@ -965,7 +1015,7 @@ function ensureContextBridgeInstalled(): InstallResult {
     try {
       settings = JSON.parse(raw)
     } catch (err) {
-      return { kind: 'error', message: `${settingsPath} bukan JSON valid (mungkin ada komentar?). Perbaiki manual lalu coba lagi. (${(err as Error).message})` }
+      return { kind: 'error', message: `${settingsPath} is not valid JSON (comments?). Fix manually and try again. (${(err as Error).message})` }
     }
   }
 
@@ -992,14 +1042,14 @@ function ensureContextBridgeInstalled(): InstallResult {
   // Ensure the channels-level .gitignore exists before writing any state.
   const giResult = ensureChannelsGitignore(channelsDir)
   if (!giResult.ok) {
-    return { kind: 'error', message: `gagal menyiapkan channels dir: ${giResult.reason ?? 'unknown error'}` }
+    return { kind: 'error', message: `failed to prepare channels dir: ${giResult.reason ?? 'unknown error'}` }
   }
 
   try {
     mkdirSync(STATE_DIR, { recursive: true })
     writeFileSync(join(STATE_DIR, 'chained-statusline'), previousCommand ?? '')
   } catch (err) {
-    return { kind: 'error', message: `gagal menulis ${STATE_DIR}: ${(err as Error).message}` }
+    return { kind: 'error', message: `failed to write ${STATE_DIR}: ${(err as Error).message}` }
   }
 
   settings.statusLine = { type: 'command', command: CONTEXT_BRIDGE_PATH }
@@ -1007,48 +1057,11 @@ function ensureContextBridgeInstalled(): InstallResult {
     mkdirSync(join(PROJECT_DIR, '.claude'), { recursive: true })
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n')
   } catch (err) {
-    return { kind: 'error', message: `gagal menulis ${settingsPath}: ${(err as Error).message}` }
+    return { kind: 'error', message: `failed to write ${settingsPath}: ${(err as Error).message}` }
   }
 
   return { kind: 'installed', backupPath, previousCommand }
 }
-
-bot.command('context', async ctx => {
-  if (!dmCommandGate(ctx)) return
-
-  const install = ensureContextBridgeInstalled()
-  if (install.kind === 'error') {
-    await ctx.reply(`Gagal pasang bridge:\n${install.message}`)
-    return
-  }
-  if (install.kind === 'installed') {
-    const ack = await ctx.reply('⏳ Menyiapkan bridge, mohon tunggu...')
-    setTimeout(async () => {
-      const status = loadLastStatus()
-      const text = status
-        ? renderContextReply(status)
-        : '⚠️ Statusline Claude Code belum trigger. Aktif sebentar di Claude Code lalu kirim /context lagi.'
-      try {
-        await ctx.api.editMessageText(ack.chat.id, ack.message_id, text)
-      } catch (err) {
-        // Edit can fail if message was deleted or too old; fall back to a new reply.
-        await ctx.reply(text)
-      }
-    }, 5000)
-    return
-  }
-
-  const status = loadLastStatus()
-  if (!status) {
-    await ctx.reply(
-      `Bridge terpasang tapi belum ada data.\n\n` +
-      `Statusline Claude Code belum sempat trigger. Aktif di Claude Code sebentar lalu kirim /context lagi.`,
-    )
-    return
-  }
-
-  await ctx.reply(renderContextReply(status))
-})
 
 // Inline-button handlers. Two namespaces:
 //   - `ai:<callback_id>` — buttons rendered by the AI via reply/edit_message
@@ -1847,17 +1860,7 @@ void (async () => {
           botUsername = info.username
           process.stderr.write(`telegram channel: polling as @${info.username}\n`)
           void bot.api.setMyCommands(
-            [
-              { command: 'start', description: 'Welcome and setup guide' },
-              { command: 'help', description: 'What this bot can do' },
-              { command: 'status', description: 'Check your pairing status' },
-              { command: 'hello', description: 'Say hello to Mirza' },
-              { command: 'context', description: 'Show context & 5h usage' },
-              { command: 'new', description: 'Start a fresh named session' },
-              { command: 'switch', description: 'Switch Claude session' },
-              { command: 'delete', description: 'Delete a session' },
-              { command: 'rename', description: 'Rename current session' },
-            ],
+            toSetMyCommandsPayload(),
             { scope: { type: 'all_private_chats' } },
           ).catch(() => {})
         },

@@ -30,20 +30,20 @@ describe('progressBar', () => {
 })
 
 describe('formatRelativeMs', () => {
-  test('negative → "baru"', () => {
-    expect(formatRelativeMs(-1000)).toBe('baru')
+  test('negative → "just now"', () => {
+    expect(formatRelativeMs(-1000)).toBe('just now')
   })
   test('seconds', () => {
-    expect(formatRelativeMs(45_000)).toBe('45s lalu')
+    expect(formatRelativeMs(45_000)).toBe('45s ago')
   })
   test('minutes', () => {
-    expect(formatRelativeMs(3 * 60_000)).toBe('3m lalu')
+    expect(formatRelativeMs(3 * 60_000)).toBe('3m ago')
   })
   test('hours with remainder', () => {
-    expect(formatRelativeMs(2 * 3600_000 + 15 * 60_000)).toBe('2h 15m lalu')
+    expect(formatRelativeMs(2 * 3600_000 + 15 * 60_000)).toBe('2h 15m ago')
   })
   test('exact hours', () => {
-    expect(formatRelativeMs(3 * 3600_000)).toBe('3h lalu')
+    expect(formatRelativeMs(3 * 3600_000)).toBe('3h ago')
   })
 })
 
@@ -86,9 +86,9 @@ describe('formatResetRemain', () => {
   const nowMs = 1_000_000_000
   const nowSec = nowMs / 1000
 
-  test('past or zero → "reset baru saja"', () => {
-    expect(formatResetRemain(nowSec, nowMs)).toBe('reset baru saja')
-    expect(formatResetRemain(nowSec - 10, nowMs)).toBe('reset baru saja')
+  test('past or zero → "reset just now"', () => {
+    expect(formatResetRemain(nowSec, nowMs)).toBe('reset just now')
+    expect(formatResetRemain(nowSec - 10, nowMs)).toBe('reset just now')
   })
   test('minutes only', () => {
     expect(formatResetRemain(nowSec + 5 * 60, nowMs)).toBe('5m')
@@ -204,7 +204,7 @@ describe('renderContextReply (new layout)', () => {
       'Fast: off',
       '',
       'Last update: 17:42 WIB',
-      '(3m lalu)',
+      '(3m ago)',
     ].join('\n')
     expect(out).toBe(expected)
   })
@@ -273,7 +273,7 @@ describe('renderContextReply (new layout)', () => {
     }
     const out = renderContextReply(s, nowMs)
     expect(out).toContain('Context')
-    expect(out).toContain('(tidak tersedia)')
+    expect(out).toContain('(unavailable)')
   })
 
   test('context_window without token counts omits the tokens line', () => {
@@ -287,6 +287,41 @@ describe('renderContextReply (new layout)', () => {
     const out = renderContextReply(s, nowMs)
     expect(out).toContain('●○○○○○○○○○ 5%')
     expect(out).not.toContain('tokens')
+  })
+})
+
+describe('renderContextReply — session name and plugin version', () => {
+  const baseStatus: LastStatus = {
+    captured_at_ms: Date.UTC(2026, 4, 17, 10, 0, 0),
+    payload: {
+      session_id: '76b5c187abcdef12',
+      model: { display_name: 'Opus 4.7' },
+    },
+  }
+
+  test('shows "Session: <name> (<shortId>)" when sessionName is provided', () => {
+    const out = renderContextReply(baseStatus, Date.UTC(2026, 4, 17, 10, 0, 0), {
+      sessionName: 'utama',
+    })
+    expect(out).toContain('Session: utama (76b5c187)')
+  })
+
+  test('falls back to "Session: <shortId>" when no sessionName', () => {
+    const out = renderContextReply(baseStatus, Date.UTC(2026, 4, 17, 10, 0, 0))
+    expect(out).toContain('Session: 76b5c187')
+    expect(out).not.toContain('Session: utama')
+  })
+
+  test('appends plugin version line as its own section when provided', () => {
+    const out = renderContextReply(baseStatus, Date.UTC(2026, 4, 17, 10, 0, 0), {
+      pluginVersion: 'Plugin: telegram v1.0.0 (abc1234)',
+    })
+    expect(out).toContain('Plugin: telegram v1.0.0 (abc1234)')
+  })
+
+  test('omits plugin version line when not provided', () => {
+    const out = renderContextReply(baseStatus, Date.UTC(2026, 4, 17, 10, 0, 0))
+    expect(out).not.toContain('Plugin:')
   })
 })
 
@@ -332,6 +367,6 @@ describe('renderContextReply (real fixture)', () => {
     expect(out).toContain('Cost: $0.80')
     expect(out).toContain('Thinking: on')
     expect(out).toContain('Fast: off')
-    expect(out).toContain('(3m lalu)')
+    expect(out).toContain('(3m ago)')
   })
 })

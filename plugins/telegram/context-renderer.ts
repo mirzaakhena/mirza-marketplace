@@ -1,4 +1,4 @@
-// Renderer for Telegram /context reply.
+// Renderer for Telegram /status reply.
 // Pure functions only — no I/O, no bot, no env access. Lives in its own
 // module so it can be unit-tested without booting server.ts.
 
@@ -35,14 +35,14 @@ export function progressBar(pct: number, width = 10): string {
 }
 
 export function formatRelativeMs(ageMs: number): string {
-  if (ageMs < 0) return 'baru'
+  if (ageMs < 0) return 'just now'
   const sec = Math.floor(ageMs / 1000)
-  if (sec < 60) return `${sec}s lalu`
+  if (sec < 60) return `${sec}s ago`
   const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}m lalu`
+  if (min < 60) return `${min}m ago`
   const hr = Math.floor(min / 60)
   const rm = min % 60
-  return rm ? `${hr}h ${rm}m lalu` : `${hr}h lalu`
+  return rm ? `${hr}h ${rm}m ago` : `${hr}h ago`
 }
 
 // Asia/Jakarta is UTC+7 year-round, no DST — compute directly to avoid Intl.
@@ -55,7 +55,7 @@ export function formatJakartaHM(epochMs: number): string {
 
 export function formatResetRemain(resetsAtSec: number, nowMs: number = Date.now()): string {
   const remainSec = resetsAtSec - Math.floor(nowMs / 1000)
-  if (remainSec <= 0) return 'reset baru saja'
+  if (remainSec <= 0) return 'reset just now'
   const days = Math.floor(remainSec / 86400)
   const hours = Math.floor((remainSec % 86400) / 3600)
   const minutes = Math.floor((remainSec % 3600) / 60)
@@ -81,7 +81,18 @@ export function shortSession(id: string): string {
   return id.slice(0, 8)
 }
 
-export function renderContextReply(status: LastStatus, nowMs: number = Date.now()): string {
+export interface RenderOptions {
+  /** When set, displays "Session: <name> (<shortId>)" instead of just shortId. */
+  sessionName?: string | null
+  /** Pre-formatted plugin version line (or null/empty to omit). */
+  pluginVersion?: string | null
+}
+
+export function renderContextReply(
+  status: LastStatus,
+  nowMs: number = Date.now(),
+  opts: RenderOptions = {},
+): string {
   const p = status.payload
   const sections: string[] = []
 
@@ -96,7 +107,7 @@ export function renderContextReply(status: LastStatus, nowMs: number = Date.now(
       ctxLines.push(`${formatTokens(used)} / ${formatTokens(total)} tokens`)
     }
   } else {
-    ctxLines.push('(tidak tersedia)')
+    ctxLines.push('(unavailable)')
   }
   sections.push(ctxLines.join('\n'))
 
@@ -129,7 +140,10 @@ export function renderContextReply(status: LastStatus, nowMs: number = Date.now(
   // --- Metadata block (skip individual lines if missing) ---
   const meta: string[] = []
   if (p.model?.display_name) meta.push(p.model.display_name)
-  if (p.session_id) meta.push(`Session: ${shortSession(p.session_id)}`)
+  if (p.session_id) {
+    const short = shortSession(p.session_id)
+    meta.push(opts.sessionName ? `Session: ${opts.sessionName} (${short})` : `Session: ${short}`)
+  }
   if (p.cwd) meta.push(`CWD: ${shortCwd(p.cwd)}`)
   if (typeof p.cost?.total_cost_usd === 'number') {
     meta.push(`Cost: $${p.cost.total_cost_usd.toFixed(2)}`)
@@ -141,6 +155,11 @@ export function renderContextReply(status: LastStatus, nowMs: number = Date.now(
     meta.push(`Fast: ${p.fast_mode ? 'on' : 'off'}`)
   }
   if (meta.length > 0) sections.push(meta.join('\n'))
+
+  // --- Plugin version (only if caller provided one) ---
+  if (opts.pluginVersion && opts.pluginVersion.length > 0) {
+    sections.push(opts.pluginVersion)
+  }
 
   // --- Last update (always shown) ---
   const age = nowMs - status.captured_at_ms
