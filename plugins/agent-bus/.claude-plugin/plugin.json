@@ -1,0 +1,8 @@
+{
+  "name": "agent-bus",
+  "description": "Lets one Claude Code agent send slash-command requests to another agent on the same machine via a shared filesystem registry and the existing pty-controller inbox. Depends on the companion pty-controller plugin running in both bots — the peer's wrapper reads this plugin's writes and injects the keystroke into the peer's PTY. v0.0.1 supports `kind:\"slash\"` only; prompt + reply land in Phase 2.",
+  "version": "0.0.1",
+  "author": { "name": "Mirza" },
+  "license": "MIT",
+  "keywords": ["multi-agent", "inter-agent", "bot-to-bot", "claude-code", "ipc"]
+}
