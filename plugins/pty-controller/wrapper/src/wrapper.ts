@@ -711,10 +711,18 @@ async function consumePending(filename: string): Promise<void> {
   let payload: {
     id?: string
     type?: string
+    /** Phase 1 alternate type field — synonymous with type:"slash" when "slash". */
+    kind?: string
     command?: string
     sessionId?: string
     sessionName?: string
     confirmAfterMs?: number
+    /** Agent-bus extension: name of sending agent. Required when from agent-bus. */
+    from?: string
+    /** Agent-bus extension: loop-prevention counter. */
+    hop_count?: number
+    /** Agent-bus extension: correlation id, opaque to wrapper in Phase 1. */
+    correlation_id?: string
   }
   try {
     payload = JSON.parse(raw)
@@ -723,7 +731,25 @@ async function consumePending(filename: string): Promise<void> {
     return
   }
 
-  const type = payload.type ?? 'slash'
+  // Agent-bus extension: enforce hop limit on inter-agent messages. Local
+  // messages (no `from` field) skip this check — they originate inside this
+  // CC session via meta-commands and the AI's own tool calls.
+  if (typeof payload.from === 'string') {
+    const hops = typeof payload.hop_count === 'number' ? payload.hop_count : 0
+    if (hops > 5) {
+      log(`dropping ${filename}: hop_count ${hops} > 5 (from "${payload.from}")`)
+      return
+    }
+    log(
+      `inter-agent message from "${payload.from}" ` +
+        `(kind=${payload.kind ?? payload.type ?? 'slash'}, hop=${hops}, correlation=${payload.correlation_id ?? '?'})`,
+    )
+  }
+
+  // Phase 1 contract: `type` (legacy) and `kind` (new) are synonyms. Default
+  // to "slash" when neither is set (backward compat for the original
+  // single-string-command payload shape).
+  const type = payload.type ?? payload.kind ?? 'slash'
   if (type === 'slash') {
     const command = payload.command
     if (typeof command !== 'string' || !command.startsWith('/')) {
