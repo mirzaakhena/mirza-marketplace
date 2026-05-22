@@ -50,6 +50,8 @@ import {
   renameSync,
   statSync,
   watch,
+  openSync,
+  closeSync,
   type FSWatcher,
 } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -93,6 +95,16 @@ const CLAUDE_PROJECTS_DIR = join(
 // /resume injection. Consumed by the telegram plugin's /delete picker so
 // the active session can be excluded from the deletion list.
 const CURRENT_SESSION_FILE = join(STATE_DIR, 'wrapper.current_session_id')
+
+// Global agent registry shared by all bot peers on this machine.
+// See plugins/agent-bus/registry.ts for the writer-side contract.
+const AGENT_REGISTRY_PATH =
+  process.env.AGENT_REGISTRY_PATH?.trim() ||
+  join(homedir(), '.claude', 'agent-registry.json')
+const AGENT_REGISTRY_LOCK = `${AGENT_REGISTRY_PATH}.lock`
+// Bot name = basename(project_dir). Conflict (same basename, different paths)
+// is logged but not blocked at v1.
+const SELF_AGENT_NAME = PROJECT_DIR.split(/[\/\\]/).filter(Boolean).pop() ?? 'unknown'
 
 function writeCurrentSessionId(sid: string): void {
   const tmp = `${CURRENT_SESSION_FILE}.tmp.${process.pid}`
@@ -244,6 +256,126 @@ function chooseStartupArgs(): {
   }
 }
 
+function acquireRegistryLock(): (() => void) | null {
+  const start = Date.now()
+  while (true) {
+    try {
+      // openSync with 'wx' = exclusive create — fails with EEXIST if held.
+      const fd = openSync(AGENT_REGISTRY_LOCK, 'wx')
+      closeSync(fd)
+      return () => {
+        try {
+          rmSync(AGENT_REGISTRY_LOCK)
+        } catch {
+          /* best-effort */
+        }
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') return null
+      if (Date.now() - start > 2_000) {
+        log(`registry lock timeout — skipping update`)
+        return null
+      }
+      // tight busy-wait is fine here: holders only hold for milliseconds.
+      const until = Date.now() + 25
+      while (Date.now() < until) {
+        /* spin */
+      }
+    }
+  }
+}
+
+function loadRegistry(): {
+  schema_version: 1
+  agents: Record<
+    string,
+    {
+      project_dir: string
+      state_dir: string
+      registered_at: string
+      last_heartbeat: string
+      wrapper_pid: number
+    }
+  >
+} {
+  if (!existsSync(AGENT_REGISTRY_PATH)) return { schema_version: 1, agents: {} }
+  try {
+    const obj = JSON.parse(readFileSync(AGENT_REGISTRY_PATH, 'utf8'))
+    if (obj && typeof obj === 'object' && obj.schema_version === 1 && obj.agents) {
+      return obj
+    }
+  } catch {
+    /* corrupt — reset */
+  }
+  return { schema_version: 1, agents: {} }
+}
+
+function persistRegistry(reg: ReturnType<typeof loadRegistry>): void {
+  mkdirSync(join(AGENT_REGISTRY_PATH, '..'), { recursive: true })
+  const tmp = `${AGENT_REGISTRY_PATH}.tmp.${process.pid}`
+  writeFileSync(tmp, JSON.stringify(reg, null, 2))
+  renameSync(tmp, AGENT_REGISTRY_PATH)
+}
+
+function registerSelfInGlobalRegistry(): void {
+  const release = acquireRegistryLock()
+  if (!release) return
+  try {
+    const reg = loadRegistry()
+    const existing = reg.agents[SELF_AGENT_NAME]
+    if (existing && existing.project_dir !== PROJECT_DIR) {
+      log(
+        `WARNING: agent name "${SELF_AGENT_NAME}" already registered at ` +
+          `${existing.project_dir} (different from current ${PROJECT_DIR}). ` +
+          `Overwriting — both wrappers will fight over the registry slot.`,
+      )
+    }
+    const now = new Date().toISOString()
+    reg.agents[SELF_AGENT_NAME] = {
+      project_dir: PROJECT_DIR,
+      state_dir: STATE_DIR,
+      registered_at: existing?.registered_at ?? now,
+      last_heartbeat: now,
+      wrapper_pid: process.pid,
+    }
+    persistRegistry(reg)
+    log(`registered "${SELF_AGENT_NAME}" in ${AGENT_REGISTRY_PATH}`)
+  } finally {
+    release()
+  }
+}
+
+function heartbeatSelfInGlobalRegistry(): void {
+  const release = acquireRegistryLock()
+  if (!release) return
+  try {
+    const reg = loadRegistry()
+    const e = reg.agents[SELF_AGENT_NAME]
+    if (!e || e.wrapper_pid !== process.pid) return
+    e.last_heartbeat = new Date().toISOString()
+    persistRegistry(reg)
+  } finally {
+    release()
+  }
+}
+
+function unregisterSelfFromGlobalRegistry(): void {
+  const release = acquireRegistryLock()
+  if (!release) return
+  try {
+    const reg = loadRegistry()
+    const e = reg.agents[SELF_AGENT_NAME]
+    if (!e || e.wrapper_pid !== process.pid) return
+    delete reg.agents[SELF_AGENT_NAME]
+    persistRegistry(reg)
+    log(`unregistered "${SELF_AGENT_NAME}" from global registry`)
+  } catch {
+    /* swallow */
+  } finally {
+    release()
+  }
+}
+
 /**
  * Spawn Claude under a fresh PTY and return the IPty handle.
  *
@@ -280,9 +412,13 @@ function spawnClaudePty(): { pty: IPty; startup: ReturnType<typeof chooseStartup
   return { pty: p, startup }
 }
 
-const _spawn = spawnClaudePty()
-const currentPty: IPty = _spawn.pty
-const startupMode = _spawn.startup
+let _spawn = spawnClaudePty()
+let currentPty: IPty = _spawn.pty
+let startupMode = _spawn.startup
+// True while a wrapper-initiated restart is in flight. When the PTY's onExit
+// fires under this flag, respawn instead of shutting the wrapper down. Cleared
+// once the fresh PTY is wired up.
+let restarting = false
 
 /**
  * Inject a slash command into the PTY, separating the command text from
@@ -328,13 +464,53 @@ let awaitingClearReady:
   | { sessionsBefore: Set<string>; sessionName?: string }
   | null = null
 
-currentPty.onData(data => {
-  process.stdout.write(data)
-})
-currentPty.onExit(({ exitCode, signal }) => {
-  log(`claude exited (code=${exitCode}, signal=${signal ?? 'none'})`)
-  shutdown(exitCode ?? 0)
-})
+// PTY handler wiring. Extracted into a function because /restart kills the
+// PTY and respawns a fresh one — the new IPty instance needs the same
+// onData/onExit bindings as the original. stdin → PTY is wired once below
+// using the `currentPty` `let` binding, so it follows the swap automatically.
+function attachPtyHandlers(): void {
+  currentPty.onData(data => {
+    process.stdout.write(data)
+  })
+  currentPty.onExit(({ exitCode, signal }) => {
+    log(`claude exited (code=${exitCode}, signal=${signal ?? 'none'})`)
+    if (restarting) {
+      log('restart: respawning claude...')
+      _spawn = spawnClaudePty()
+      currentPty = _spawn.pty
+      startupMode = _spawn.startup
+      attachPtyHandlers()
+      // Mirror the post-spawn resume bookkeeping: write current session id and
+      // emit a session-change outbox event so the telegram plugin can notify
+      // the user the wrapper is back up.
+      if (!startupMode.isFirstRun && startupMode.latestSessionId) {
+        const sid = startupMode.latestSessionId
+        writeCurrentSessionId(sid)
+        const stateDir = resolveTelegramStateDir()
+        let resolvedName: string | null = null
+        if (stateDir) {
+          try {
+            const obj = JSON.parse(
+              readFileSync(join(stateDir, 'session-names.json'), 'utf8'),
+            ) as Record<string, { name: string }>
+            resolvedName = obj[sid]?.name ?? null
+          } catch {
+            /* registry missing → null */
+          }
+        }
+        writeSystemOutbox({
+          type: 'session-change',
+          sessionId: sid,
+          sessionName: resolvedName,
+        })
+      }
+      restarting = false
+      return
+    }
+    shutdown(exitCode ?? 0)
+  })
+}
+attachPtyHandlers()
 
 // User terminal → PTY (raw mode so keypresses go straight through).
 process.stdin.setRawMode?.(true)
@@ -358,8 +534,10 @@ const heartbeatInterval = setInterval(() => {
   } catch (err) {
     log(`heartbeat write failed: ${err}`)
   }
+  heartbeatSelfInGlobalRegistry()
 }, 5_000)
 writeFileSync(HEARTBEAT_FILE, new Date().toISOString())
+registerSelfInGlobalRegistry()
 try {
   writeFileSync(PID_FILE, String(process.pid))
 } catch (err) {
@@ -588,6 +766,18 @@ async function consumePending(filename: string): Promise<void> {
     return
   }
 
+  if (type === 'restart') {
+    log(`restart requested (id: ${payload.id ?? '?'})`)
+    restarting = true
+    try {
+      currentPty.kill()
+    } catch (err) {
+      log(`restart: pty.kill threw: ${err}`)
+      restarting = false
+    }
+    return
+  }
+
   if (type === 'switch') {
     const sid = payload.sessionId
     if (typeof sid !== 'string' || !sid) {
@@ -649,6 +839,7 @@ const sweepInterval = setInterval(() => {
 }, 2_000)
 
 function shutdown(code: number): void {
+  unregisterSelfFromGlobalRegistry()
   clearInterval(heartbeatInterval)
   clearInterval(sweepInterval)
   clearInterval(sessionPollInterval)
