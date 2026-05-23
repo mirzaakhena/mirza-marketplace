@@ -972,7 +972,7 @@ bot.command('status', async ctx => {
     const sessionName = resolveCurrentSessionName(sessionId, STATE_DIR)
     return renderContextReply(status, Date.now(), {
       sessionName,
-      pluginVersion: PLUGIN_VERSION_LINE,
+      pluginVersion: buildVersionBlock(),
     })
   }
 
@@ -1004,6 +1004,45 @@ const PLUGIN_VERSION_LINE = (() => {
   const v = readPluginVersion(import.meta.dir)
   return formatPluginVersionLine(v.name, v.version, v.sha)
 })()
+
+/**
+ * Read the pty-controller wrapper's self-reported versions, written at boot
+ * to <state>/pty-controller/wrapper.version. Returns null for either field
+ * if the file is missing, malformed, or pre-dates the version-publishing
+ * feature. Best-effort; failures yield null so the /status footer just omits
+ * the line.
+ */
+function readWrapperVersions(): { plugin_version: string | null; wrapper_version: string | null } | null {
+  if (!PROJECT_DIR) return null
+  try {
+    const path = join(PROJECT_DIR, '.claude', 'channels', 'pty-controller', 'wrapper.version')
+    const raw = readFileSync(path, 'utf8')
+    const obj = JSON.parse(raw) as { plugin_version?: unknown; wrapper_version?: unknown }
+    return {
+      plugin_version: typeof obj.plugin_version === 'string' ? obj.plugin_version : null,
+      wrapper_version: typeof obj.wrapper_version === 'string' ? obj.wrapper_version : null,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Build the full version block shown at the bottom of /status. Joins
+ * available version lines with newlines; lines whose source is missing are
+ * dropped silently. The telegram plugin's own version is always present.
+ */
+function buildVersionBlock(): string {
+  const lines = [PLUGIN_VERSION_LINE]
+  const wrapper = readWrapperVersions()
+  if (wrapper?.plugin_version) {
+    lines.push(`Plugin: pty-controller v${wrapper.plugin_version}`)
+  }
+  if (wrapper?.wrapper_version) {
+    lines.push(`Wrapper: mirza-cc v${wrapper.wrapper_version}`)
+  }
+  return lines.join('\n')
+}
 
 // /status helper: load the most recent statusLine payload (written by
 // scripts/context-bridge.ts). Returns null if Claude Code hasn't run yet.

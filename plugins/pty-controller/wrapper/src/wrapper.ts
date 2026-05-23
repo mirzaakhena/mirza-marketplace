@@ -65,6 +65,10 @@ const PENDING_DIR = join(STATE_DIR, 'pending')
 const HEARTBEAT_FILE = join(STATE_DIR, 'wrapper.heartbeat')
 const PID_FILE = join(STATE_DIR, 'wrapper.pid')
 const LOG_FILE = join(STATE_DIR, 'wrapper.log')
+// Versions of the pty-controller plugin and this wrapper sub-package, written
+// once at boot so peer plugins (e.g. telegram /status) can surface them
+// without needing to know where the plugin source lives on disk.
+const VERSION_FILE = join(STATE_DIR, 'wrapper.version')
 
 // The telegram plugin's state dir lives as a sibling of ours. We write
 // "system-outbox" events here for the telegram plugin's server.ts to pick
@@ -528,6 +532,36 @@ try {
   writeFileSync(PID_FILE, String(process.pid))
 } catch (err) {
   log(`pid file write failed: ${err}`)
+}
+// Surface our versions for peer plugins to read at /status time.
+// Each lookup is best-effort: missing files leave the field as null.
+try {
+  // The wrapper is shipped inside plugins/pty-controller/wrapper/, so the
+  // plugin manifest sits one level up at .claude-plugin/plugin.json. The
+  // wrapper's own package.json sits next to the compiled entry point.
+  const wrapperDir = join(import.meta.dir, '..')
+  const pluginDir = join(wrapperDir, '..')
+  const versionInfo: { plugin_version: string | null; wrapper_version: string | null } = {
+    plugin_version: null,
+    wrapper_version: null,
+  }
+  try {
+    const raw = readFileSync(join(pluginDir, '.claude-plugin', 'plugin.json'), 'utf8')
+    const obj = JSON.parse(raw) as { version?: unknown }
+    if (typeof obj.version === 'string') versionInfo.plugin_version = obj.version
+  } catch {
+    /* ignore — leave null */
+  }
+  try {
+    const raw = readFileSync(join(wrapperDir, 'package.json'), 'utf8')
+    const obj = JSON.parse(raw) as { version?: unknown }
+    if (typeof obj.version === 'string') versionInfo.wrapper_version = obj.version
+  } catch {
+    /* ignore — leave null */
+  }
+  writeFileSync(VERSION_FILE, JSON.stringify(versionInfo, null, 2))
+} catch (err) {
+  log(`version file write failed: ${err}`)
 }
 
 // Post-/clear poll. Cheap (one readdir every 500ms) and only does work when
