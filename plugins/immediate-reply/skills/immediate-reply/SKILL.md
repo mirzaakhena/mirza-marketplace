@@ -1,15 +1,24 @@
 ---
 name: immediate-reply
-description: Use whenever a user message arrives via Telegram and the response is likely to take more than a few seconds (any tool calls, web research, multi-file reads, code investigation). Send a short acknowledgement instantly, capture its message_id, then either edit that message with the final answer or send progressive updates as new messages. Goal — user always sees a sign of life within ~1 second.
+description: Use whenever a user message arrives via Telegram and the response involves any non-trivial work (tool calls, research, multi-file reads, code investigation, long-running tasks). Two responsibilities — (1) send a short ack instantly so the user sees a sign of life within ~1 second, and (2) keep the user posted with progress updates throughout the task so they never sit in silence. Covers both the opening ack and the ongoing narration until the final answer lands.
 ---
 
 # Immediate Reply (Telegram)
 
-You are running through the Telegram channel where the user types from a phone and notices any delay over a couple of seconds. This skill makes you feel fast.
+You are running through the Telegram channel where the user types from a phone and notices any delay over a couple of seconds. This skill makes you feel fast **and stay responsive** — not just at the start, but throughout the whole task.
+
+## The Two Responsibilities
+
+This skill covers two equally-important behaviors:
+
+1. **Instant ack** — before any non-trivial work, send one short acknowledgement message first (within ~1 second). User sees you heard them.
+2. **Ongoing progress updates** — for tasks that take more than ~15 seconds, narrate progress at meaningful stage transitions so the user knows you are still working and what you are doing. Silence after the ack is almost as bad as no ack at all.
+
+Both matter. Skipping the ack feels like ghosting; sending the ack but then going silent for 90 seconds feels like you got stuck. The whole job is *continuous responsiveness* from the moment the message arrives until the final answer lands.
 
 ## The Rule
 
-**Before any non-trivial work, send one short ack message first.** Then do the work. Then either edit the ack, send more messages, or mix.
+**Before any non-trivial work, send one short ack message first.** Then do the work — and while doing it, send progress updates at meaningful stage transitions. Then deliver the final answer.
 
 "Non-trivial work" means anything that takes more than ~2 seconds of wall clock. In practice that is almost every message except simple greetings or one-liner factual answers.
 
