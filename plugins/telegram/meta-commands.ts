@@ -221,6 +221,7 @@ function wrapperHeartbeatFresh(stateDir: string): boolean {
 type WrapperPayload =
   | { type?: 'slash'; command: string; sessionName?: string; confirmAfterMs?: number }
   | { type: 'switch'; sessionId: string; sessionName?: string }
+  | { type: 'restart' }
 
 function writeWrapperCommand(stateDir: string, payload: WrapperPayload): void {
   const pending = join(stateDir, 'pending')
@@ -287,6 +288,9 @@ export async function tryRouteMetaCommand(
   if (lower === '/rename' || lower.startsWith('/rename ') || lower.startsWith('/rename\t')) {
     const rest = trimmed.slice('/rename'.length).trim()
     return handleRename(env, handlers, rest)
+  }
+  if (lower === '/restart') {
+    return handleRestart(env, handlers)
   }
   // Match `/effort` (exact) or `/effort` followed by whitespace + arg.
   if (lower === '/effort' || lower.startsWith('/effort ') || lower.startsWith('/effort\t')) {
@@ -419,6 +423,39 @@ async function handleRename(
     registrySetName(telegramStateDir, currentSid, newName)
   }
   await handlers.reply(`✏️ Renaming session ke "${newName}".`)
+  return true
+}
+
+async function handleRestart(
+  env: Record<string, string | undefined>,
+  handlers: MetaCommandHandlers,
+): Promise<boolean> {
+  const stateDir = resolvePtyStateDir(env)
+  if (!stateDir) {
+    await handlers.reply(
+      '⚠️ /restart tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.',
+    )
+    return true
+  }
+  if (!wrapperHeartbeatFresh(stateDir)) {
+    await handlers.reply(
+      '⚠️ /restart tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi (heartbeat stale). ' +
+        'Pastikan CC dijalankan via `mirza-cc` wrapper, bukan `claude` langsung.',
+    )
+    return true
+  }
+  // Confirmation flow — restart kills the live PTY and there is a few seconds
+  // of downtime. The actual side-effect happens in the meta:restart_confirm
+  // callback below.
+  await handlers.replyWithButtons(
+    'Restart Claude Code sekarang? Wrapper akan kill PTY dan respawn dengan `--resume` ' +
+      '(conversation lanjut, MCP/plugins reload fresh). AI turn aktif akan terinterupsi, ' +
+      'downtime ~beberapa detik.',
+    [[
+      { label: '✅ Restart', callbackData: 'meta:restart_confirm' },
+      { label: '❌ Cancel', callbackData: 'meta:restart_cancel' },
+    ]],
+  )
   return true
 }
 
@@ -675,6 +712,38 @@ export async function tryHandleMetaCallback(
   if (rest === 'cancel') {
     await handlers.ackCallback('Cancelled')
     await handlers.editMessage('(switch cancelled)').catch(() => {})
+    return true
+  }
+
+  if (rest === 'restart_cancel') {
+    await handlers.ackCallback('Cancelled')
+    await handlers.editMessage('(restart cancelled)').catch(() => {})
+    return true
+  }
+  if (rest === 'restart_confirm') {
+    const stateDir = resolvePtyStateDir(env)
+    if (!stateDir) {
+      await handlers.ackCallback('CLAUDE_PROJECT_DIR not set')
+      return true
+    }
+    if (!wrapperHeartbeatFresh(stateDir)) {
+      await handlers.ackCallback('Wrapper tidak detected')
+      await handlers.editMessage('⚠️ Wrapper not running — restart aborted').catch(() => {})
+      return true
+    }
+    try {
+      writeWrapperCommand(stateDir, { type: 'restart' })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await handlers.ackCallback(`Write failed: ${msg}`)
+      return true
+    }
+    // No "restarting..." pre-announce here — the wrapper writes a
+    // system-outbox `session-change` event after the fresh CC respawns,
+    // and the plugin sends a transition message from there (same pattern
+    // as /new and /switch). One unified message when CC is actually back.
+    await handlers.ackCallback('Restarting...')
+    await handlers.editMessage('🔄 Restarting Claude Code...').catch(() => {})
     return true
   }
 
