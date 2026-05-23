@@ -54,10 +54,16 @@ import {
   closeSync,
   type FSWatcher,
 } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join, resolve, dirname } from 'node:path'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import process from 'node:process'
+import { fileURLToPath } from 'node:url'
+
+// Portable equivalent of __dirname under ES modules. `import.meta.dir` only
+// exists on Bun; the wrapper actually runs under tsx (Node), where we need
+// fileURLToPath + dirname.
+const SELF_DIR = dirname(fileURLToPath(import.meta.url))
 
 const PROJECT_DIR = resolve(process.env.CLAUDE_PROJECT_DIR ?? process.cwd())
 const STATE_DIR = join(PROJECT_DIR, '.claude', 'channels', 'pty-controller')
@@ -539,7 +545,7 @@ try {
   // The wrapper is shipped inside plugins/pty-controller/wrapper/, so the
   // plugin manifest sits one level up at .claude-plugin/plugin.json. The
   // wrapper's own package.json sits next to the compiled entry point.
-  const wrapperDir = join(import.meta.dir, '..')
+  const wrapperDir = join(SELF_DIR, '..')
   const pluginDir = join(wrapperDir, '..')
   const versionInfo: { plugin_version: string | null; wrapper_version: string | null } = {
     plugin_version: null,
