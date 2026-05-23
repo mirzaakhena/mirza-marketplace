@@ -56,7 +56,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'pty_send_slash',
       description:
-        'Send a Claude Code slash command (e.g. "/clear", "/compact", "/notify-user") to the current CC session by writing a request file the parent wrapper consumes. The wrapper injects the keystrokes into the PTY, where CC processes the command on its next input-loop tick. Returns immediately; the actual command may execute after the current AI turn completes. Requires the mirza-cc wrapper process to be running — call `pty_status` first if you are not sure.',
+        'Send a Claude Code slash command to a PTY. WITHOUT `target` — targets the CURRENT (self) CC session; safe to call autonomously. WITH `target` (a single agent name) — targets a peer agent\'s session; this is a CROSS-AGENT side effect and REQUIRES the user to have explicitly asked you to message that peer. WITH `target` as an ARRAY — broadcasts to multiple peers at once; same explicit-user-consent rule applies, and destructive commands (`/clear`, `/delete`) are REJECTED on array targets to prevent accidental fan-out wipes. Peer state is resolved from `~/.claude/agent-registry.json`; call `pty_list_agents` first to discover valid names. Returns immediately; the wrapper(s) inject the keystrokes on the next input-loop tick.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -64,6 +64,14 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: 'string',
             description:
               'The slash command to inject, including the leading slash. Must match /^\\/[a-z][a-z0-9_:-]{0,63}(\\s.{0,256})?$/ — at most 64-char command name (the `:` is allowed so namespaced plugin commands like `/telegram:notify-user` dispatch correctly), optional 256-char argument. Examples: "/clear", "/compact", "/telegram:notify-user fresh session ready".',
+          },
+          target: {
+            description:
+              'Optional. Omit (or pass null) to target self. Pass a single string (e.g. "bot-03") for one peer, or a string array (e.g. ["bot-02", "bot-03"]) to broadcast. Names must match entries in `pty_list_agents`. Destructive commands like "/clear" and "/delete" are rejected when target is an array.',
+            oneOf: [
+              { type: 'string' },
+              { type: 'array', items: { type: 'string' } },
+            ],
           },
         },
         required: ['command'],
@@ -81,7 +89,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'pty_list_agents',
       description:
-        'List all peer Claude Code agents currently registered in the shared agent registry (~/.claude/agent-registry.json, written by every mirza-cc wrapper). Each entry exposes its agent name (basename of its project dir), state directory, last heartbeat, heartbeat age in seconds, and whether it is alive (heartbeat fresher than 30s). Pass `only_alive: true` to filter out stale entries. Use this before calling `pty_send_slash_to` to discover valid targets.',
+        'List all peer Claude Code agents currently registered in the shared agent registry (~/.claude/agent-registry.json, written by every mirza-cc wrapper). Each entry exposes its agent name (basename of its project dir), state directory, last heartbeat, heartbeat age in seconds, and whether it is alive (heartbeat fresher than 30s). Pass `only_alive: true` to filter out stale entries. Use this before passing `target` to `pty_send_slash` to discover valid targets.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -90,26 +98,6 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             description: 'When true, exclude agents whose last heartbeat is older than 30 seconds. Default: false.',
           },
         },
-      },
-    },
-    {
-      name: 'pty_send_slash_to',
-      description:
-        'Same as `pty_send_slash`, but targets a DIFFERENT agent identified by name. Resolves the target agent\'s state directory from the shared registry, validates the target is alive (heartbeat <30s), then writes the command to the target\'s wrapper inbox so that wrapper injects the keystrokes into ITS Claude Code PTY. Use this for cross-agent coordination (e.g. tell bot-03 to run `/telegram:notify-user`). Call `pty_list_agents` first to discover valid agent names.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          agent: {
-            type: 'string',
-            description: 'Name of the target agent as registered in the agent registry (e.g. "bot-03"). Must match an entry returned by `pty_list_agents`.',
-          },
-          command: {
-            type: 'string',
-            description:
-              'The slash command to inject on the target agent, including the leading slash. Same format and limits as `pty_send_slash`: /^\\/[a-z][a-z0-9_:-]{0,63}(\\s.{0,256})?$/.',
-          },
-        },
-        required: ['agent', 'command'],
       },
     },
   ],
@@ -129,17 +117,114 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
             `command must match /^\\/[a-z][a-z0-9_:-]{0,63}(\\s.{0,256})?$/ — got: ${JSON.stringify(command)}`,
           )
         }
-        if (!wrapperLikelyRunning(STATE_DIR)) {
+
+        // Normalise the `target` argument into a list of agent names. `null`
+        // and undefined both mean self.
+        const rawTarget = args.target
+        let targets: string[] | null
+        if (rawTarget === undefined || rawTarget === null) {
+          targets = null
+        } else if (typeof rawTarget === 'string') {
+          if (rawTarget.length === 0) {
+            throw new Error('target must be a non-empty string when set')
+          }
+          targets = [rawTarget]
+        } else if (Array.isArray(rawTarget)) {
+          if (rawTarget.length === 0) {
+            throw new Error('target array must contain at least one agent name')
+          }
+          for (const t of rawTarget) {
+            if (typeof t !== 'string' || t.length === 0) {
+              throw new Error('every entry in target array must be a non-empty string')
+            }
+          }
+          targets = rawTarget as string[]
+        } else {
+          throw new Error('target must be a string, an array of strings, or omitted')
+        }
+
+        // SELF path — preserves the original behaviour of pty_send_slash.
+        if (targets === null) {
+          if (!wrapperLikelyRunning(STATE_DIR)) {
+            throw new Error(
+              'wrapper not detected (no fresh heartbeat). Launch CC via `mirza-cc` instead of `claude` directly.',
+            )
+          }
+          const { id, path } = writeCommand(STATE_DIR, command)
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `queued (id: ${id}) — wrapper will inject "${command}" into PTY shortly\npath: ${path}`,
+              },
+            ],
+          }
+        }
+
+        // CROSS-AGENT path (single or broadcast).
+        // Blast-radius guard: refuse destructive commands on array targets so
+        // a one-tap fan-out cannot wipe multiple peers at once. Single-target
+        // destructive calls still go through (user already named one peer).
+        const isDestructive = /^\/(clear|delete)(\s|$)/.test(command)
+        if (isDestructive && targets.length > 1) {
           throw new Error(
-            'wrapper not detected (no fresh heartbeat). Launch CC via `mirza-cc` instead of `claude` directly.',
+            `destructive command "${command}" rejected for array target (${targets.length} peers). ` +
+              `Send to one peer at a time to confirm intent.`,
           )
         }
-        const { id, path } = writeCommand(STATE_DIR, command)
+
+        const regPath = resolveAgentRegistryPath(process.env)
+        const reg = readAgentRegistry(regPath)
+
+        // Resolve + validate all targets up-front. If any name is unknown or
+        // any peer is offline, fail before writing any file so the caller
+        // gets one clear error instead of partial dispatch.
+        const known = Object.keys(reg.agents).join(', ') || '(none)'
+        const resolved: { name: string; state_dir: string }[] = []
+        for (const name of targets) {
+          const entry = reg.agents[name]
+          if (!entry) {
+            throw new Error(
+              `unknown agent "${name}". Known agents: ${known}. Call pty_list_agents to refresh.`,
+            )
+          }
+          const [info] = describeAgents({ agents: { [name]: entry } })
+          if (!info.alive) {
+            throw new Error(
+              `target agent "${name}" is not alive (last heartbeat ${info.last_heartbeat_age_s}s ago, threshold 30s).`,
+            )
+          }
+          resolved.push({ name, state_dir: entry.state_dir })
+        }
+
+        // Write to each peer's inbox. Failures partway through are
+        // surfaced as a partial-success error message — earlier writes are
+        // NOT rolled back (the wrapper protocol has no notion of rollback;
+        // a queued message is queued).
+        const results: { name: string; id: string; path: string }[] = []
+        for (const r of resolved) {
+          try {
+            const { id, path } = writeCommand(r.state_dir, command)
+            results.push({ name: r.name, id, path })
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            throw new Error(
+              `partial dispatch: wrote ${results.length}/${resolved.length} ` +
+                `successfully; failed on "${r.name}": ${msg}. ` +
+                `Already-queued targets: ${results.map(r => r.name).join(', ') || '(none)'}.`,
+            )
+          }
+        }
         return {
           content: [
             {
               type: 'text',
-              text: `queued (id: ${id}) — wrapper will inject "${command}" into PTY shortly\npath: ${path}`,
+              text: results
+                .map(
+                  r =>
+                    `queued (id: ${r.id}) for agent "${r.name}" — wrapper will inject "${command}" into its PTY shortly\npath: ${r.path}`,
+                )
+                .join('\n---\n'),
             },
           ],
         }
@@ -174,45 +259,6 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
                 null,
                 2,
               ),
-            },
-          ],
-        }
-      }
-      case 'pty_send_slash_to': {
-        const agent = args.agent
-        const command = args.command
-        if (typeof agent !== 'string' || agent.length === 0) {
-          throw new Error('agent must be a non-empty string')
-        }
-        if (typeof command !== 'string' || command.length === 0) {
-          throw new Error('command must be a non-empty string')
-        }
-        if (!SLASH_COMMAND_RE.test(command)) {
-          throw new Error(
-            `command must match /^\\/[a-z][a-z0-9_:-]{0,63}(\\s.{0,256})?$/ — got: ${JSON.stringify(command)}`,
-          )
-        }
-        const regPath = resolveAgentRegistryPath(process.env)
-        const reg = readAgentRegistry(regPath)
-        const entry = reg.agents[agent]
-        if (!entry) {
-          const known = Object.keys(reg.agents).join(', ') || '(none)'
-          throw new Error(
-            `unknown agent "${agent}". Known agents: ${known}. Call pty_list_agents to refresh.`,
-          )
-        }
-        const [info] = describeAgents({ agents: { [agent]: entry } })
-        if (!info.alive) {
-          throw new Error(
-            `target agent "${agent}" is not alive (last heartbeat ${info.last_heartbeat_age_s}s ago, threshold 30s).`,
-          )
-        }
-        const { id, path } = writeCommand(entry.state_dir, command)
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `queued (id: ${id}) for agent "${agent}" — wrapper at ${entry.state_dir} will inject "${command}" into its PTY shortly\npath: ${path}`,
             },
           ],
         }

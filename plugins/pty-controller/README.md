@@ -84,15 +84,21 @@ Quit dengan `/exit` di dalam Claude atau Ctrl+C di terminal wrapper.
 
 ## MCP tools
 
-Server di [`server.ts`](./server.ts) expose lima tool. Dipanggil via stdio MCP transport.
+Server di [`server.ts`](./server.ts) expose tiga tool. Dipanggil via stdio MCP transport.
 
-### `pty_send_slash(command: string)`
+### `pty_send_slash({ command, target? })`
 
-Queue sebuah slash command supaya wrapper inject ke PTY.
+Queue sebuah slash command supaya wrapper inject ke PTY. Bisa target diri sendiri (default) atau satu/lebih agent peer.
 
-- **Input**: `command` — string mulai dengan `/`. Harus match regex `/^\/[a-z][a-z0-9_:-]{0,63}(\s[\s\S]{0,256})?$/`. Mendukung command bare (`/clear`) dan namespaced plugin command (`/telegram:notify-user brief`). Tool **menolak raw text injection** by design — kalau bukan slash command structurally valid, error.
-- **Behavior**: validasi format → cek heartbeat wrapper (kalau stale/missing → error `"wrapper not detected"`) → tulis `<state>/pending/<uuid>.json` atomically (tmp + rename). Return immediately; keystroke baru fire setelah turn AI selesai (CC consume stdin antar-turn).
-- **Return**: text `"queued (id: <uuid>) — wrapper will inject \"<cmd>\" into PTY shortly\npath: <file>"`.
+- **Input**:
+  - `command: string` — mulai dengan `/`. Harus match regex `/^\/[a-z][a-z0-9_:-]{0,63}(\s[\s\S]{0,256})?$/`. Mendukung command bare (`/clear`) dan namespaced plugin command (`/telegram:notify-user brief`). Tool **menolak raw text injection** by design — kalau bukan slash command structurally valid, error.
+  - `target?: string | string[]` — opsional. Tanpa = target self (current CC session), aman dipanggil autonomously. Satu nama = peer single, harus user explicit asked. Array = broadcast ke beberapa peer; **destructive command (`/clear`, `/delete`) ditolak** untuk array target sebagai blast-radius guard.
+- **Behavior**:
+  - **Self path**: cek heartbeat wrapper lokal → tulis ke `<state>/pending/<uuid>.json` atomic (tmp + rename).
+  - **Peer path**: resolve tiap nama di `~/.claude/agent-registry.json`, validasi alive (heartbeat <30s), lalu writeCommand per peer state_dir. Validasi semua nama dulu sebelum tulis satu file pun — kalau ada nama unknown atau offline, fail upfront (tidak partial dispatch).
+- **Return**: text dengan `id`, `path`, dan agent name (untuk peer path). Multi-target: hasil per-peer dipisah dengan separator.
+- **Use case self**: `/clear`, `/compact`, `/notify-user` di sesi sendiri.
+- **Use case peer**: `target: "bot-03"` untuk satu peer, atau `target: ["bot-02", "bot-03"]` untuk broadcast. Panggil `pty_list_agents` dulu untuk discover nama valid.
 
 ### `pty_status()`
 
@@ -109,15 +115,6 @@ List semua peer agent (Claude Code session lain) yang terdaftar di shared agent 
 - **Input**: opsional `only_alive: boolean` — kalau `true`, filter entri yang heartbeat-nya stale (>30 detik).
 - **Behavior**: baca registry file (atau pakai `AGENT_REGISTRY_PATH` env var), proyeksikan tiap entri jadi `{name, project_dir, state_dir, last_heartbeat, last_heartbeat_age_s, alive, wrapper_pid}`.
 - **Return**: JSON `{ registry_path, agents: [...] }`.
-
-### `pty_send_slash_to({ agent, command })`
-
-Sama seperti `pty_send_slash`, tapi target sesi CC **agent lain**. Resolve `state_dir` dari registry, validasi target alive (heartbeat <30s), lalu drop file ke `<target_state_dir>/pending/`. Wrapper target yang akan inject keystroke ke PTY-nya sendiri.
-
-- **Input**: `agent: string` (nama di registry, e.g. `"bot-03"`) + `command: string` (format sama dengan `pty_send_slash`).
-- **Behavior**: validasi command regex → lookup agent di registry → cek heartbeat target → `writeCommand(target.state_dir, command)`. Throw error kalau agent tidak ditemukan atau heartbeat stale.
-- **Return**: text dengan `id`, `target_state_dir`, dan command yang di-queue.
-- **Use case**: cross-agent coordination. Panggil `pty_list_agents` dulu untuk discover nama yang valid.
 
 ## Slash command
 
