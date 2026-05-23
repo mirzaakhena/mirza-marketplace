@@ -84,7 +84,7 @@ Quit dengan `/exit` di dalam Claude atau Ctrl+C di terminal wrapper.
 
 ## MCP tools
 
-Server di [`server.ts`](./server.ts) expose dua tool. Dipanggil via stdio MCP transport.
+Server di [`server.ts`](./server.ts) expose lima tool. Dipanggil via stdio MCP transport.
 
 ### `pty_send_slash(command: string)`
 
@@ -102,7 +102,22 @@ Probe apakah wrapper lagi running.
 - **Behavior**: cek `<state>/wrapper.heartbeat`. Kalau ada DAN timestamp di dalamnya < 30 detik dari sekarang → `wrapper_alive: true`. Selain itu → false.
 - **Return**: JSON `{ wrapper_alive: boolean, state_dir: string }`.
 
-> Catatan validasi: description di `pty_send_slash` menyebut batas nama 32 char (`{0,31}`), tapi regex aktual di kode adalah `{0,63}` dengan tambahan karakter `:`. Description-nya lebih ketat dari kenyataan. Tidak fatal — semua valid command tetap lewat — tapi pesan errornya bisa misleading.
+### `pty_list_agents({ only_alive?: boolean })`
+
+List semua peer agent (Claude Code session lain) yang terdaftar di shared agent registry `~/.claude/agent-registry.json`. Registry itu di-tulis oleh setiap wrapper `mirza-cc` saat startup + heartbeat tick.
+
+- **Input**: opsional `only_alive: boolean` — kalau `true`, filter entri yang heartbeat-nya stale (>30 detik).
+- **Behavior**: baca registry file (atau pakai `AGENT_REGISTRY_PATH` env var), proyeksikan tiap entri jadi `{name, project_dir, state_dir, last_heartbeat, last_heartbeat_age_s, alive, wrapper_pid}`.
+- **Return**: JSON `{ registry_path, agents: [...] }`.
+
+### `pty_send_slash_to({ agent, command })`
+
+Sama seperti `pty_send_slash`, tapi target sesi CC **agent lain**. Resolve `state_dir` dari registry, validasi target alive (heartbeat <30s), lalu drop file ke `<target_state_dir>/pending/`. Wrapper target yang akan inject keystroke ke PTY-nya sendiri.
+
+- **Input**: `agent: string` (nama di registry, e.g. `"bot-03"`) + `command: string` (format sama dengan `pty_send_slash`).
+- **Behavior**: validasi command regex → lookup agent di registry → cek heartbeat target → `writeCommand(target.state_dir, command)`. Throw error kalau agent tidak ditemukan atau heartbeat stale.
+- **Return**: text dengan `id`, `target_state_dir`, dan command yang di-queue.
+- **Use case**: cross-agent coordination. Panggil `pty_list_agents` dulu untuk discover nama yang valid.
 
 ## Slash command
 

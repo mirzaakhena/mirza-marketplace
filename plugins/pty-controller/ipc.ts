@@ -11,6 +11,7 @@
  */
 import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 
 export interface PtyCommand {
@@ -81,6 +82,83 @@ export function writeRestartCommand(stateDir: string): { id: string; path: strin
   writeFileSync(tmpPath, JSON.stringify(payload, null, 2))
   renameSync(tmpPath, finalPath)
   return { id, path: finalPath }
+}
+
+/**
+ * Resolve the path to the shared agent registry file. The wrapper writes
+ * this; we only read it. Override via AGENT_REGISTRY_PATH env var (kept in
+ * sync with the writer in wrapper/src/wrapper.ts).
+ */
+export function resolveAgentRegistryPath(env: Record<string, string | undefined>): string {
+  return env.AGENT_REGISTRY_PATH?.trim() || join(homedir(), '.claude', 'agent-registry.json')
+}
+
+export interface AgentRegistryEntry {
+  project_dir: string
+  state_dir: string
+  registered_at?: string
+  last_heartbeat: string
+  wrapper_pid: number
+}
+
+export interface AgentRegistry {
+  schema_version?: number
+  agents: Record<string, AgentRegistryEntry>
+}
+
+export interface AgentInfo {
+  name: string
+  project_dir: string
+  state_dir: string
+  last_heartbeat: string
+  last_heartbeat_age_s: number
+  alive: boolean
+  wrapper_pid: number
+}
+
+/**
+ * Read the shared agent registry. Returns an empty agents map if the file
+ * does not exist or is malformed — callers treat that as "no peers".
+ */
+export function readAgentRegistry(path: string): AgentRegistry {
+  if (!existsSync(path)) return { agents: {} }
+  try {
+    const raw = readFileSync(path, 'utf8')
+    const obj = JSON.parse(raw)
+    if (obj && typeof obj === 'object' && obj.agents && typeof obj.agents === 'object') {
+      return obj as AgentRegistry
+    }
+    return { agents: {} }
+  } catch {
+    return { agents: {} }
+  }
+}
+
+/**
+ * Project a registry entry into the AgentInfo shape exposed to the AI.
+ * `alive` = heartbeat newer than `freshMs` (default 30s, same threshold as
+ * `wrapperLikelyRunning`).
+ */
+export function describeAgents(
+  reg: AgentRegistry,
+  freshMs = 30_000,
+  now = Date.now(),
+): AgentInfo[] {
+  const out: AgentInfo[] = []
+  for (const [name, e] of Object.entries(reg.agents)) {
+    const wroteAt = Date.parse(e.last_heartbeat)
+    const ageMs = Number.isNaN(wroteAt) ? Number.POSITIVE_INFINITY : now - wroteAt
+    out.push({
+      name,
+      project_dir: e.project_dir,
+      state_dir: e.state_dir,
+      last_heartbeat: e.last_heartbeat,
+      last_heartbeat_age_s: Number.isFinite(ageMs) ? Math.round(ageMs / 1000) : -1,
+      alive: ageMs < freshMs,
+      wrapper_pid: e.wrapper_pid,
+    })
+  }
+  return out
 }
 
 /**

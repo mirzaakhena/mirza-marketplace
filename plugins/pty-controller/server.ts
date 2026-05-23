@@ -17,7 +17,15 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
-import { resolveStateDir, writeCommand, writeRestartCommand, wrapperLikelyRunning } from './ipc.ts'
+import {
+  describeAgents,
+  readAgentRegistry,
+  resolveAgentRegistryPath,
+  resolveStateDir,
+  writeCommand,
+  writeRestartCommand,
+  wrapperLikelyRunning,
+} from './ipc.ts'
 
 // Accepts either a bare command (`/clear`, `/rename foo`) or a namespaced
 // plugin command (`/telegram:notify-user brief`). Plugin commands need
@@ -80,6 +88,40 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {},
       },
     },
+    {
+      name: 'pty_list_agents',
+      description:
+        'List all peer Claude Code agents currently registered in the shared agent registry (~/.claude/agent-registry.json, written by every mirza-cc wrapper). Each entry exposes its agent name (basename of its project dir), state directory, last heartbeat, heartbeat age in seconds, and whether it is alive (heartbeat fresher than 30s). Pass `only_alive: true` to filter out stale entries. Use this before calling `pty_send_slash_to` to discover valid targets.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          only_alive: {
+            type: 'boolean',
+            description: 'When true, exclude agents whose last heartbeat is older than 30 seconds. Default: false.',
+          },
+        },
+      },
+    },
+    {
+      name: 'pty_send_slash_to',
+      description:
+        'Same as `pty_send_slash`, but targets a DIFFERENT agent identified by name. Resolves the target agent\'s state directory from the shared registry, validates the target is alive (heartbeat <30s), then writes the command to the target\'s wrapper inbox so that wrapper injects the keystrokes into ITS Claude Code PTY. Use this for cross-agent coordination (e.g. tell bot-03 to run `/telegram:notify-user`). Call `pty_list_agents` first to discover valid agent names.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          agent: {
+            type: 'string',
+            description: 'Name of the target agent as registered in the agent registry (e.g. "bot-03"). Must match an entry returned by `pty_list_agents`.',
+          },
+          command: {
+            type: 'string',
+            description:
+              'The slash command to inject on the target agent, including the leading slash. Same format and limits as `pty_send_slash`: /^\\/[a-z][a-z0-9_:-]{0,63}(\\s.{0,256})?$/.',
+          },
+        },
+        required: ['agent', 'command'],
+      },
+    },
   ],
 }))
 
@@ -139,6 +181,64 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
                 null,
                 2,
               ),
+            },
+          ],
+        }
+      }
+      case 'pty_list_agents': {
+        const onlyAlive = args.only_alive === true
+        const regPath = resolveAgentRegistryPath(process.env)
+        const reg = readAgentRegistry(regPath)
+        const all = describeAgents(reg)
+        const out = onlyAlive ? all.filter(a => a.alive) : all
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                { registry_path: regPath, agents: out },
+                null,
+                2,
+              ),
+            },
+          ],
+        }
+      }
+      case 'pty_send_slash_to': {
+        const agent = args.agent
+        const command = args.command
+        if (typeof agent !== 'string' || agent.length === 0) {
+          throw new Error('agent must be a non-empty string')
+        }
+        if (typeof command !== 'string' || command.length === 0) {
+          throw new Error('command must be a non-empty string')
+        }
+        if (!SLASH_COMMAND_RE.test(command)) {
+          throw new Error(
+            `command must match /^\\/[a-z][a-z0-9_:-]{0,63}(\\s.{0,256})?$/ — got: ${JSON.stringify(command)}`,
+          )
+        }
+        const regPath = resolveAgentRegistryPath(process.env)
+        const reg = readAgentRegistry(regPath)
+        const entry = reg.agents[agent]
+        if (!entry) {
+          const known = Object.keys(reg.agents).join(', ') || '(none)'
+          throw new Error(
+            `unknown agent "${agent}". Known agents: ${known}. Call pty_list_agents to refresh.`,
+          )
+        }
+        const [info] = describeAgents({ agents: { [agent]: entry } })
+        if (!info.alive) {
+          throw new Error(
+            `target agent "${agent}" is not alive (last heartbeat ${info.last_heartbeat_age_s}s ago, threshold 30s).`,
+          )
+        }
+        const { id, path } = writeCommand(entry.state_dir, command)
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `queued (id: ${id}) for agent "${agent}" — wrapper at ${entry.state_dir} will inject "${command}" into its PTY shortly\npath: ${path}`,
             },
           ],
         }
