@@ -5,21 +5,21 @@ import { describe, test, expect } from 'bun:test'
 import { formatPluginVersionLine, readPluginVersion } from './plugin-version'
 
 describe('formatPluginVersionLine', () => {
-  test('with sha → "Plugin: <name> v<version> (<sha>)"', () => {
+  test('with sha → two lines "Plugin: <name>\\nv<version> (<sha>)"', () => {
     expect(formatPluginVersionLine('telegram', '0.0.8-mirza.0', 'abc1234')).toBe(
-      'Plugin: telegram v0.0.8-mirza.0 (abc1234)',
+      'Plugin: telegram\nv0.0.8-mirza.0 (abc1234)',
     )
   })
 
-  test('without sha → "Plugin: <name> v<version>"', () => {
+  test('without sha → two lines "Plugin: <name>\\nv<version>"', () => {
     expect(formatPluginVersionLine('telegram', '0.0.8-mirza.0', null)).toBe(
-      'Plugin: telegram v0.0.8-mirza.0',
+      'Plugin: telegram\nv0.0.8-mirza.0',
     )
   })
 
   test('empty sha treated as missing', () => {
     expect(formatPluginVersionLine('telegram', '1.0.0', '')).toBe(
-      'Plugin: telegram v1.0.0',
+      'Plugin: telegram\nv1.0.0',
     )
   })
 })

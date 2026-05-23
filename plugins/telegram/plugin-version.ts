@@ -24,7 +24,7 @@ export function formatPluginVersionLine(
   sha: string | null,
 ): string {
   const tail = sha && sha.length > 0 ? ` (${sha})` : ''
-  return `Plugin: ${name} v${version}${tail}`
+  return `Plugin: ${name}\nv${version}${tail}`
 }
 
 /**

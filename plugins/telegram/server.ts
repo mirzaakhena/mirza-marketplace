@@ -1028,20 +1028,22 @@ function readWrapperVersions(): { plugin_version: string | null; wrapper_version
 }
 
 /**
- * Build the full version block shown at the bottom of /status. Joins
- * available version lines with newlines; lines whose source is missing are
+ * Build the full version block shown at the bottom of /status. Each entry
+ * is rendered as two lines (label on the first, "v<version>" on the second)
+ * with a blank line between entries — same shape as the telegram entry
+ * produced by formatPluginVersionLine. Entries whose source is missing are
  * dropped silently. The telegram plugin's own version is always present.
  */
 function buildVersionBlock(): string {
-  const lines = [PLUGIN_VERSION_LINE]
+  const blocks = [PLUGIN_VERSION_LINE]
   const wrapper = readWrapperVersions()
   if (wrapper?.plugin_version) {
-    lines.push(`Plugin: pty-controller v${wrapper.plugin_version}`)
+    blocks.push(`Plugin: pty-controller\nv${wrapper.plugin_version}`)
   }
   if (wrapper?.wrapper_version) {
-    lines.push(`Wrapper: mirza-cc v${wrapper.wrapper_version}`)
+    blocks.push(`Wrapper: mirza-cc\nv${wrapper.wrapper_version}`)
   }
-  return lines.join('\n')
+  return blocks.join('\n\n')
 }
 
 // /status helper: load the most recent statusLine payload (written by
