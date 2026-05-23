@@ -100,6 +100,8 @@ cd mirza-marketplace
 
 1. **Edit kode plugin** di `plugins/<name>/`.
 2. **Bump version** di `plugins/<name>/.claude-plugin/plugin.json` (skema: `<upstream-version>-mirza.<N>` agar jelas ini fork).
+
+   > ⚠️ **`package.json` does NOT count.** Claude Code's marketplace cache me-resolve versi dari `.claude-plugin/plugin.json` saja. Kalau Anda hanya bump `package.json` dan `.claude-plugin/plugin.json` dibiarkan, cache tetap serve kode lama dan `/reload-plugins` jadi no-op. Untuk hygiene boleh align `package.json` dengan nilai yang sama, tapi yang **binding** adalah `.claude-plugin/plugin.json`. Lihat `CLAUDE.md` untuk full procedure + commit message format.
 3. **Validasi** manifest:
    ```bash
    claude plugin validate .
