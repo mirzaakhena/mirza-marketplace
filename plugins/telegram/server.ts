@@ -1214,9 +1214,16 @@ bot.on('callback_query:data', async ctx => {
 
     // Replace buttons with the chosen label so the same prompt can't be
     // answered twice and the chat history reflects what was picked.
+    // Preserve original entities so markdown/markdownv2 formatting survives
+    // the edit — msg.text is plain text and editing without entities strips
+    // bold/italic/code/etc. Appending to the end keeps existing offsets valid.
     if (msg && typeof msg === 'object' && 'text' in msg && typeof msg.text === 'string') {
       const newText = `${msg.text}\n\n→ ${tappedLabel ?? aiParsed.callback_id}`
-      await ctx.editMessageText(newText).catch(() => {})
+      const editOpts: { entities?: typeof msg.entities } = {}
+      if ('entities' in msg && Array.isArray(msg.entities) && msg.entities.length) {
+        editOpts.entities = msg.entities
+      }
+      await ctx.editMessageText(newText, editOpts).catch(() => {})
     }
     return
   }
