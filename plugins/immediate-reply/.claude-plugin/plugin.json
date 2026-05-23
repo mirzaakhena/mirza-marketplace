@@ -1,7 +1,7 @@
 {
   "name": "immediate-reply",
   "description": "Make Claude feel fast on Telegram. Ships a behavioral skill that sends an instant acknowledgement before any non-trivial work, then edits the same message (or sends new ones) with the actual answer.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "author": {
     "name": "Mirza"
   },
