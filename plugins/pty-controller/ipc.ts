@@ -64,27 +64,6 @@ export function writeCommand(
 }
 
 /**
- * Write a restart command to the wrapper's inbox. The wrapper kills the
- * current PTY and respawns Claude Code with --resume <latestSessionId>, so
- * the conversation continues after MCP servers/plugins are reloaded fresh.
- */
-export function writeRestartCommand(stateDir: string): { id: string; path: string } {
-  const pending = join(stateDir, 'pending')
-  mkdirSync(pending, { recursive: true })
-  const id = randomUUID()
-  const payload = {
-    id,
-    ts: new Date().toISOString(),
-    type: 'restart',
-  }
-  const finalPath = join(pending, `${id}.json`)
-  const tmpPath = `${finalPath}.tmp.${process.pid}`
-  writeFileSync(tmpPath, JSON.stringify(payload, null, 2))
-  renameSync(tmpPath, finalPath)
-  return { id, path: finalPath }
-}
-
-/**
  * Resolve the path to the shared agent registry file. The wrapper writes
  * this; we only read it. Override via AGENT_REGISTRY_PATH env var (kept in
  * sync with the writer in wrapper/src/wrapper.ts).

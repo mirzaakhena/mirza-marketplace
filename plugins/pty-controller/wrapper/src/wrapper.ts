@@ -433,13 +433,9 @@ function spawnClaudePty(): { pty: IPty; startup: ReturnType<typeof chooseStartup
   return { pty: p, startup }
 }
 
-let _spawn = spawnClaudePty()
-let currentPty: IPty = _spawn.pty
-let startupMode = _spawn.startup
-// True while a wrapper-initiated restart is in flight. When the PTY's onExit
-// fires under this flag, respawn instead of shutting the wrapper down. Cleared
-// once the fresh PTY is wired up.
-let restarting = false
+const _spawn = spawnClaudePty()
+const currentPty: IPty = _spawn.pty
+const startupMode = _spawn.startup
 
 /**
  * Inject a slash command into the PTY, separating the command text from
@@ -485,53 +481,15 @@ let awaitingClearReady:
   | { sessionsBefore: Set<string>; sessionName?: string }
   | null = null
 
-// PTY handler wiring. Extracted into a function because /restart kills the
-// PTY and respawns a fresh one — the new IPty instance needs the same
-// onData/onExit bindings as the original. stdin → PTY is wired once below
-// using the `currentPty` `let` binding, so it follows the swap automatically.
-function attachPtyHandlers(): void {
-  currentPty.onData(data => {
-    process.stdout.write(data)
-  })
-  currentPty.onExit(({ exitCode, signal }) => {
-    log(`claude exited (code=${exitCode}, signal=${signal ?? 'none'})`)
-    if (restarting) {
-      log('restart: respawning claude...')
-      _spawn = spawnClaudePty()
-      currentPty = _spawn.pty
-      startupMode = _spawn.startup
-      attachPtyHandlers()
-      // Mirror the post-spawn resume bookkeeping: write current session id and
-      // emit a session-change outbox event so the telegram plugin can notify
-      // the user the wrapper is back up.
-      if (!startupMode.isFirstRun && startupMode.latestSessionId) {
-        const sid = startupMode.latestSessionId
-        writeCurrentSessionId(sid)
-        const stateDir = resolveTelegramStateDir()
-        let resolvedName: string | null = null
-        if (stateDir) {
-          try {
-            const obj = JSON.parse(
-              readFileSync(join(stateDir, 'session-names.json'), 'utf8'),
-            ) as Record<string, { name: string }>
-            resolvedName = obj[sid]?.name ?? null
-          } catch {
-            /* registry missing → null */
-          }
-        }
-        writeSystemOutbox({
-          type: 'session-change',
-          sessionId: sid,
-          sessionName: resolvedName,
-        })
-      }
-      restarting = false
-      return
-    }
-    shutdown(exitCode ?? 0)
-  })
-}
-attachPtyHandlers()
+// PTY handlers: forward output to our stdout and shut the wrapper down
+// when claude exits.
+currentPty.onData(data => {
+  process.stdout.write(data)
+})
+currentPty.onExit(({ exitCode, signal }) => {
+  log(`claude exited (code=${exitCode}, signal=${signal ?? 'none'})`)
+  shutdown(exitCode ?? 0)
+})
 
 // User terminal → PTY (raw mode so keypresses go straight through).
 process.stdin.setRawMode?.(true)
@@ -816,18 +774,6 @@ async function consumePending(filename: string): Promise<void> {
           sessionName ? ` (will rename to "${sessionName}")` : ''
         }`,
       )
-    }
-    return
-  }
-
-  if (type === 'restart') {
-    log(`restart requested (id: ${payload.id ?? '?'})`)
-    restarting = true
-    try {
-      currentPty.kill()
-    } catch (err) {
-      log(`restart: pty.kill threw: ${err}`)
-      restarting = false
     }
     return
   }

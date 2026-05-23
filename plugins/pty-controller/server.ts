@@ -23,7 +23,6 @@ import {
   resolveAgentRegistryPath,
   resolveStateDir,
   writeCommand,
-  writeRestartCommand,
   wrapperLikelyRunning,
 } from './ipc.ts'
 
@@ -68,15 +67,6 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
         },
         required: ['command'],
-      },
-    },
-    {
-      name: 'pty_restart',
-      description:
-        'Restart the entire Claude Code process hosted by the mirza-cc wrapper. The wrapper kills the PTY and respawns CC with --resume <latestSessionId>, so the conversation continues seamlessly but all MCP servers and plugin code are reloaded fresh. Use this after editing plugin source files (.ts) so the changes take effect without losing the current chat. Returns immediately; the actual restart happens after this turn ends. The current AI turn will be interrupted — call this as the LAST action in your turn. Requires the mirza-cc wrapper to be running.',
-      inputSchema: {
-        type: 'object',
-        properties: {},
       },
     },
     {
@@ -150,22 +140,6 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
             {
               type: 'text',
               text: `queued (id: ${id}) — wrapper will inject "${command}" into PTY shortly\npath: ${path}`,
-            },
-          ],
-        }
-      }
-      case 'pty_restart': {
-        if (!wrapperLikelyRunning(STATE_DIR)) {
-          throw new Error(
-            'wrapper not detected (no fresh heartbeat). Launch CC via `mirza-cc` instead of `claude` directly.',
-          )
-        }
-        const { id, path } = writeRestartCommand(STATE_DIR)
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `queued restart (id: ${id}) — wrapper will kill PTY and respawn shortly\npath: ${path}`,
             },
           ],
         }

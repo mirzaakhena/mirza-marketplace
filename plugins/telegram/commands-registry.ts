@@ -76,13 +76,6 @@ export const COMMANDS: CommandSpec[] = [
       'Renames the currently active session. Usage: /rename <name>. Example: /rename utama. Names must be unique within the project; the command rejects duplicates.',
   },
   {
-    name: 'restart',
-    menuHint: 'Restart Claude Code (reload plugins)',
-    helpSummary: 'Restart CC via wrapper; reloads MCPs/plugins, conversation continues',
-    helpDetail:
-      'Kills the PTY and respawns Claude Code with --resume <latestSessionId>. MCP servers and plugin code reload fresh from disk, but the current conversation continues seamlessly. Useful after editing plugin source (.ts) files. Asks for confirmation first since the in-flight AI turn is interrupted and there is a few seconds of downtime. Requires the mirza-cc wrapper to be running.',
-  },
-  {
     name: 'effort',
     menuHint: 'Set effort level (low..max, auto)',
     helpSummary: 'Change Claude\'s effort level for this session',
