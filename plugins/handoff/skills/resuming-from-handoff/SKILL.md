@@ -7,11 +7,16 @@ description: Use when the user invokes /handoff-resume at the start of a new Cla
 
 ## When this skill runs
 
-You were invoked by the `/handoff-resume` slash command. The user has no argument to give you. Your job:
+You were invoked by the `/handoff-resume` slash command. The command may pass an optional argument:
+
+- **No argument** (default): full human-gate flow.
+- **`yes`** (case-insensitive): user pre-confirmed — skip the confirmation question and proceed directly after showing the summary.
+
+Your job:
 
 1. Locate the repo's `.handoff/` directory and find the latest file.
 2. Read the full file into your context.
-3. Show the user a short summary and ask for confirmation.
+3. Show the user a short summary. If pre-confirmed, skip Step 4's question; otherwise ask for confirmation.
 4. After confirmation (or redirection), proceed with full handoff context loaded.
 
 ## Step 1 — Locate the handoff directory
@@ -57,6 +62,24 @@ Apakah Anda yakin ingin melanjutkan task handover ini?
 ```
 
 Then stop and wait for the user's reply. Do NOT begin executing the plan from Section 6 until the user confirms.
+
+**If the `interactive-prompts` skill is available** (listed in the session's available skills), render the confirmation as inline-keyboard buttons instead of plain text — the user is likely on Telegram and tapping is faster than typing. Invoke the skill, then attach `buttons` to your `reply` call:
+
+```json
+"buttons": [
+  [
+    {"label": "✅ Lanjutkan handoff", "callback_id": "resume_yes"},
+    {"label": "❌ Mulai segar", "callback_id": "resume_no"}
+  ],
+  [
+    {"label": "✏️ Jelaskan manual", "callback_id": "manual"}
+  ]
+]
+```
+
+Map the tap in Step 5: `resume_yes` → confirm branch; `resume_no` → decline-without-redirect branch; `manual` → invite free-form text and treat the next message as the redirect/clarification. If `interactive-prompts` is not installed, fall back to plain-text confirmation.
+
+**If pre-confirmed via the `yes` argument:** skip the question entirely. Reply with only the summary plus a short acknowledgement (e.g. `"Auto-confirmed — langsung mulai eksekusi Section 6."`), then proceed straight to Step 5's confirm branch without waiting. Still show the summary so the user can intervene if something looks wrong (e.g. wrong branch).
 
 ## Step 5 — Proceed based on user reply
 

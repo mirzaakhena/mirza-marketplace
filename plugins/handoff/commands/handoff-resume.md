@@ -1,8 +1,10 @@
 ---
 description: Load the latest handoff file from <repo>/.handoff/, summarise it, and ask the user to confirm before continuing the work it describes.
-argument-hint: ""
+argument-hint: "[yes]"
 ---
 
 You are resuming work from a previous Claude Code session. Invoke the `resuming-from-handoff` skill — it locates the latest handoff file, summarises it, and asks the user to confirm before proceeding. Follow its instructions exactly.
 
-This command takes no arguments. If the user typed extra text after `/handoff-resume`, ignore it and continue with the default behaviour.
+Argument: `$ARGUMENTS`
+
+If the argument is exactly `yes` (case-insensitive), the user has pre-confirmed — skip the confirmation prompt and proceed directly to executing Section 6's plan after showing a brief summary. Any other argument (or empty) means use the default behaviour with the human gate.
