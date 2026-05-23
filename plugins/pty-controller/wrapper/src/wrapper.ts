@@ -314,7 +314,28 @@ function persistRegistry(reg: ReturnType<typeof loadRegistry>): void {
   mkdirSync(join(AGENT_REGISTRY_PATH, '..'), { recursive: true })
   const tmp = `${AGENT_REGISTRY_PATH}.tmp.${process.pid}`
   writeFileSync(tmp, JSON.stringify(reg, null, 2))
-  renameSync(tmp, AGENT_REGISTRY_PATH)
+  // Retry renameSync on Windows EPERM/EBUSY: antivirus / Search Indexer
+  // can briefly hold the destination open during scans, causing rename
+  // to fail even though the cross-wrapper lock is held. Race window is
+  // <100ms in practice, so progressive backoff (50/100/150/200ms, total
+  // <500ms) clears it without inflating heartbeat latency.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      renameSync(tmp, AGENT_REGISTRY_PATH)
+      if (attempt > 0) {
+        log(`registry rename succeeded on attempt ${attempt + 1}`)
+      }
+      return
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code !== 'EPERM' && code !== 'EBUSY') throw err
+      if (attempt === 4) throw err
+      const until = Date.now() + 50 * (attempt + 1)
+      while (Date.now() < until) {
+        /* busy-wait — same pattern as acquireRegistryLock */
+      }
+    }
+  }
 }
 
 function registerSelfInGlobalRegistry(): void {
@@ -534,7 +555,14 @@ const heartbeatInterval = setInterval(() => {
   } catch (err) {
     log(`heartbeat write failed: ${err}`)
   }
-  heartbeatSelfInGlobalRegistry()
+  // Guarded separately so a global-registry update failure (e.g. the
+  // Windows EPERM rename race) does not propagate out of the timer
+  // callback and kill the wrapper process.
+  try {
+    heartbeatSelfInGlobalRegistry()
+  } catch (err) {
+    log(`global registry heartbeat failed: ${err}`)
+  }
 }, 5_000)
 writeFileSync(HEARTBEAT_FILE, new Date().toISOString())
 registerSelfInGlobalRegistry()
