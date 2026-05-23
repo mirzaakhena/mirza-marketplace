@@ -1,21 +1,53 @@
 ---
 name: interactive-prompts
-description: Use whenever you are about to ask the user a Telegram question with a finite set of answers — confirmation (yes/no), action selection (proceed/cancel/skip), or single-choice from a short list. Render the options as inline-keyboard buttons via the telegram reply tool's `buttons` parameter so the user can answer with one tap instead of typing. Always include a manual-fallback button so the user can elaborate freely when none of the options fit.
+description: MANDATORY audit before sending any Telegram reply that ends with a question. Mechanical 2-question check — (1) Does my reply text end with `?` or contain a question-marker like "mau...", "lanjut?", "pilih"? (2) Can the user's expected answers be enumerated as ≤5 options (yes/no, confirm/cancel, choose A/B/C)? If BOTH yes → MUST use the telegram reply tool's `buttons` parameter, NOT a text list. Always include a manual-fallback button (`callback_id: manual`) so user can elaborate freely. Open-ended questions ("how should we structure X?") stay text-only. Failure to convert finite-answer questions to buttons is the most common UX miss — user types "ya" on a phone when one tap was available.
 ---
 
 # Interactive Prompts (Telegram)
 
-The user reads Telegram from a phone. Typing "B" or "2" or "option three please" is friction. When a question has a small, knowable set of answers, render those answers as **inline buttons** so the user taps once.
+User reads Telegram from a phone. Typing "B" or "2" or "option three please"
+is friction. When a question has a small, knowable set of answers, render
+those answers as **inline buttons** so the user taps once.
 
-## The Rule
+## THE PRE-FLIGHT CHECK (do this BEFORE sending any Telegram reply)
 
-When you are about to ask a question of the form **"do X or Y?"**, **"which of A/B/C?"**, or **"confirm Z?"**, attach a `buttons` array to your `reply` (or `edit_message`) call instead of just listing options in text.
+Before calling the `reply` tool (or `edit_message`), audit your composed
+text with this 2-question check:
 
-If the question is **open-ended** ("how should I structure this?", "what do you mean?"), do NOT use buttons. Buttons are for choices with bounded answers.
+1. **Does the reply contain a question?** Markers:
+   - Text ends with `?`
+   - Contains phrases like "mau X atau Y", "lanjut?", "pilih", "konfirmasi",
+     "OK / Cancel", "proceed / skip", "ya / tidak", "should I X or Y"
+2. **Can the user's expected answers be enumerated as ≤5 finite options?**
+   - "Yes/no" → 2 options ✓
+   - "Lanjut / batalkan" → 2 options ✓
+   - "A / B / C / D" → 4 options ✓
+   - "Apa pendapatmu soal arsitektur ini?" → unbounded ✗
+   - "Berapa harga BTC?" → factual, not a choice ✗
+
+**If BOTH yes → MUST attach `buttons` parameter to the reply tool call.**
+
+This is a mechanical check. You are not asking "would buttons be nicer?" —
+you are scanning your composed text for `?` and counting enumerable answers.
+
+## Why mechanical, not judgement-based
+
+The previous wording ("when you are about to ask a question with finite
+answers") relied on the AI noticing mid-compose. Common failure modes:
+
+- AI types out a yes/no question at end of reply and hits send without
+  reviewing — buttons forgotten.
+- AI rationalizes "user will just type 'ya'" — but on a phone, one tap
+  beats two-finger typing every time.
+- AI in flow of multi-paragraph reply forgets the audit step at the end.
+
+The pre-flight check forces an explicit scan immediately before send,
+regardless of how long the reply got.
 
 ## How the Mechanism Works
 
-The `telegram` plugin's `reply` and `edit_message` tools accept an optional `buttons` parameter:
+The `telegram` plugin's `reply` and `edit_message` tools accept an optional
+`buttons` parameter:
 
 ```json
 "buttons": [
@@ -30,23 +62,25 @@ Shape: **outer array = rows, inner array = buttons in a row**.
 
 Constraints (validated server-side, will throw if violated):
 - `label`: visible button text, 1–64 chars
-- `callback_id`: identifier echoed back when tapped, must match `/^[a-z0-9_]{1,32}$/`, unique within the call
+- `callback_id`: identifier echoed back when tapped, must match
+  `/^[a-z0-9_]{1,32}$/`, unique within the call
 - Max 8 rows × 8 buttons per row
 - Cannot combine `buttons` with `files` in a single call
 
-**When the user taps**, the AI receives a new `<channel>` message:
-- `content`: `[button tapped: <label>]` (the visible text the user saw)
+When the user taps, the AI receives a new `<channel>` message:
+- `content`: `[button tapped: <label>]`
 - `meta.callback_id`: the structured id you set (`yes`, `opt_a`, etc.)
 - `meta.button_label`: same as the label in content
-- `meta.source_message_id`: id of the original message with the buttons (useful for `edit_message`)
+- `meta.source_message_id`: id of the original message with buttons
 
-After a tap, the original message's buttons are automatically stripped and the chosen label is appended (`→ ✅ Yes`). So the same prompt can't be answered twice.
+After a tap, the original message's buttons are auto-stripped and the
+chosen label is appended (`→ ✅ Yes`). Same prompt can't be answered twice.
 
 ## The Three Patterns
 
-### Pattern 1 — Single Action
+### Pattern 1 — Single Action (rare)
 
-One button. Use when you need an explicit acknowledgement before proceeding (rare; usually direct text is fine).
+One button. Use when you need an explicit acknowledgement before proceeding.
 
 ```json
 "buttons": [[{"label": "👌 Mengerti", "callback_id": "ack"}]]
@@ -65,11 +99,13 @@ Two buttons side-by-side. The default for "should I do X?" prompts.
 ]
 ```
 
-Tip: use action verbs ("Lanjutkan / Batalkan") not yes/no when the action is non-trivial — confirms intent.
+Tip: use action verbs ("Lanjutkan / Batalkan") not raw yes/no when the
+action is non-trivial — confirms intent more clearly.
 
 ### Pattern 3 — Single-Select (mimic radio)
 
-N options, one row each (vertical layout — easier to read on mobile when labels are long).
+N options, one row each (vertical layout — easier on mobile when labels
+are long).
 
 ```json
 "buttons": [
@@ -80,72 +116,86 @@ N options, one row each (vertical layout — easier to read on mobile when label
 ]
 ```
 
-Notice the last button — see next section.
-
 ## MANDATORY: The Manual-Fallback Button
 
-**Every multi-choice prompt MUST include a last button labelled "✏️ Jelaskan manual" (or equivalent) with `callback_id: "manual"`.**
+**Every multi-choice prompt MUST include a last button labelled
+"✏️ Jelaskan manual" (or equivalent) with `callback_id: "manual"`.**
 
 Why:
-- The user may want a combination of options (multi-select via free-form text, since Telegram has no native checkbox)
+- User may want a combination of options (Telegram has no native checkbox)
 - The options you offer may be incomplete
-- The user may want to ask a clarifying question instead of committing
+- User may want to ask a clarifying question instead of committing
 - It's the escape hatch — never trap the user in your option set
 
-When the user taps `manual`, respond with a short follow-up reply (no buttons this time) inviting free-form text:
+When user taps `manual`, respond with a short follow-up reply (no buttons
+this time) inviting free-form text:
 
 > "Sip, silakan jelaskan langsung apa yang kamu mau."
 
 Then handle whatever they type next as a normal text request.
 
-## Anti-Patterns (Don't Do This)
+## Hard Rules (carry forward)
 
-❌ **Don't use buttons for free-form questions.**
-"Apa pendapatmu soal arsitektur ini?" — this needs text. Buttons would collapse rich answer into a meaningless tap.
+1. **Pre-flight check is mechanical.** Scan text for `?` and count answers.
+   No judgement step.
+2. **No buttons for open-ended questions.** "Apa pendapatmu...?" → text only.
+3. **No buttons for "obvious yes" prompts.** "Lanjut?" after a trivial step
+   is noise. Just proceed without asking.
+4. **No buttons for 6+ options.** Switch to a numbered text list + "reply
+   with the number". Buttons are for short menus.
+5. **Sensitive/destructive operations** need confirmation text in the
+   message body, not just the button label.
 
-❌ **Don't use buttons when the answer is "obvious yes".**
-"Lanjut?" right after a trivial step is noise. Just proceed.
+   Bad:
+   ```
+   text: "OK?"
+   buttons: [[Yes][No]]
+   ```
+   Good:
+   ```
+   text: "Saya akan menghapus folder X (irreversible). OK?"
+   buttons: [[Yes, hapus][Cancel]]
+   ```
+6. **Don't reuse callback_ids** across simultaneous prompts.
+7. **Manual-fallback button mandatory** on every multi-choice prompt.
 
-❌ **Don't offer more than 5 options.**
-If there are 6+ choices, the list is too long for buttons. Switch to a numbered text list + "reply with the number". Buttons are for short menus.
+## Anti-patterns
 
-❌ **Don't use buttons for sensitive/destructive operations without confirmation text in the message body.**
-The button label alone may be too terse. Example bad:
-```
-text: "OK?"
-buttons: [[Yes][No]]
-```
-Better:
-```
-text: "Saya akan menghapus folder X (irreversible). OK?"
-buttons: [[Yes, hapus][Cancel]]
-```
-
-❌ **Don't reuse callback_ids across simultaneous prompts** for different choices. Each prompt's callback_ids should be unique-enough that you can tell which prompt was answered if you check meta.callback_id.
-
-❌ **Don't omit the manual-fallback button** on single-select prompts. See above.
+❌ Type out yes/no question and send without auditing for buttons.
+❌ "Pilih A / B / C / D" laid out as text list when buttons would render
+   as taps.
+❌ Omit manual-fallback button — traps user when none of the options fit.
+❌ Buttons on open-ended free-form question — collapses rich answer to a
+   meaningless tap.
+❌ Button label terse + ambiguous body ("OK?" + [Yes][No]). Spell out the
+   action in body.
+✅ Pre-flight scan before EVERY reply that ends with a question.
+✅ Action verbs in labels for non-trivial choices ("Lanjutkan" not "Yes").
+✅ Vertical layout when labels are long (one button per row).
 
 ## Handling the Tap
 
-When the user's tap arrives, the inbound `<channel>` message has:
+When tap arrives, inbound `<channel>` has:
 - `content` = `[button tapped: ✅ Lanjutkan]`
 - `meta.callback_id` = `yes`
 
-Switch on `meta.callback_id` (not on the content string — labels can change but callback_ids are stable). React appropriately:
+Switch on `meta.callback_id` (NOT on content string — labels can change but
+callback_ids are stable).
 
-- If a known choice → proceed with the chosen branch
-- If `manual` → invite free-form input
-- If unexpected → something's wrong (probably a stale prompt); reply with a clarifying question
+- Known choice → proceed with the chosen branch.
+- `manual` → invite free-form input.
+- Unexpected → probably a stale prompt; reply with a clarifying question.
 
 ## Pairs Nicely With `immediate-reply`
 
-If a question requires research before you can even formulate the options, use `immediate-reply` ack pattern first:
+If a question needs research before you can formulate the options, use
+`immediate-reply` ack first:
 
 1. Ack: "🤔 Bentar mikir pilihannya..."
-2. Do research
-3. `edit_message` with the question + `buttons` filled in
+2. Do research.
+3. `edit_message` with question + `buttons` filled in.
 
-This way the user always sees a sign of life within ~1 second, and the buttons appear as soon as you know what to offer.
+Sign of life within ~1 second, buttons appear as soon as options known.
 
 ## Quick Reference (Cheat Sheet)
 
@@ -157,5 +207,7 @@ This way the user always sees a sign of life within ~1 second, and the buttons a
 | "Pakai opsi mana?" (3-5 choices) | Pattern 3 | row each + ✏️ manual |
 | Open-ended / free-form | NO BUTTONS | text only |
 | 6+ choices | NO BUTTONS | numbered text list |
+| Factual question ("berapa harga BTC?") | NO BUTTONS | text answer |
 
-That's it. Keep prompts crisp. The user came to your chat for fast answers — make the question fast to answer too.
+That's it. The pre-flight check runs every Telegram reply. Audit, count,
+tap > type.

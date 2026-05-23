@@ -1,177 +1,173 @@
 ---
 name: immediate-reply
-description: Use whenever a user message arrives via Telegram and the response involves any non-trivial work (tool calls, research, multi-file reads, code investigation, long-running tasks). Two responsibilities — (1) send a short ack instantly so the user sees a sign of life within ~1 second, and (2) keep the user posted with progress updates throughout the task so they never sit in silence. Covers both the opening ack and the ongoing narration until the final answer lands.
+description: MANDATORY before any tool call in response to a Telegram inbound. Trigger criterion is MECHANICAL, not "is this hard?" — if your planned response involves ANY of (≥1 tool call other than the reply itself, ≥1 file Read, ≥1 Bash invocation, ≥1 background process, ≥1 agent dispatch), send a short ack via reply tool BEFORE that first tool fires. Then keep narrating progress at stage transitions for tasks >15s. Skip ack ONLY when your entire response is pure text with zero tool calls. Failure to ack before tools fires is the most common UX miss — user sits in silence and assumes you ghosted.
 ---
 
 # Immediate Reply (Telegram)
 
-You are running through the Telegram channel where the user types from a phone and notices any delay over a couple of seconds. This skill makes you feel fast **and stay responsive** — not just at the start, but throughout the whole task.
+User reads Telegram from a phone and notices any delay over a couple of
+seconds. This skill keeps you visible from the moment the message arrives
+until the final answer lands.
 
-## The Two Responsibilities
+## THE PRE-FLIGHT CHECK (do this BEFORE every Telegram reply)
 
-This skill covers two equally-important behaviors:
+When a Telegram `<channel>` message arrives, **before composing your
+response**, run this 4-question check:
 
-1. **Instant ack** — before any non-trivial work, send one short acknowledgement message first (within ~1 second). User sees you heard them.
-2. **Ongoing progress updates** — for tasks that take more than ~15 seconds, narrate progress at meaningful stage transitions so the user knows you are still working and what you are doing. Silence after the ack is almost as bad as no ack at all.
+1. Will I call any tool other than `reply` before delivering the final answer?
+2. Will I `Read` any file?
+3. Will I run any `Bash` command (including `git`, `ls`, `grep` via tools)?
+4. Will I dispatch an Agent / background process / Monitor?
 
-Both matter. Skipping the ack feels like ghosting; sending the ack but then going silent for 90 seconds feels like you got stuck. The whole job is *continuous responsiveness* from the moment the message arrives until the final answer lands.
+**If ANY answer is "yes" → ack BEFORE the first such tool call.**
 
-## The Rule
+This is a mechanical check. You are not deciding "is this important?" or
+"does this feel slow?" — you are counting future tool calls. Yes/no, no
+judgement.
 
-**Before any non-trivial work, send one short ack message first.** Then do the work — and while doing it, send progress updates at meaningful stage transitions. Then deliver the final answer.
+If all four are "no" (you are about to produce a pure-text reply with no
+tools) → ack optional, just send the answer.
 
-"Non-trivial work" means anything that takes more than ~2 seconds of wall clock. In practice that is almost every message except simple greetings or one-liner factual answers.
+## Why mechanical, not judgement-based
 
-## Decision Tree
+The previous wording ("non-trivial work", "more than a few seconds") relied
+on judgement and drifted in practice. Common failure modes:
+
+- AI estimates "this will only take 3 seconds" — actual wall clock 12 sec.
+- AI in flow after several short replies skips ack out of habit.
+- AI rationalizes "the answer is already in my head, just typing it now"
+  while a Read or Bash fires in the background and the user waits.
+
+Counting tool calls eliminates all three. If you wrote a plan with even one
+`Read` or `Bash`, the ack is mandatory — no debate.
+
+## The Two Responsibilities (still applies)
+
+1. **Instant ack** — within ~1 second of the inbound message, send a short
+   reply so the user sees a sign of life.
+2. **Ongoing progress** — for tasks >15s wall clock, narrate at stage
+   transitions so the user never sits in silence after the ack.
+
+Silence after an ack is almost as bad as no ack.
+
+## Sequence (mechanical)
 
 ```
-User message arrives
+Telegram inbound arrives
         │
         ▼
-Is the answer trivial?
-(greeting, single short fact, yes/no, repeated question)
+Run pre-flight check (4 questions above)
         │
    ┌────┴────┐
-   │         │
-  Yes        No
+  All "no"   Any "yes"
    │         │
    ▼         ▼
-Reply       Send ack message FIRST
-directly    (capture message_id)
-            │
-            ▼
-            Do the work
-            │
-            ▼
-            Estimate total elapsed time
-            │
-       ┌────┴────┐
-       │         │
-   < 15 sec   ≥ 15 sec
-       │         │
-       ▼         ▼
-   edit_message  Decide per situation:
-   with final    (a) multi-edit progress on the ack, then NEW reply with final
-                 (b) leave ack as-is, send progress as NEW messages
-                 (c) mix
+Reply with   reply tool: send short ack
+final        capture bot's message_id
+answer.      │
+Done.        ▼
+             Do the work (tool calls, reads, etc.)
+             │
+             ▼
+             Estimate total elapsed time
+             │
+        ┌────┴────┐
+    < 15 sec   ≥ 15 sec
+        │         │
+        ▼         ▼
+   edit_message   Decide per situation:
+   with final     (a) multi-edit progress on ack, then NEW reply with final
+                  (b) leave ack as-is, send progress as NEW messages
+                  (c) mix
+                  (final answer ALWAYS a NEW reply for push notification)
 ```
 
 ## Ack Phrasing — Mix and Surprise
 
-Vary the wording. Boring repetition kills the gimmick. Pick a phrasing that matches the task and your mood. Lean casual Indonesian. Occasional emoji is fine, don't overdo.
+Vary the wording. Boring repetition kills the gimmick. Lean casual
+Indonesian. Occasional emoji fine, don't overdo.
 
-Research / browsing the web:
+Research / browsing:
 - "🔍 Bentar, cek dulu yaa..."
-- "🌐 Lagi browsing, sebentar..."
-- "📰 Hmm, kepoin internet dulu..."
 - "🕵️ Investigasi mode on..."
 
 Reading files / code:
 - "📖 Lagi baca file dulu..."
-- "🔧 Buka kap mesin sebentar..."
 - "👀 Bentar lihat kodenya..."
-- "📂 Ngintip folder dulu yaa..."
 
 Thinking / planning:
 - "🤔 Bentar mikir..."
-- "💭 Hmm, kasih waktu sedikit..."
 - "🧠 Lagi nyusun strategi..."
-- "🎯 Oke tantangan diterima, sebentar ya..."
 
 Writing / drafting:
 - "📝 Lagi nulis, bentar..."
-- "✍️ Drafting dulu..."
 - "🎨 Nyusun jawaban..."
 
-When you genuinely don't know how long it'll take:
+When you don't know how long:
 - "👌 Sip, kerjain dulu ya..."
 - "🚀 On it, sebentar..."
-- "🤝 Got it, bentar yaa..."
 
-Surprise occasionally. A well-placed unexpected line ("kopi dulu ☕ bentar... oke siap") feels human. But never more than once per task.
+Surprise occasionally ("kopi dulu ☕ bentar..."). Never more than once per
+task.
 
-## Update Strategies
+## Update Strategies (pick ONE per task)
 
-After the ack is sent and `message_id` is captured, choose ONE strategy per task. Don't switch mid-task — it confuses the user.
+### Strategy A — Edit-to-final (best for 5-15s tasks)
+1. Ack: "🔍 Bentar cek dulu..."
+2. Do the work.
+3. `edit_message` with final answer.
 
-### Strategy A — Edit-to-final (best for tasks 5-15 seconds)
-1. Send ack: "🔍 Bentar cek dulu..."
-2. Do the work
-3. `edit_message` with final answer
-4. Done. One pesan di chat. Bersih.
+### Strategy B — Multi-edit progress (best for 15-60s tasks with clear stages)
+1. Ack: "🔍 Lagi cek dulu..."
+2. After stage 1: edit to "✅ Cek selesai, sekarang research..."
+3. After stage 2: edit to "✅ Research done, nyusun jawaban..."
+4. Final answer: NEW reply (not edit) — push notification fires.
 
-### Strategy B — Multi-edit progress (best for tasks 15-60 seconds with clear stages)
-1. Send ack: "🔍 Lagi cek dulu..."
-2. After first stage: edit to "✅ Cek selesai, sekarang research..."
-3. After second stage: edit to "✅ Research done, lagi nyusun jawaban..."
-4. Final answer: send as **NEW reply** (not edit) — user gets push notification that work is done.
+### Strategy C — Progressive new messages
+1. Ack: "👌 Sip bentar..."
+2. As work progresses, NEW messages narrating: "hmm baca dulu...", "oh ternyata X..."
+3. Final answer also NEW message.
 
-Important: don't edit faster than 1x per second (rate limit) and don't update for every tiny step. Only at meaningful stage transitions.
+Use when narration is itself useful or user wants thinking visible.
 
-### Strategy C — Progressive new messages (best for "thinking out loud" feel)
-1. Send ack: "👌 Sip bentar..."
-2. As work progresses, send NEW messages narrating the thinking: "hmm ok, baca dulu xyz...", "aku coba research dulu soal abc...", "oh ternyata X, sekarang aku coba Y..."
-3. Final answer also as new message.
+### Strategy D — Mix
+Switch mid-task if stages run longer than expected. Final answer ALWAYS
+NEW reply if total >15s.
 
-This works when the user wants the thinking process visible, or when narration is itself useful.
+## Hard Rules (Telegram constraints — non-negotiable)
 
-### Strategy D — Mix (judgement call)
-Sometimes you start with edit-progress then realize the task is taking too long → switch to sending new messages. That's fine. Just make sure the final answer always arrives as a NEW reply if more than ~15 seconds passed, so the push notification fires.
+1. **No push notification on edit.** Task >15s → final must be NEW reply.
+2. **Don't edit faster than 1x per second per chat.** Rate limit.
+3. **Edits don't change message type.** Image must be a new message.
+4. **Don't ack-spam.** One ack per user message; if user sends 3 in 5s, ack
+   the latest only.
+5. **No ack for pure-text replies with zero tools.** Pre-flight all-no path.
 
-## Hard Rules (Telegram Constraints)
+## Implementation pointers
 
-1. **No push notification on edit.** If the task lasts more than ~15 seconds, the FINAL meaningful output must be a NEW reply (not just an edit), otherwise the user's phone won't ping and they'll think you ghosted them.
+Via `plugin:telegram:telegram` MCP:
 
-2. **Don't edit faster than 1x per second per chat.** Rate limit territory.
+1. Receive Telegram message → has `chat_id`, `message_id` of user.
+2. Pre-flight check (4 questions). If any "yes": call `reply` with ack →
+   capture bot's `message_id`.
+3. Save that `message_id` in working memory for this turn.
+4. Do the tool calls.
+5. Call `edit_message` (chat_id + saved message_id + new text) for edit
+   strategy, OR `reply` again for new-message strategy.
+6. Long tasks: final answer ALWAYS via `reply`, never just `edit_message`.
 
-3. **Edits don't change message type.** If ack was text and you want to send an image as final, image must be a new message.
+## Anti-patterns (carry forward)
 
-4. **Don't ack-spam.** One ack per user message. If the user sends 3 messages in 5 seconds, ack the latest one — don't send 3 acks.
+- ❌ Judgement-based threshold ("feels fast", "trivial") — drifts.
+- ❌ "I'll just type the answer now while Read is running" — Read is a
+  tool call. Ack first.
+- ❌ Multiple acks for one inbound message.
+- ❌ Multi-paragraph ack. One line, one emoji max, under 50 chars.
+- ❌ Final answer as edit when task >15s — no push notification, user
+  thinks you ghosted.
+- ✅ Pre-flight check is mechanical. Count tools, don't judge difficulty.
+- ✅ Ack BEFORE the first non-reply tool fires, not after.
+- ✅ Stage-transition narration for long tasks. Silence kills trust.
 
-5. **Skip ack entirely for trivial answers.** Greeting back ("Halo!") doesn't need a "🤔 bentar..." in front of it. Use judgement.
-
-## When NOT to Use Immediate Reply
-
-- User message is clearly trivial (greeting, simple fact, yes/no acknowledgment).
-- You're already mid-task and the user sent a follow-up — they're watching, no need for another ack.
-- The reply tool itself is unavailable or already returned error — don't double down on a broken pipe.
-
-## Example Walkthroughs
-
-**Example 1 — Short research (Strategy A):**
-- User: "Apa ibu kota Indonesia?"
-- This is trivial — just answer "Jakarta." No ack needed.
-
-**Example 2 — Medium research (Strategy A):**
-- User: "Tolong cek harga Bitcoin sekarang"
-- Ack: "📊 Cek harga dulu yaa..."
-- WebFetch crypto price (~5s)
-- `edit_message`: "📊 BTC sekarang: $X (data per Y)"
-
-**Example 3 — Long multi-stage research (Strategy B → final new reply):**
-- User: "Tolong investigasi 5 repo Telegram bot dan kasih perbandingan"
-- Ack: "🕵️ Sip, mau investigasi 5 repo. Bentar yaa..."
-- After fetch repo 1-2: edit "📥 Sudah 2 repo, lanjut 3 lagi..."
-- After fetch all: edit "✅ Data lengkap, lagi nyusun perbandingan..."
-- Final answer: **NEW reply** with the comparison table
-
-**Example 4 — Coding task (Strategy C):**
-- User: "Bisa tolong cek bug di file X dan fix?"
-- Ack: "🔧 Oke, lagi buka file X..."
-- New msg: "👀 Hmm, ada race condition di line 45. Coba aku fix..."
-- New msg: "✏️ Lagi nulis patch..."
-- Final new msg: "✅ Fixed. Begini perubahannya: [diff]"
-
-## Implementation Pointers
-
-Concrete tool sequence (via `plugin:telegram:telegram` MCP):
-
-1. Receive Telegram message → has `chat_id`, `message_id` of user's message
-2. Call `reply` with `chat_id` + ack text → response gives **bot's** `message_id` (your placeholder)
-3. Save that `message_id` in working memory for this turn
-4. Do the work
-5. Call `edit_message` with `chat_id` + saved `message_id` + new text (for edit strategy)
-   OR call `reply` again for new-message strategy
-6. For long tasks: final answer is ALWAYS via `reply`, never just `edit_message`
-
-That's it. Keep it simple. The point is the user sees a sign of life within ~1 second and trusts you're working.
+That's it. The point: user sees a sign of life within ~1 second from
+EVERY non-trivial inbound, and stays informed throughout.
