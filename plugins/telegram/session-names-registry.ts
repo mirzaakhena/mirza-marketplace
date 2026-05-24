@@ -94,6 +94,18 @@ export function setName(
 }
 
 /**
+ * Remove a single session's name entry, then persist. No-op if the entry is
+ * absent. Best-effort: errors are swallowed via saveRegistry, consistent with
+ * setName — a failed registry write must never abort the caller's delete.
+ */
+export function removeName(stateDir: string, sessionId: string): void {
+  const registry = loadRegistry(stateDir)
+  if (!registry.has(sessionId)) return
+  registry.delete(sessionId)
+  saveRegistry(stateDir, registry)
+}
+
+/**
  * Mutates `registry` in place: for each ~/.claude/sessions/<pid>.json whose
  * cwd matches projectDir and which carries a non-empty name, upsert into
  * the registry if the pid file's mtime is newer than the registry entry

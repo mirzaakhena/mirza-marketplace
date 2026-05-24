@@ -13,6 +13,7 @@ import {
   loadRegistry,
   saveRegistry,
   setName,
+  removeName,
   refreshFromPidFiles,
   findSessionIdByName,
 } from './session-names-registry'
@@ -78,6 +79,23 @@ describe('session-names-registry', () => {
     const entry = loadRegistry(stateDir).get('sid-a')!
     expect(entry.name).toBe('second')
     expect(entry.updatedAt).toBeGreaterThan(firstTs)
+  })
+
+  test('removeName deletes an existing entry and persists', () => {
+    setName(stateDir, 'sid-a', 'utama')
+    setName(stateDir, 'sid-b', 'bahas')
+    removeName(stateDir, 'sid-a')
+    const loaded = loadRegistry(stateDir)
+    expect(loaded.has('sid-a')).toBe(false)
+    expect(loaded.get('sid-b')!.name).toBe('bahas')
+  })
+
+  test('removeName is a no-op when the sessionId is absent', () => {
+    setName(stateDir, 'sid-a', 'utama')
+    expect(() => removeName(stateDir, 'sid-nonexistent')).not.toThrow()
+    const loaded = loadRegistry(stateDir)
+    expect(loaded.size).toBe(1)
+    expect(loaded.get('sid-a')!.name).toBe('utama')
   })
 
   test('loadRegistry ignores malformed entries', () => {
