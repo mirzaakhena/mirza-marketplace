@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { tryRouteMetaCommand, tryHandleMetaCallback, __resetDeletePickerForTests, __resetSwitchPickerForTests, __resetArchivePickerForTests, parseEffortInput, EFFORT_LEVELS, extractCurrentEffortLevel } from './meta-commands'
+import { tryRouteMetaCommand, tryHandleMetaCallback, __resetDeletePickerForTests, __resetSwitchPickerForTests, __resetArchivePickerForTests, __resetArchiveAllForTests, __resetDeleteAllForTests, parseEffortInput, EFFORT_LEVELS, extractCurrentEffortLevel } from './meta-commands'
 import { loadArchived } from './archive-store'
 import { listProjectSessions } from './sessions-list'
 import { setName as registrySetName, loadRegistry, findSessionIdByName } from './session-names-registry'
@@ -1474,5 +1474,157 @@ describe('meta-commands: tryHandleMetaCallback effort_*', () => {
     const cb = makeCallbackHandler()
     await tryHandleMetaCallback('meta:effort_low', {}, cb.handler)
     expect(cb.acks.some(t => /CLAUDE_PROJECT_DIR/i.test(t))).toBe(true)
+  })
+})
+
+describe('meta-commands: /delete all & /delete hard all', () => {
+  let projectDir: string
+  let stateDir: string
+  let telegramStateDir: string
+  let cleanup: () => void
+  let homeOverride: string
+
+  beforeEach(() => {
+    const ctx = mkProject()
+    projectDir = ctx.projectDir
+    stateDir = ctx.stateDir
+    cleanup = ctx.cleanup
+    homeOverride = mkdtempSync(join(tmpdir(), 'meta-cmd-home-'))
+    process.env.USERPROFILE = homeOverride
+    process.env.HOME = homeOverride
+    telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(telegramStateDir, { recursive: true })
+    setHeartbeat(stateDir, new Date().toISOString())
+    __resetArchiveAllForTests()
+    __resetDeleteAllForTests()
+  })
+
+  afterEach(() => {
+    try { rmSync(homeOverride, { recursive: true, force: true }) } catch {}
+    cleanup()
+  })
+
+  function seedN(n: number, marker: string): string[] {
+    const sids: string[] = []
+    for (let i = 0; i < n; i++) {
+      const sid = `${marker.repeat(7)}${i.toString(16)}-1111-2222-3333-444444444444`
+      sids.push(sid)
+      writeProjectJsonl(homeOverride, projectDir, sid)
+    }
+    return sids
+  }
+
+  test('/delete all replies with a single archive-all confirm button showing the count', async () => {
+    const sids = seedN(3, 'a')
+    writeCurrentSessionId(stateDir, sids[0]!)
+    const { handler, replies } = makeHandler()
+    const consumed = await tryRouteMetaCommand('/delete all', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    expect(replies).toHaveLength(1)
+    const buttons = replies[0]!.buttons!.flat()
+    expect(buttons.some(b => b.callbackData === 'meta:archive_all_confirm')).toBe(true)
+    expect(buttons.some(b => b.callbackData === 'meta:archive_all_cancel')).toBe(true)
+    expect(buttons.some(b => b.label.includes('2'))).toBe(true)
+  })
+
+  test('/delete hard all routes to hard-all confirm with PERMANEN copy, not the picker', async () => {
+    const sids = seedN(2, 'b')
+    writeCurrentSessionId(stateDir, sids[0]!)
+    const { handler, replies } = makeHandler()
+    await tryRouteMetaCommand('/delete hard all', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const buttons = replies[0]!.buttons!.flat()
+    expect(buttons.some(b => b.callbackData === 'meta:delete_all_confirm')).toBe(true)
+    expect(buttons.some(b => b.callbackData === 'meta:delete_all_cancel')).toBe(true)
+    expect(replies[0]!.text).toMatch(/PERMANEN/i)
+  })
+
+  test('/delete all with only the current session replies no-other-sessions, no buttons', async () => {
+    const sids = seedN(1, 'c')
+    writeCurrentSessionId(stateDir, sids[0]!)
+    const { handler, replies } = makeHandler()
+    await tryRouteMetaCommand('/delete all', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(replies[0]!.text).toMatch(/Tidak ada session lain/)
+    expect(replies[0]!.buttons).toBeUndefined()
+  })
+
+  test('archive_all_confirm archives every non-current session and frees each name', async () => {
+    const sids = seedN(3, 'd')
+    writeCurrentSessionId(stateDir, sids[0]!)
+    registrySetName(telegramStateDir, sids[1]!, 'session-01')
+    registrySetName(telegramStateDir, sids[2]!, 'session-02')
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    const { handler } = makeHandler()
+    await tryRouteMetaCommand('/delete all', env, handler)
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback('meta:archive_all_confirm', env, cb.handler)
+
+    expect(loadArchived(telegramStateDir)).toEqual(new Set([sids[1]!, sids[2]!]))
+    const registry = loadRegistry(telegramStateDir)
+    const short1 = sids[1]!.replace(/-/g, '').slice(0, 8).toLowerCase()
+    const short2 = sids[2]!.replace(/-/g, '').slice(0, 8).toLowerCase()
+    expect(registry.get(sids[1]!)!.name).toBe(`session-01__${short1}`)
+    expect(registry.get(sids[2]!)!.name).toBe(`session-02__${short2}`)
+    expect(findSessionIdByName(registry, 'session-01')).toBeNull()
+    expect(cb.edits[0]).toMatch(/2 session diarchive/)
+  })
+
+  test('delete_all_confirm rmSyncs every non-current jsonl and frees each name', async () => {
+    const sids = seedN(3, 'e')
+    writeCurrentSessionId(stateDir, sids[0]!)
+    registrySetName(telegramStateDir, sids[1]!, 'session-01')
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    const { handler } = makeHandler()
+    await tryRouteMetaCommand('/delete hard all', env, handler)
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback('meta:delete_all_confirm', env, cb.handler)
+
+    const encoded = projectDir.replace(/[\\/:]/g, '-')
+    const jsonl = (sid: string) => join(homeOverride, '.claude', 'projects', encoded, `${sid}.jsonl`)
+    expect(existsSync(jsonl(sids[1]!))).toBe(false)
+    expect(existsSync(jsonl(sids[2]!))).toBe(false)
+    expect(existsSync(jsonl(sids[0]!))).toBe(true) // current untouched
+    expect(loadRegistry(telegramStateDir).has(sids[1]!)).toBe(false)
+    expect(cb.edits[0]).toMatch(/2 session dihapus permanen/)
+  })
+
+  test('confirm skips a session that became active between command and tap', async () => {
+    const sids = seedN(3, 'f')
+    writeCurrentSessionId(stateDir, sids[0]!)
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    const { handler } = makeHandler()
+    await tryRouteMetaCommand('/delete all', env, handler) // snapshot = sids[1], sids[2]
+    writeCurrentSessionId(stateDir, sids[1]!) // user switched into sids[1]
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback('meta:archive_all_confirm', env, cb.handler)
+
+    expect(loadArchived(telegramStateDir)).toEqual(new Set([sids[2]!]))
+    expect(cb.edits[0]).toMatch(/1 session diarchive/)
+    expect(cb.edits[0]).toMatch(/1 dilewati/)
+  })
+
+  test('archive_all_confirm with empty snapshot reports expired and changes nothing', async () => {
+    __resetArchiveAllForTests()
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    const cb = makeCallbackHandler()
+    const consumed = await tryHandleMetaCallback('meta:archive_all_confirm', env, cb.handler)
+    expect(consumed).toBe(true)
+    expect(cb.acks[0]).toMatch(/expired/i)
+    expect(loadArchived(telegramStateDir).size).toBe(0)
+  })
+
+  test('archive_all_cancel closes cleanly', async () => {
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    const cb = makeCallbackHandler()
+    const consumed = await tryHandleMetaCallback('meta:archive_all_cancel', env, cb.handler)
+    expect(consumed).toBe(true)
+    expect(cb.edits[0]).toMatch(/cancelled/i)
+  })
+
+  test('delete_all_cancel closes cleanly', async () => {
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    const cb = makeCallbackHandler()
+    const consumed = await tryHandleMetaCallback('meta:delete_all_cancel', env, cb.handler)
+    expect(consumed).toBe(true)
+    expect(cb.edits[0]).toMatch(/cancelled/i)
   })
 })

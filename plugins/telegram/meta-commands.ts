@@ -146,6 +146,12 @@ interface ArchivePickerEntry {
 const archivePicker = new Map<string, ArchivePickerEntry>()
 let archivePickerSessions: ArchivePickerEntry[] = []
 
+// Snapshots for the bulk /delete all and /delete hard all commands. Populated
+// when the command renders its confirm button; consumed on confirm. Process-
+// lifetime only, same as the picker maps.
+let archiveAllSessions: { sessionId: string; label: string; shortId: string }[] = []
+let deleteAllSessions: { sessionId: string; label: string; shortId: string }[] = []
+
 /** Resolve the per-project state dir pty-controller agrees on. */
 function resolvePtyStateDir(env: Record<string, string | undefined>): string | null {
   const explicit = env.PTY_CONTROLLER_STATE_DIR?.trim()
@@ -316,6 +322,14 @@ export async function tryRouteMetaCommand(
   // The handler functions are still named handleArchive/handleDelete and the
   // callback prefixes are still meta:archive_/meta:delete_ for historical
   // reasons — this is purely internal and slated for a future rename pass.
+  // Bulk variants must be matched before the picker variants — "/delete hard all"
+  // would otherwise be swallowed by the "/delete hard " picker check.
+  if (lower === '/delete hard all' || lower.startsWith('/delete hard all ')) {
+    return handleDeleteAll(env, handlers)
+  }
+  if (lower === '/delete all' || lower.startsWith('/delete all ')) {
+    return handleArchiveAll(env, handlers)
+  }
   if (lower === '/delete' || lower === '/delete ' || lower.startsWith('/delete  ')) {
     return handleArchive(env, handlers)
   }
@@ -691,6 +705,72 @@ async function handleDelete(
   return true
 }
 
+async function handleArchiveAll(
+  env: Record<string, string | undefined>,
+  handlers: MetaCommandHandlers,
+): Promise<boolean> {
+  const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
+  if (!projectDir) {
+    await handlers.reply('⚠️ /delete all tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.')
+    return true
+  }
+  const stateDir = resolvePtyStateDir(env)
+  if (!stateDir || !wrapperHeartbeatFresh(stateDir)) {
+    await handlers.reply('⚠️ /delete all tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.')
+    return true
+  }
+  const currentSid = readCurrentSessionId(stateDir)
+  const telegramStateDir = resolveTelegramStateDir(env)
+  const all = listProjectSessions(projectDir, telegramStateDir ?? undefined)
+  const sessions = currentSid ? all.filter(s => s.sessionId !== currentSid) : all
+  if (sessions.length === 0) {
+    await handlers.reply('Tidak ada session lain untuk diarchive.')
+    return true
+  }
+  archiveAllSessions = sessions.map(s => ({ sessionId: s.sessionId, label: s.label, shortId: s.shortId }))
+  await handlers.replyWithButtons(
+    `📦 Archive semua ${sessions.length} session (kecuali yang aktif)?`,
+    [[
+      { label: `✅ Archive ${sessions.length} session`, callbackData: 'meta:archive_all_confirm' },
+      { label: '❌ Batal', callbackData: 'meta:archive_all_cancel' },
+    ]],
+  )
+  return true
+}
+
+async function handleDeleteAll(
+  env: Record<string, string | undefined>,
+  handlers: MetaCommandHandlers,
+): Promise<boolean> {
+  const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
+  if (!projectDir) {
+    await handlers.reply('⚠️ /delete hard all tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.')
+    return true
+  }
+  const stateDir = resolvePtyStateDir(env)
+  if (!stateDir || !wrapperHeartbeatFresh(stateDir)) {
+    await handlers.reply('⚠️ /delete hard all tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.')
+    return true
+  }
+  const currentSid = readCurrentSessionId(stateDir)
+  const telegramStateDir = resolveTelegramStateDir(env)
+  const all = listProjectSessions(projectDir, telegramStateDir ?? undefined)
+  const sessions = currentSid ? all.filter(s => s.sessionId !== currentSid) : all
+  if (sessions.length === 0) {
+    await handlers.reply('Tidak ada session lain untuk dihapus.')
+    return true
+  }
+  deleteAllSessions = sessions.map(s => ({ sessionId: s.sessionId, label: s.label, shortId: s.shortId }))
+  await handlers.replyWithButtons(
+    `🗑️ Hapus PERMANEN semua ${sessions.length} session (kecuali yang aktif)? Ini tidak bisa di-undo.`,
+    [[
+      { label: `🗑️ Hapus PERMANEN ${sessions.length} session`, callbackData: 'meta:delete_all_confirm' },
+      { label: '❌ Batal', callbackData: 'meta:delete_all_cancel' },
+    ]],
+  )
+  return true
+}
+
 /**
  * Try to handle a `callback_query.data` string as a meta-route. Returns:
  *   - `true`  → consumed (the bot's own callback handler must NOT forward to AI)
@@ -803,8 +883,46 @@ export async function tryHandleMetaCallback(
 
   if (rest.startsWith('delete_')) {
     // Branches: `delete_<shortId>` (picker tap), `delete_confirm_<shortId>`,
-    // `delete_cancel`, `delete_page_<N>` (pagination).
+    // `delete_cancel`, `delete_page_<N>` (pagination), `delete_all_confirm`,
+    // `delete_all_cancel` (bulk /delete hard all).
     const remainder = rest.slice('delete_'.length)
+
+    if (remainder === 'all_cancel') {
+      await handlers.ackCallback('Cancelled')
+      await handlers.editMessage('(delete all cancelled)').catch(() => {})
+      return true
+    }
+    if (remainder === 'all_confirm') {
+      if (deleteAllSessions.length === 0) {
+        await handlers.ackCallback('Expired, /delete hard all lagi')
+        await handlers.editMessage('(expired — /delete hard all lagi)').catch(() => {})
+        return true
+      }
+      const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
+      if (!projectDir) {
+        await handlers.ackCallback('CLAUDE_PROJECT_DIR not set')
+        return true
+      }
+      const telegramStateDir = resolveTelegramStateDir(env)
+      const stateDir = resolvePtyStateDir(env)
+      const currentSid = stateDir ? readCurrentSessionId(stateDir) : null
+      let deleted = 0
+      let skipped = 0
+      for (const s of deleteAllSessions) {
+        if (currentSid && s.sessionId === currentSid) { skipped++; continue }
+        try {
+          deleteSessionJsonlAndFreeName(projectDir, telegramStateDir, s.sessionId)
+          deleted++
+        } catch {
+          skipped++
+        }
+      }
+      deleteAllSessions = []
+      const note = skipped > 0 ? ` · ${skipped} dilewati` : ''
+      await handlers.ackCallback('Dihapus')
+      await handlers.editMessage(`🗑️ ${deleted} session dihapus permanen.${note}`).catch(() => {})
+      return true
+    }
 
     if (remainder.startsWith('page_')) {
       const arg = remainder.slice('page_'.length)
@@ -919,8 +1037,45 @@ export async function tryHandleMetaCallback(
 
   if (rest.startsWith('archive_')) {
     // Branches: `archive_<shortId>` (picker tap), `archive_confirm_<shortId>`,
-    // `archive_cancel`, `archive_page_<N>` (pagination).
+    // `archive_cancel`, `archive_page_<N>` (pagination), `archive_all_confirm`,
+    // `archive_all_cancel` (bulk /delete all).
     const remainder = rest.slice('archive_'.length)
+
+    if (remainder === 'all_cancel') {
+      await handlers.ackCallback('Cancelled')
+      await handlers.editMessage('(archive all cancelled)').catch(() => {})
+      return true
+    }
+    if (remainder === 'all_confirm') {
+      if (archiveAllSessions.length === 0) {
+        await handlers.ackCallback('Expired, /delete all lagi')
+        await handlers.editMessage('(expired — /delete all lagi)').catch(() => {})
+        return true
+      }
+      const telegramStateDir = resolveTelegramStateDir(env)
+      if (!telegramStateDir) {
+        await handlers.ackCallback('TELEGRAM_STATE_DIR not set')
+        return true
+      }
+      const stateDir = resolvePtyStateDir(env)
+      const currentSid = stateDir ? readCurrentSessionId(stateDir) : null
+      let archived = 0
+      let skipped = 0
+      for (const s of archiveAllSessions) {
+        if (currentSid && s.sessionId === currentSid) { skipped++; continue }
+        try {
+          archiveSessionAndFreeName(telegramStateDir, s.sessionId)
+          archived++
+        } catch {
+          skipped++
+        }
+      }
+      archiveAllSessions = []
+      const note = skipped > 0 ? ` · ${skipped} dilewati` : ''
+      await handlers.ackCallback('Diarchive')
+      await handlers.editMessage(`📦 ${archived} session diarchive.${note}`).catch(() => {})
+      return true
+    }
 
     if (remainder.startsWith('page_')) {
       const arg = remainder.slice('page_'.length)
@@ -1077,4 +1232,12 @@ export function __resetDeletePickerForTests(): void {
 export function __resetArchivePickerForTests(): void {
   archivePicker.clear()
   archivePickerSessions = []
+}
+
+export function __resetArchiveAllForTests(): void {
+  archiveAllSessions = []
+}
+
+export function __resetDeleteAllForTests(): void {
+  deleteAllSessions = []
 }
