@@ -239,6 +239,44 @@ function writeWrapperCommand(stateDir: string, payload: WrapperPayload): void {
 }
 
 /**
+ * Soft-delete one session: add it to the archive store, then free its original
+ * name by renaming the registry entry to "<name>__<shortId>". No-op when the
+ * session has no registry name; guarded against double-suffixing. May throw
+ * from addArchived; the rename step is internally best-effort.
+ */
+function archiveSessionAndFreeName(telegramStateDir: string, sessionId: string): void {
+  addArchived(telegramStateDir, sessionId)
+  try {
+    const registry = loadRegistry(telegramStateDir)
+    const currentName = registry.get(sessionId)?.name
+    if (currentName) {
+      const suffix = `__${deriveShortId(sessionId)}`
+      if (!currentName.endsWith(suffix)) {
+        registrySetName(telegramStateDir, sessionId, `${currentName}${suffix}`)
+      }
+    }
+  } catch {
+    /* best-effort — archive already succeeded on disk */
+  }
+}
+
+/**
+ * Hard-delete one session: remove its jsonl on disk, then free its name from
+ * the registry. May throw from rmSync; removeName is best-effort and only runs
+ * when telegramStateDir is known.
+ */
+function deleteSessionJsonlAndFreeName(
+  projectDir: string,
+  telegramStateDir: string | null,
+  sessionId: string,
+): void {
+  const encoded = encodeProjectDir(projectDir)
+  const jsonlPath = join(homedir(), '.claude', 'projects', encoded, `${sessionId}.jsonl`)
+  rmSync(jsonlPath, { force: true })
+  if (telegramStateDir) removeName(telegramStateDir, sessionId)
+}
+
+/**
  * Try to handle `text` as a Telegram meta-command. Returns:
  *   - `true`  → consumed (we did something; caller must NOT forward to AI)
  *   - `false` → not a meta-command (caller should continue normal flow)
@@ -835,21 +873,13 @@ export async function tryHandleMetaCallback(
         }
       }
 
-      const encoded = encodeProjectDir(projectDir)
-      const jsonlPath = join(homedir(), '.claude', 'projects', encoded, `${entry.sessionId}.jsonl`)
+      const telegramStateDir = resolveTelegramStateDir(env)
       try {
-        rmSync(jsonlPath, { force: true })
+        deleteSessionJsonlAndFreeName(projectDir, telegramStateDir, entry.sessionId)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         await handlers.ackCallback(`Gagal hapus: ${msg}`)
         return true
-      }
-
-      // The session is gone — free its name from the registry so /new and
-      // /rename can reuse it. Best-effort; the jsonl delete already happened.
-      const telegramStateDir = resolveTelegramStateDir(env)
-      if (telegramStateDir) {
-        removeName(telegramStateDir, entry.sessionId)
       }
 
       await handlers.ackCallback(`session dihapus`)
@@ -947,28 +977,11 @@ export async function tryHandleMetaCallback(
         return true
       }
       try {
-        addArchived(telegramStateDir, entry.sessionId)
+        archiveSessionAndFreeName(telegramStateDir, entry.sessionId)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         await handlers.ackCallback(`Gagal archive: ${msg}`)
         return true
-      }
-      // Free the original name so /new and /rename can reuse it, while the
-      // archived session keeps a unique, identifiable name in case it is
-      // unarchived manually later: "session-01" -> "session-01__<shortId>".
-      // No-op when the session has no registry name, and guarded against
-      // double-suffixing if it was somehow archived before.
-      try {
-        const registry = loadRegistry(telegramStateDir)
-        const currentName = registry.get(entry.sessionId)?.name
-        if (currentName) {
-          const suffix = `__${deriveShortId(entry.sessionId)}`
-          if (!currentName.endsWith(suffix)) {
-            registrySetName(telegramStateDir, entry.sessionId, `${currentName}${suffix}`)
-          }
-        }
-      } catch {
-        /* best-effort — archive already succeeded on disk */
       }
       await handlers.ackCallback('session diarchive')
       await handlers.editMessage(`📦 session "${entry.label}" diarchive.`).catch(() => {})
