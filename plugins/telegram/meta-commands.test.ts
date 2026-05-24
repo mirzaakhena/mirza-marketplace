@@ -1039,6 +1039,56 @@ describe('meta-commands: /delete (soft / default)', () => {
     expect(loadArchived(telegramStateDir)).toEqual(new Set([target]))
   })
 
+  test('soft delete confirm renames the registry entry to <name>__<shortId>, freeing the original name', async () => {
+    const sids = seedNSessions(2, 'a')
+    const target = sids[1]!
+    const targetShort = target.replace(/-/g, '').slice(0, 8).toLowerCase()
+    registrySetName(telegramStateDir, target, 'session-01')
+
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    const { handler } = makeHandler()
+    await tryRouteMetaCommand('/delete', env, handler)
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback(`meta:archive_${targetShort}`, env, cb.handler)
+    await tryHandleMetaCallback(`meta:archive_confirm_${targetShort}`, env, cb.handler)
+
+    const registry = loadRegistry(telegramStateDir)
+    expect(registry.get(target)!.name).toBe(`session-01__${targetShort}`)
+    expect(findSessionIdByName(registry, 'session-01')).toBeNull()
+  })
+
+  test('soft delete confirm on a session with no registry name creates no entry', async () => {
+    const sids = seedNSessions(2, 'b')
+    const target = sids[1]!
+    const targetShort = target.replace(/-/g, '').slice(0, 8).toLowerCase()
+    // No registrySetName for target — it only has a fallback label.
+
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    const { handler } = makeHandler()
+    await tryRouteMetaCommand('/delete', env, handler)
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback(`meta:archive_${targetShort}`, env, cb.handler)
+    await tryHandleMetaCallback(`meta:archive_confirm_${targetShort}`, env, cb.handler)
+
+    expect(loadRegistry(telegramStateDir).has(target)).toBe(false)
+  })
+
+  test('soft delete confirm does not double-append the shortId suffix', async () => {
+    const sids = seedNSessions(2, 'c')
+    const target = sids[1]!
+    const targetShort = target.replace(/-/g, '').slice(0, 8).toLowerCase()
+    registrySetName(telegramStateDir, target, `session-01__${targetShort}`)
+
+    const env = { CLAUDE_PROJECT_DIR: projectDir }
+    const { handler } = makeHandler()
+    await tryRouteMetaCommand('/delete', env, handler)
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback(`meta:archive_${targetShort}`, env, cb.handler)
+    await tryHandleMetaCallback(`meta:archive_confirm_${targetShort}`, env, cb.handler)
+
+    expect(loadRegistry(telegramStateDir).get(target)!.name).toBe(`session-01__${targetShort}`)
+  })
+
   test('after archive, next /switch picker filters out that session', async () => {
     const sids = seedNSessions(3, 'c')
     writeCurrentSessionId(stateDir, sids[0]!)

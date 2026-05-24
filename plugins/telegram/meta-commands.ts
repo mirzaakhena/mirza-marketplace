@@ -953,6 +953,23 @@ export async function tryHandleMetaCallback(
         await handlers.ackCallback(`Gagal archive: ${msg}`)
         return true
       }
+      // Free the original name so /new and /rename can reuse it, while the
+      // archived session keeps a unique, identifiable name in case it is
+      // unarchived manually later: "session-01" -> "session-01__<shortId>".
+      // No-op when the session has no registry name, and guarded against
+      // double-suffixing if it was somehow archived before.
+      try {
+        const registry = loadRegistry(telegramStateDir)
+        const currentName = registry.get(entry.sessionId)?.name
+        if (currentName) {
+          const suffix = `__${deriveShortId(entry.sessionId)}`
+          if (!currentName.endsWith(suffix)) {
+            registrySetName(telegramStateDir, entry.sessionId, `${currentName}${suffix}`)
+          }
+        }
+      } catch {
+        /* best-effort — archive already succeeded on disk */
+      }
       await handlers.ackCallback('session diarchive')
       await handlers.editMessage(`📦 session "${entry.label}" diarchive.`).catch(() => {})
       archivePicker.delete(shortId)
