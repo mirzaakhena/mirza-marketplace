@@ -26,9 +26,9 @@ const isWindows = process.platform === 'win32'
 const shell = isWindows ? 'cmd.exe' : CLAUDE_BIN
 const args = isWindows ? ['/c', CLAUDE_BIN] : []
 
-console.log(`[node-pty-cc] spawning ${shell} ${args.join(' ')}`)
-console.log(`[node-pty-cc] platform: ${process.platform}, runtime: ${process.versions.bun ? 'bun ' + process.versions.bun : 'node ' + process.version}`)
-console.log(`[node-pty-cc] (Ctrl+C inside Claude to quit)\n`)
+console.log(`[pty-controller] spawning ${shell} ${args.join(' ')}`)
+console.log(`[pty-controller] platform: ${process.platform}, runtime: ${process.versions.bun ? 'bun ' + process.versions.bun : 'node ' + process.version}`)
+console.log(`[pty-controller] (Ctrl+C inside Claude to quit)\n`)
 
 // Inherit current terminal size so Claude renders correctly.
 const cols = process.stdout.columns || 100
@@ -62,6 +62,6 @@ process.stdout.on('resize', () => {
 pty.onExit(({ exitCode, signal }) => {
   process.stdin.setRawMode?.(false)
   process.stdin.pause()
-  console.log(`\n[node-pty-cc] claude exited (code=${exitCode}, signal=${signal ?? 'none'})`)
+  console.log(`\n[pty-controller] claude exited (code=${exitCode}, signal=${signal ?? 'none'})`)
   process.exit(exitCode ?? 0)
 })
