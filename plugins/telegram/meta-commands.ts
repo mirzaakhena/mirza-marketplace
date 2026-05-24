@@ -28,11 +28,12 @@ import {
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { listProjectSessions, encodeProjectDir } from './sessions-list.ts'
+import { listProjectSessions, encodeProjectDir, deriveShortId } from './sessions-list.ts'
 import {
   loadRegistry,
   setName as registrySetName,
   findSessionIdByName,
+  removeName,
 } from './session-names-registry.ts'
 import { resolveStateDir as resolveTelegramStateDir } from './state-path.ts'
 import { renderPickerPage } from './paginated-picker.ts'
@@ -842,6 +843,13 @@ export async function tryHandleMetaCallback(
         const msg = err instanceof Error ? err.message : String(err)
         await handlers.ackCallback(`Gagal hapus: ${msg}`)
         return true
+      }
+
+      // The session is gone — free its name from the registry so /new and
+      // /rename can reuse it. Best-effort; the jsonl delete already happened.
+      const telegramStateDir = resolveTelegramStateDir(env)
+      if (telegramStateDir) {
+        removeName(telegramStateDir, entry.sessionId)
       }
 
       await handlers.ackCallback(`session dihapus`)

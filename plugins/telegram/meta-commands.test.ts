@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { tryRouteMetaCommand, tryHandleMetaCallback, __resetDeletePickerForTests, __resetSwitchPickerForTests, __resetArchivePickerForTests, parseEffortInput, EFFORT_LEVELS, extractCurrentEffortLevel } from './meta-commands'
 import { loadArchived } from './archive-store'
 import { listProjectSessions } from './sessions-list'
-import { setName as registrySetName } from './session-names-registry'
+import { setName as registrySetName, loadRegistry, findSessionIdByName } from './session-names-registry'
 
 // Local alias kept so existing test bodies don't need rewriting.
 const tryRouteMetaCommandT = tryRouteMetaCommand
@@ -606,6 +606,24 @@ describe('meta-commands: tryHandleMetaCallback for delete', () => {
     expect(consumed).toBe(true)
     expect(existsSync(jsonlPath)).toBe(false)
     expect(cb.edits[0]).toMatch(/dihapus/)
+  })
+
+  test('delete confirm also removes the session name from the registry', async () => {
+    const sid = '1a2b3c4d-aaaa-bbbb-cccc-dddddddddddd'
+    const telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(telegramStateDir, { recursive: true })
+    registrySetName(telegramStateDir, sid, 'session-01')
+
+    const [shortId] = await setupAndPopulatePicker(homeOverride, projectDir, stateDir, [sid])
+
+    const cb = makeCallbackHandler()
+    await tryHandleMetaCallback(
+      `meta:delete_confirm_${shortId}`,
+      { CLAUDE_PROJECT_DIR: projectDir },
+      cb.handler,
+    )
+
+    expect(loadRegistry(telegramStateDir).has(sid)).toBe(false)
   })
 
   test('delete confirm aborts if target became the current session', async () => {
