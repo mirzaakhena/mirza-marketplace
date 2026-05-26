@@ -1,7 +1,7 @@
 {
   "name": "interactive-prompts",
   "description": "Teaches Claude when and how to render inline-keyboard buttons on Telegram so the user can answer choice prompts with one tap instead of typing. Requires the `telegram` plugin (>= 0.0.9-mirza.0) which exposes the underlying `buttons` parameter on the reply and edit_message tools.",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "author": {
     "name": "Mirza"
   },
