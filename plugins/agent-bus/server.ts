@@ -19,6 +19,9 @@ import {
 import { readRegistry, resolveRegistryPath } from './registry'
 import { readPeerSessionInfo } from './peer-status'
 import { writeAgentMessage, type AgentPayload } from './inbox-writer'
+import { writePromptMessage } from './prompt-inbox'
+import { normalizeTargets, isDestructiveSlash } from './send-guards'
+import { randomUUID } from 'node:crypto'
 
 const REGISTRY_PATH = resolveRegistryPath(process.env)
 process.stderr.write(`agent-bus: registry path = ${REGISTRY_PATH}\n`)
@@ -148,36 +151,67 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
       }
       case 'agent_send': {
         const target = args.target
-        const payload = args.payload as AgentPayload | undefined
+        const payload = args.payload as Record<string, unknown> | undefined
         const correlation = typeof args.correlation_id === 'string' ? args.correlation_id : undefined
-        if (typeof target !== 'string' || !target) throw new Error('target (string) is required')
-        if (!payload) throw new Error('payload is required')
+        if (target === undefined) throw new Error('target (string or string[]) is required')
+        if (!payload || typeof payload !== 'object') throw new Error('payload is required')
 
-        const reg = readRegistry(REGISTRY_PATH)
-        const entry = reg.agents[target]
-        if (!entry) {
-          const known = Object.keys(reg.agents).join(', ') || '(none)'
-          throw new Error(`target "${target}" not in registry. Known: ${known}`)
-        }
+        const targets = normalizeTargets(target as string | string[])
+        const kind = payload.kind
 
-        // SELF — derive from CLAUDE_PROJECT_DIR basename. Matches the convention
-        // wrapper.ts uses when registering itself (see Task 6).
+        // SELF — derive from CLAUDE_PROJECT_DIR basename (matches wrapper.ts).
         const selfDir = (process.env.CLAUDE_PROJECT_DIR ?? '').replace(/[\/\\]+$/, '')
         const self = selfDir.split(/[\/\\]/).filter(Boolean).pop() ?? 'unknown'
 
-        const res = writeAgentMessage(entry.state_dir, self, payload, correlation)
-        const online = isOnline(entry.last_heartbeat)
-        const warn = online ? '' : ' WARNING: target is offline; file will be consumed on next boot.'
-        return {
-          content: [
-            {
-              type: 'text',
-              text:
-                `queued for ${target} (id: ${res.id}, correlation: ${res.correlation_id})\n` +
-                `wrote to: ${res.path}${warn}`,
-            },
-          ],
+        const reg = readRegistry(REGISTRY_PATH)
+
+        if (kind === 'prompt') {
+          const body = payload.body
+          if (typeof body !== 'string' || body.length === 0) throw new Error('prompt payload needs a non-empty body')
+          // One broadcast_group_id shared across all targets of this call.
+          const groupId = targets.length > 1 ? randomUUID() : undefined
+          const results = targets.map(name => {
+            const entry = reg.agents[name]
+            if (!entry) {
+              return { target: name, ok: false, error: 'not in registry', online: false }
+            }
+            try {
+              const r = writePromptMessage(entry.project_dir, self, body, { broadcastGroupId: groupId })
+              return { target: name, ok: true, path: r.path, online: isOnline(entry.last_heartbeat) }
+            } catch (err) {
+              return { target: name, ok: false, error: err instanceof Error ? err.message : String(err), online: isOnline(entry.last_heartbeat) }
+            }
+          })
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ kind: 'prompt', broadcast_group_id: groupId, results }, null, 2) }],
+          }
         }
+
+        if (kind === 'slash') {
+          const command = payload.command
+          if (typeof command !== 'string' || !command) throw new Error('slash payload needs a command')
+          // Blast-radius guard: never fan out a destructive command.
+          if (targets.length > 1 && isDestructiveSlash(command)) {
+            throw new Error(`refusing to broadcast destructive command "${command}" to ${targets.length} targets`)
+          }
+          const results = targets.map(name => {
+            const entry = reg.agents[name]
+            if (!entry) {
+              return { target: name, ok: false, error: 'not in registry', online: false }
+            }
+            try {
+              const r = writeAgentMessage(entry.state_dir, self, payload as unknown as AgentPayload, correlation)
+              return { target: name, ok: true, path: r.path, online: isOnline(entry.last_heartbeat) }
+            } catch (err) {
+              return { target: name, ok: false, error: err instanceof Error ? err.message : String(err), online: isOnline(entry.last_heartbeat) }
+            }
+          })
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ kind: 'slash', results }, null, 2) }],
+          }
+        }
+
+        throw new Error(`unsupported payload kind: ${JSON.stringify(kind)} (expected "prompt" or "slash")`)
       }
       default:
         return {

@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeEach, afterEach } from 'bun:test'
-import { mkdtempSync, mkdirSync, rmSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -11,6 +11,7 @@ import {
 } from './registry'
 import { writeAgentMessage } from './inbox-writer'
 import { readPeerSessionInfo } from './peer-status'
+import { resolvePromptInboxDir, validateInboundPrompt, writePromptMessage } from './prompt-inbox'
 
 describe('integration: bot-01 ↔ bot-02 loopback', () => {
   let root: string
@@ -119,5 +120,30 @@ describe('integration: bot-01 ↔ bot-02 loopback', () => {
     expect(info.context_used_percent).toBe(12)
     expect(info.model).toBe('Opus 4.7')
     expect(info.effort_level).toBe('medium')
+  })
+
+  test('prompt loopback: bot-01 writes a prompt into bot-02 agent-bus inbox; receiver validates it', () => {
+    // sender side
+    const res = writePromptMessage(bot02Dir, 'bot-01', 'tolong review PR #5')
+    expect(res.id).toMatch(/^[0-9a-f-]{36}$/)
+
+    // file landed in the AGENT-BUS inbox, not the pty-controller pending dir
+    const inbox = resolvePromptInboxDir(bot02Dir)
+    const files = readdirSync(inbox).filter(f => f.endsWith('.json'))
+    expect(files).toHaveLength(1)
+
+    // receiver side parses it cleanly
+    const obj = JSON.parse(readFileSync(join(inbox, files[0]!), 'utf8'))
+    const v = validateInboundPrompt(obj)
+    expect(v.ok).toBe(true)
+    if (v.ok) {
+      expect(v.msg.from).toBe('bot-01')
+      expect(v.msg.body).toBe('tolong review PR #5')
+    }
+
+    // and the pty-controller pending dir stays empty (separate channel)
+    const pending = join(bot02StateDir, 'pending')
+    const pendingFiles = existsSync(pending) ? readdirSync(pending) : []
+    expect(pendingFiles).toHaveLength(0)
   })
 })
