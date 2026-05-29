@@ -26,7 +26,7 @@ import { createMessagesStore } from './messages-store.ts'
 import { createAlbumBuffer } from './album-buffer'
 import { resolveStateDir } from './state-path.ts'
 import { ensureChannelsGitignore } from './channels-gitignore.ts'
-import { toSetMyCommandsPayload, renderHelpList, renderHelpDetail } from './commands-registry.ts'
+import { toSetMyCommandsPayload, renderHelpList, renderHelpDetail, type Audience } from './commands-registry.ts'
 import { renderContextReply, type LastStatus } from './context-renderer.ts'
 import { isOurOwnBridge, extractQuoteText } from './server-helpers.ts'
 import { validateButtons, parseAiCallbackData, buildKeyboard, findButtonLabel } from './buttons.ts'
@@ -136,6 +136,75 @@ const PERMISSION_REPLY_RE = /^\s*(y|yes|n|no)\s+([a-km-z]{5})\s*$/i
 
 const bot = new Bot(TOKEN)
 let botUsername = ''
+
+// --- Slash-menu scope manager ---------------------------------------------
+//
+// Telegram exposes BotFather's slash-menu via setMyCommands with an optional
+// `scope`. A per-chat scope OVERRIDES the broader scopes for that chat. We
+// use this to show paired chats only the commands that make sense once
+// paired (no /start), while unpaired chats still see the default menu
+// (/start + /help) under the all_private_chats scope.
+//
+// `lastPairedScopes` mirrors the set of chat_ids we have currently
+// registered a paired-audience scope for. On access.json changes we diff
+// against this set and apply only the deltas: newly-paired chats get a
+// paired scope, newly-removed chats get their per-chat scope cleared so
+// the default menu (with /start) returns.
+const lastPairedScopes = new Set<string>()
+
+async function applyPairedMenuScope(chatId: string): Promise<void> {
+  const chat_id = Number(chatId)
+  if (!Number.isFinite(chat_id)) {
+    process.stderr.write(`telegram channel: skipping menu scope — non-numeric chat_id "${chatId}"\n`)
+    return
+  }
+  try {
+    await bot.api.setMyCommands(toSetMyCommandsPayload('paired'), {
+      scope: { type: 'chat', chat_id },
+    })
+    lastPairedScopes.add(chatId)
+  } catch (err) {
+    process.stderr.write(`telegram channel: setMyCommands(paired) for ${chatId} failed: ${err}\n`)
+  }
+}
+
+async function clearPairedMenuScope(chatId: string): Promise<void> {
+  const chat_id = Number(chatId)
+  if (!Number.isFinite(chat_id)) return
+  try {
+    await bot.api.deleteMyCommands({ scope: { type: 'chat', chat_id } })
+    lastPairedScopes.delete(chatId)
+  } catch (err) {
+    process.stderr.write(`telegram channel: deleteMyCommands for ${chatId} failed: ${err}\n`)
+  }
+}
+
+/**
+ * Reconcile per-chat menu scopes against the current access.allowFrom list.
+ * Newly-paired chats get the paired menu; chats no longer in allowFrom get
+ * their scope cleared so they revert to the default menu (which advertises
+ * /start again for re-pairing). Idempotent: only fires API calls for
+ * actual deltas, so a benign access.json touch is cheap.
+ */
+async function reconcileMenuScopes(access: Access): Promise<void> {
+  const current = new Set(access.allowFrom)
+  const additions: string[] = []
+  const removals: string[] = []
+  for (const id of current) {
+    if (!lastPairedScopes.has(id)) additions.push(id)
+  }
+  for (const id of lastPairedScopes) {
+    if (!current.has(id)) removals.push(id)
+  }
+  if (!additions.length && !removals.length) return
+  process.stderr.write(
+    `telegram channel: menu-scope reconcile — +${additions.length} paired, -${removals.length} reverted\n`,
+  )
+  await Promise.all([
+    ...additions.map(id => applyPairedMenuScope(id)),
+    ...removals.map(id => clearPairedMenuScope(id)),
+  ])
+}
 
 type PendingEntry = {
   senderId: string
@@ -863,6 +932,8 @@ function shutdown(): void {
   process.stderr.write('telegram channel: shutting down\n')
   try { systemOutboxWatcher.close() } catch {}
   try { clearInterval(systemOutboxSweepInterval) } catch {}
+  try { accessWatcher?.close() } catch {}
+  try { if (accessSweepInterval) clearInterval(accessSweepInterval) } catch {}
   try { messagesStore.close() } catch {}
   try {
     if (parseInt(readFileSync(PID_FILE, 'utf8'), 10) === process.pid) rmSync(PID_FILE)
@@ -934,11 +1005,18 @@ bot.command('start', async ctx => {
 })
 
 bot.command('help', async ctx => {
-  if (!dmCommandGate(ctx)) return
+  const gated = dmCommandGate(ctx)
+  if (!gated) return
   // grammy gives us the argument string in ctx.match for command handlers.
   const arg = (ctx.match ?? '').toString().trim()
   if (!arg) {
-    await ctx.reply(renderHelpList())
+    // Paired chats see the paired list (no /start); unpaired see the default
+    // list (/start + /help only). Mirrors the per-chat scope sent to Telegram
+    // by applyMenuScope so the menu and /help output stay consistent.
+    const audience: Audience = gated.access.allowFrom.includes(gated.senderId)
+      ? 'paired'
+      : 'default'
+    await ctx.reply(renderHelpList(audience))
     return
   }
   const detail = renderHelpDetail(arg)
@@ -1928,6 +2006,64 @@ async function handleSessionChangeEvent(payload: {
   }
 }
 
+// --- access.json watcher --------------------------------------------------
+//
+// The `/telegram:access` skill mutates access.json from the user's terminal
+// (separate process). To keep per-chat menu scopes in sync without forcing
+// a bot restart, watch the file and reconcile on every change. Static mode
+// snapshots access at boot, so the watcher is a no-op there.
+//
+// fs.watch on a single file is flaky on Windows when editors do
+// atomic-rename writes (the inode swap can drop the watch). saveAccess()
+// here writes tmp + rename, and external skills may use the same pattern.
+// We watch the parent directory instead, filter to the access.json basename,
+// and pair the watcher with a 5s sweep that re-checks mtime — same defensive
+// shape as the system-outbox watcher above.
+let lastAccessMtimeMs = 0
+function readAccessMtime(): number {
+  try {
+    return statSync(ACCESS_FILE).mtimeMs
+  } catch {
+    return 0
+  }
+}
+async function reconcileFromDisk(): Promise<void> {
+  try {
+    await reconcileMenuScopes(readAccessFile())
+  } catch (err) {
+    process.stderr.write(`telegram channel: menu-scope reconcile failed: ${err}\n`)
+  }
+}
+let accessWatcher: FSWatcher | null = null
+let accessSweepInterval: ReturnType<typeof setInterval> | null = null
+if (!STATIC) {
+  lastAccessMtimeMs = readAccessMtime()
+  try {
+    accessWatcher = watch(STATE_DIR, (_eventType, filename) => {
+      if (!filename) return
+      if (filename.toString() !== 'access.json') return
+      // Defer briefly so tmp-then-rename has time to commit on Windows
+      // and we read the new file rather than the half-written tmp.
+      setTimeout(() => {
+        const mtime = readAccessMtime()
+        if (mtime === lastAccessMtimeMs) return
+        lastAccessMtimeMs = mtime
+        void reconcileFromDisk()
+      }, 50)
+    })
+  } catch (err) {
+    process.stderr.write(`telegram channel: failed to install access.json watcher: ${err}\n`)
+  }
+  // Sweep fallback for Windows fs.watch quirks (atomic-rename writes that
+  // swap the inode out from under the watcher).
+  accessSweepInterval = setInterval(() => {
+    const mtime = readAccessMtime()
+    if (mtime === lastAccessMtimeMs) return
+    lastAccessMtimeMs = mtime
+    void reconcileFromDisk()
+  }, 5_000)
+}
+
 const systemOutboxWatcher: FSWatcher = watch(SYSTEM_OUTBOX_DIR, (_eventType, filename) => {
   if (!filename) return
   const name = filename.toString()
@@ -1966,10 +2102,23 @@ void (async () => {
           attempt = 0
           botUsername = info.username
           process.stderr.write(`telegram channel: polling as @${info.username}\n`)
+          // Default menu for unpaired chats (and any chat without an
+          // explicit per-chat scope). Currently /start + /help.
           void bot.api.setMyCommands(
-            toSetMyCommandsPayload(),
+            toSetMyCommandsPayload('default'),
             { scope: { type: 'all_private_chats' } },
-          ).catch(() => {})
+          ).catch(err => {
+            process.stderr.write(`telegram channel: setMyCommands(default) failed: ${err}\n`)
+          })
+          // Paired per-chat scopes. Run async — failure for one chat
+          // must not block the others, and bot.start() should not wait.
+          void (async () => {
+            try {
+              await reconcileMenuScopes(loadAccess())
+            } catch (err) {
+              process.stderr.write(`telegram channel: initial menu reconcile failed: ${err}\n`)
+            }
+          })()
         },
       })
       return // bot.stop() was called — clean exit from the loop
