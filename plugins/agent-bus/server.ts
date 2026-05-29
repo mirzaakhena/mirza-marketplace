@@ -43,7 +43,7 @@ function isStaleForList(lastHeartbeatIso: string): boolean {
 }
 
 const mcp = new Server(
-  { name: 'agent-bus', version: '0.0.1' },
+  { name: 'agent-bus', version: '0.0.2' },
   { capabilities: { tools: {} } },
 )
 
@@ -70,37 +70,50 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'agent_send',
       description:
-        "Send a slash-command request to a peer bot's pty-controller inbox. The peer's wrapper will inject the command into its PTY on the next turn boundary. DO NOT call autonomously — only when the user has explicitly asked you to message another agent. Destructive commands (/clear, /delete) require explicit user confirmation. Phase 1 supports kind=\"slash\" only; kind=\"prompt\" and kind=\"reply\" will return an error until Phase 2 ships.",
+        "Send a one-way message to one or more peer bots. Two kinds:\n" +
+        "  • kind=\"prompt\": deliver a natural-language instruction to the peer's Claude session (it arrives as an inbound message and the peer acts on it). One-way — there is NO reply channel. If you want the peer to report back, say so inside the body (e.g. \"...when done, send a one-line summary back to bot-01\").\n" +
+        "  • kind=\"slash\": inject a slash command into the peer's PTY via pty-controller (e.g. /clear, /rename, /effort).\n" +
+        "`target` may be a single name or an array (broadcast/fan-out). DO NOT call autonomously — only when the user explicitly asks you to message another agent, OR when an inbound agent prompt explicitly told you to report back. Never auto-reply to an incoming agent message otherwise. Destructive slash commands (/clear, /delete) cannot be broadcast to an array.",
       inputSchema: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target agent name (must be registered)' },
+          target: {
+            description: 'Target agent name, or an array of names for broadcast. Each must be registered.',
+            oneOf: [
+              { type: 'string' },
+              { type: 'array', items: { type: 'string' } },
+            ],
+          },
           payload: {
             type: 'object',
             properties: {
-              kind: { type: 'string', enum: ['slash'] },
+              kind: { type: 'string', enum: ['prompt', 'slash'] },
+              body: {
+                type: 'string',
+                description: 'For kind="prompt": the natural-language instruction (max 8 KB).',
+              },
               command: {
                 type: 'string',
-                description: 'Slash command including leading "/" (e.g. "/clear", "/rename", "/effort")',
+                description: 'For kind="slash": slash command including leading "/" (e.g. "/clear", "/rename").',
               },
               sessionName: {
                 type: 'string',
-                description: 'When command="/clear", chain a /rename to this session name (mirrors meta-commands /new behavior).',
+                description: 'For kind="slash" with command="/clear": chain a /rename to this session name.',
               },
               args: {
                 type: 'string',
-                description: 'Optional argument string; appended to command with a space.',
+                description: 'For kind="slash": optional argument string appended to command with a space.',
               },
               confirmAfterMs: {
                 type: 'number',
-                description: 'Optional auto-confirm pacing for commands that pop a picker (e.g. /effort).',
+                description: 'For kind="slash": optional auto-confirm pacing for picker commands (e.g. /effort).',
               },
             },
-            required: ['kind', 'command'],
+            required: ['kind'],
           },
           correlation_id: {
             type: 'string',
-            description: 'Optional UUID. Auto-generated if omitted. Used in Phase 2 for reply pairing.',
+            description: 'Optional UUID for slash sends; auto-generated if omitted.',
           },
         },
         required: ['target', 'payload'],
