@@ -30,10 +30,10 @@ describe('inbox-writer: validatePayload', () => {
     expect(r.ok).toBe(false)
   })
 
-  test('rejects unknown kind (prompt is Phase 2)', () => {
+  test('rejects unknown kind (prompts go via prompt-compose, not this writer)', () => {
     const r = validatePayload({ kind: 'prompt', body: 'hi' } as any)
     expect(r.ok).toBe(false)
-    expect(r.error).toContain('Phase 2')
+    expect(r.error).toContain('prompt-compose')
   })
 })
 

@@ -1,13 +1,13 @@
 /**
  * Serialise an agent_send payload and atomically write it to the peer
- * bot's pty-controller inbox. The peer's wrapper consumes the file and
- * injects the corresponding slash command into its PTY.
+ * bot's pty-controller `pending/` inbox. The peer's wrapper consumes
+ * the file and injects the corresponding slash command into its PTY.
  *
- * This module handles only the **slash path**. Natural-language prompt
- * delivery ships via a separate inbox (`agent-bus/inbox/`) consumed by
- * the agent-bus MCP server watcher (see `prompt-inbox.ts` /
- * `prompt-watcher.ts`). The `kind:"slash"` guard in `validatePayload`
- * is retained as defense-in-depth — prompt/reply payloads accidentally
+ * This module owns only the **slash** payload path. Natural-language
+ * prompt delivery is handled by `prompt-compose.ts`, which types the
+ * prompt directly into the peer's PTY via the wrapper — it does NOT go
+ * through this inbox. The `kind:"slash"` guard in `validatePayload` is
+ * retained as defense-in-depth: prompt/reply payloads accidentally
  * routed here will receive a clear error instead of a silent no-op.
  */
 import { mkdirSync, writeFileSync, renameSync } from 'node:fs'
@@ -32,7 +32,7 @@ export function validatePayload(p: unknown): ValidationResult {
   if (!p || typeof p !== 'object') return { ok: false, error: 'payload must be an object' }
   const o = p as Record<string, unknown>
   if (o.kind === 'prompt' || o.kind === 'reply') {
-    return { ok: false, error: `kind "${o.kind}" is not supported in Phase 1 (Phase 2 feature)` }
+    return { ok: false, error: `kind "${o.kind}" is not handled by this writer (prompts are sent via prompt-compose, not the slash inbox)` }
   }
   if (o.kind !== 'slash') {
     return { ok: false, error: `kind must be "slash" (got ${JSON.stringify(o.kind)})` }
