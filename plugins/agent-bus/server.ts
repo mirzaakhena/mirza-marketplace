@@ -19,7 +19,8 @@ import {
 import { readRegistry, resolveRegistryPath } from './registry'
 import { readPeerSessionInfo } from './peer-status'
 import { writeAgentMessage, type AgentPayload } from './inbox-writer'
-import { writePromptMessage } from './prompt-inbox'
+import { writePromptMessage, resolvePromptInboxDir } from './prompt-inbox'
+import { startPromptWatcher } from './prompt-watcher'
 import { normalizeTargets, isDestructiveSlash } from './send-guards'
 import { randomUUID } from 'node:crypto'
 
@@ -231,3 +232,45 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
 const transport = new StdioServerTransport()
 await mcp.connect(transport)
 process.stderr.write(`agent-bus: MCP server connected\n`)
+
+// --- Prompt inbox watcher --------------------------------------------------
+// Run a background watcher over THIS agent's own prompt inbox. Each prompt
+// becomes a notifications/claude/channel inbound message so the local AI
+// sees it as <channel source="agent" from="...">. Mirrors the telegram
+// plugin's notification pattern. Requires CLAUDE_PROJECT_DIR; without it we
+// can't resolve our own inbox, so we log and skip (agent_send still works).
+const SELF_PROJECT_DIR = (process.env.CLAUDE_PROJECT_DIR ?? '').trim()
+if (SELF_PROJECT_DIR) {
+  const inboxDir = resolvePromptInboxDir(SELF_PROJECT_DIR)
+  process.stderr.write(`agent-bus: watching prompt inbox ${inboxDir}\n`)
+  const stopWatcher = startPromptWatcher({
+    inboxDir,
+    log: line => process.stderr.write(`agent-bus: ${line}\n`),
+    emit: msg => {
+      const meta: Record<string, string> = {
+        from: msg.from,
+        ts: msg.ts,
+        kind: 'prompt',
+      }
+      if (msg.broadcast_group_id) meta.broadcast_group_id = msg.broadcast_group_id
+      void mcp.notification({
+        method: 'notifications/claude/channel',
+        params: {
+          content: msg.body,
+          meta,
+        },
+      })
+    },
+  })
+
+  const shutdown = () => {
+    try { stopWatcher() } catch { /* noop */ }
+    process.exit(0)
+  }
+  process.on('SIGTERM', shutdown)
+  process.on('SIGINT', shutdown)
+  process.stdin.on('end', shutdown)
+  process.stdin.on('close', shutdown)
+} else {
+  process.stderr.write('agent-bus: CLAUDE_PROJECT_DIR unset — prompt inbox watcher disabled\n')
+}
