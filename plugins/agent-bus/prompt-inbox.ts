@@ -84,3 +84,33 @@ export function writePromptMessage(
   renameSync(tmpPath, finalPath)
   return { id, path: finalPath }
 }
+
+export type InboundValidation =
+  | { ok: true; msg: PromptMessage }
+  | { ok: false; error: string }
+
+/**
+ * Validate + parse a prompt file at the RECEIVER. Tolerates a missing
+ * hop_count (defaults to 0). Enforces from, kind, body size, and hop cap.
+ */
+export function validateInboundPrompt(obj: unknown): InboundValidation {
+  if (!obj || typeof obj !== 'object') return { ok: false, error: 'not an object' }
+  const o = obj as Record<string, unknown>
+  if (o.kind !== 'prompt') return { ok: false, error: `kind must be "prompt" (got ${JSON.stringify(o.kind)})` }
+  if (typeof o.from !== 'string' || o.from.length === 0) return { ok: false, error: 'from must be a non-empty string' }
+  if (typeof o.body !== 'string' || o.body.length === 0) return { ok: false, error: 'body must be a non-empty string' }
+  if (Buffer.byteLength(o.body, 'utf8') > MAX_BODY_BYTES) return { ok: false, error: `body exceeds ${MAX_BODY_BYTES} bytes` }
+  const hop = typeof o.hop_count === 'number' ? o.hop_count : 0
+  if (hop > HOP_CAP) return { ok: false, error: `hop_count ${hop} exceeds cap ${HOP_CAP}` }
+
+  const msg: PromptMessage = {
+    id: typeof o.id === 'string' ? o.id : 'unknown',
+    ts: typeof o.ts === 'string' ? o.ts : new Date().toISOString(),
+    from: o.from,
+    kind: 'prompt',
+    body: o.body,
+    hop_count: hop,
+  }
+  if (typeof o.broadcast_group_id === 'string') msg.broadcast_group_id = o.broadcast_group_id
+  return { ok: true, msg }
+}

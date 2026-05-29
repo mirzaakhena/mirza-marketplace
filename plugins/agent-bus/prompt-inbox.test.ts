@@ -7,6 +7,7 @@ import {
   validatePromptPayload,
   writePromptMessage,
   MAX_BODY_BYTES,
+  validateInboundPrompt,
 } from './prompt-inbox'
 
 describe('resolvePromptInboxDir', () => {
@@ -73,5 +74,35 @@ describe('writePromptMessage', () => {
     writePromptMessage(peerDir, 'bot-01', 'hi')
     const inbox = resolvePromptInboxDir(peerDir)
     expect(readdirSync(inbox).some(f => f.includes('.tmp'))).toBe(false)
+  })
+})
+
+describe('validateInboundPrompt', () => {
+  const base = { id: 'x', ts: 't', from: 'bot-01', kind: 'prompt', body: 'hi', hop_count: 0 }
+
+  test('accepts a valid inbound prompt and returns the parsed message', () => {
+    const r = validateInboundPrompt(base)
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.msg.from).toBe('bot-01')
+      expect(r.msg.body).toBe('hi')
+    }
+  })
+  test('rejects missing from', () => {
+    expect(validateInboundPrompt({ ...base, from: '' }).ok).toBe(false)
+  })
+  test('rejects wrong kind', () => {
+    expect(validateInboundPrompt({ ...base, kind: 'slash' }).ok).toBe(false)
+  })
+  test('rejects oversized body', () => {
+    expect(validateInboundPrompt({ ...base, body: 'a'.repeat(9000) }).ok).toBe(false)
+  })
+  test('rejects hop_count over the cap', () => {
+    expect(validateInboundPrompt({ ...base, hop_count: 6 }).ok).toBe(false)
+  })
+  test('defaults hop_count to 0 when absent', () => {
+    const r = validateInboundPrompt({ id: 'x', ts: 't', from: 'b', kind: 'prompt', body: 'hi' })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.msg.hop_count).toBe(0)
   })
 })
