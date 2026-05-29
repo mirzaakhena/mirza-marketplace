@@ -19,10 +19,8 @@ import {
 import { readRegistry, resolveRegistryPath } from './registry'
 import { readPeerSessionInfo } from './peer-status'
 import { writeAgentMessage, type AgentPayload } from './inbox-writer'
-import { writePromptMessage, resolvePromptInboxDir } from './prompt-inbox'
-import { startPromptWatcher } from './prompt-watcher'
+import { validatePromptBody, composePromptText, writePromptToPending } from './prompt-compose'
 import { normalizeTargets, isDestructiveSlash } from './send-guards'
-import { randomUUID } from 'node:crypto'
 
 const REGISTRY_PATH = resolveRegistryPath(process.env)
 process.stderr.write(`agent-bus: registry path = ${REGISTRY_PATH}\n`)
@@ -181,23 +179,23 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
 
         if (kind === 'prompt') {
           const body = payload.body
-          if (typeof body !== 'string' || body.length === 0) throw new Error('prompt payload needs a non-empty body')
-          // One broadcast_group_id shared across all targets of this call.
-          const groupId = targets.length > 1 ? randomUUID() : undefined
+          const v = validatePromptBody(body)
+          if (!v.ok) throw new Error(v.error ?? 'invalid prompt body')
+          const text = composePromptText(self, body as string)
           const results = targets.map(name => {
             const entry = reg.agents[name]
             if (!entry) {
               return { target: name, ok: false, error: 'not in registry', online: false }
             }
             try {
-              const r = writePromptMessage(entry.project_dir, self, body, { broadcastGroupId: groupId })
+              const r = writePromptToPending(entry.state_dir, self, text)
               return { target: name, ok: true, path: r.path, online: isOnline(entry.last_heartbeat) }
             } catch (err) {
               return { target: name, ok: false, error: err instanceof Error ? err.message : String(err), online: isOnline(entry.last_heartbeat) }
             }
           })
           return {
-            content: [{ type: 'text', text: JSON.stringify({ kind: 'prompt', broadcast_group_id: groupId, results }, null, 2) }],
+            content: [{ type: 'text', text: JSON.stringify({ kind: 'prompt', results }, null, 2) }],
           }
         }
 
@@ -246,44 +244,3 @@ const transport = new StdioServerTransport()
 await mcp.connect(transport)
 process.stderr.write(`agent-bus: MCP server connected\n`)
 
-// --- Prompt inbox watcher --------------------------------------------------
-// Run a background watcher over THIS agent's own prompt inbox. Each prompt
-// becomes a notifications/claude/channel inbound message so the local AI
-// sees it as <channel source="agent" from="...">. Mirrors the telegram
-// plugin's notification pattern. Requires CLAUDE_PROJECT_DIR; without it we
-// can't resolve our own inbox, so we log and skip (agent_send still works).
-const SELF_PROJECT_DIR = (process.env.CLAUDE_PROJECT_DIR ?? '').trim()
-if (SELF_PROJECT_DIR) {
-  const inboxDir = resolvePromptInboxDir(SELF_PROJECT_DIR)
-  process.stderr.write(`agent-bus: watching prompt inbox ${inboxDir}\n`)
-  const stopWatcher = startPromptWatcher({
-    inboxDir,
-    log: line => process.stderr.write(`agent-bus: ${line}\n`),
-    emit: msg => {
-      const meta: Record<string, string> = {
-        from: msg.from,
-        ts: msg.ts,
-        kind: 'prompt',
-      }
-      if (msg.broadcast_group_id) meta.broadcast_group_id = msg.broadcast_group_id
-      void mcp.notification({
-        method: 'notifications/claude/channel',
-        params: {
-          content: msg.body,
-          meta,
-        },
-      })
-    },
-  })
-
-  const shutdown = () => {
-    try { stopWatcher() } catch { /* noop */ }
-    process.exit(0)
-  }
-  process.on('SIGTERM', shutdown)
-  process.on('SIGINT', shutdown)
-  process.stdin.on('end', shutdown)
-  process.stdin.on('close', shutdown)
-} else {
-  process.stderr.write('agent-bus: CLAUDE_PROJECT_DIR unset — prompt inbox watcher disabled\n')
-}

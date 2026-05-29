@@ -11,7 +11,7 @@ import {
 } from './registry'
 import { writeAgentMessage } from './inbox-writer'
 import { readPeerSessionInfo } from './peer-status'
-import { resolvePromptInboxDir, validateInboundPrompt, writePromptMessage } from './prompt-inbox'
+import { composePromptText, writePromptToPending } from './prompt-compose'
 
 describe('integration: bot-01 ↔ bot-02 loopback', () => {
   let root: string
@@ -122,28 +122,19 @@ describe('integration: bot-01 ↔ bot-02 loopback', () => {
     expect(info.effort_level).toBe('medium')
   })
 
-  test('prompt loopback: bot-01 writes a prompt into bot-02 agent-bus inbox; receiver validates it', () => {
-    // sender side
-    const res = writePromptMessage(bot02Dir, 'bot-01', 'tolong review PR #5')
+  test('prompt delivery: writes a type:"prompt" payload into bot-02 pty-controller pending', () => {
+    const text = composePromptText('bot-01', 'review PR #5')
+    const res = writePromptToPending(bot02StateDir, 'bot-01', text)
     expect(res.id).toMatch(/^[0-9a-f-]{36}$/)
 
-    // file landed in the AGENT-BUS inbox, not the pty-controller pending dir
-    const inbox = resolvePromptInboxDir(bot02Dir)
-    const files = readdirSync(inbox).filter(f => f.endsWith('.json'))
+    const pending = join(bot02StateDir, 'pending')
+    const files = readdirSync(pending).filter(f => f.endsWith('.json'))
     expect(files).toHaveLength(1)
 
-    // receiver side parses it cleanly
-    const obj = JSON.parse(readFileSync(join(inbox, files[0]!), 'utf8'))
-    const v = validateInboundPrompt(obj)
-    expect(v.ok).toBe(true)
-    if (v.ok) {
-      expect(v.msg.from).toBe('bot-01')
-      expect(v.msg.body).toBe('tolong review PR #5')
-    }
-
-    // and the pty-controller pending dir stays empty (separate channel)
-    const pending = join(bot02StateDir, 'pending')
-    const pendingFiles = existsSync(pending) ? readdirSync(pending) : []
-    expect(pendingFiles).toHaveLength(0)
+    const body = JSON.parse(readFileSync(join(pending, files[0]!), 'utf8'))
+    expect(body.type).toBe('prompt')
+    expect(body.from).toBe('bot-01')
+    expect(body.text).toContain('agent bot-01 via agent-bus')
+    expect(body.text.endsWith('review PR #5')).toBe(true)
   })
 })
