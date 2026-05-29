@@ -3,7 +3,7 @@ description: Load the latest handoff file from <repo>/.handoff/, summarise it, a
 argument-hint: "[yes]"
 ---
 
-You are resuming work from a previous Claude Code session. Invoke the `resuming-from-handoff` skill — it locates the latest handoff file, summarises it, and asks the user to confirm before proceeding. Follow its instructions exactly.
+You are resuming work from a previous Claude Code session. Invoke the `handoff-resume` skill — it locates the latest handoff file, summarises it, and asks the user to confirm before proceeding. Follow its instructions exactly.
 
 Argument: `$ARGUMENTS`
 

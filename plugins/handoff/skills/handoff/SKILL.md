@@ -1,5 +1,5 @@
 ---
-name: writing-handoff
+name: handoff
 description: Use when the user invokes /handoff to capture the current session so it can be resumed cleanly later. Runs a clarity check first; if next-step direction is unclear, the AI brainstorms with the user before writing the file. Final output is a markdown file in <repo>/.handoff/ following an 8-section template.
 ---
 
@@ -72,7 +72,7 @@ Validate the title before writing. If it has more than 6 words or contains illeg
 
 ## Step 4 — Generate the content
 
-> **CONTRACT:** the section numbers and headings below are part of the cross-skill contract with `/handoff-resume`. Do **not** add, remove, or renumber sections without updating `skills/resuming-from-handoff/SKILL.md` in lockstep. Section *content* is free-form; section *structure* is shared.
+> **CONTRACT:** the section numbers and headings below are part of the cross-skill contract with `/handoff-resume`. Do **not** add, remove, or renumber sections without updating `skills/handoff-resume/SKILL.md` in lockstep. Section *content* is free-form; section *structure* is shared.
 
 Use the 8-section template below. Every section is present even if its content is `—` (so `/handoff-resume` can parse predictably).
 

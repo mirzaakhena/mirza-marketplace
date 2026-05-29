@@ -3,7 +3,7 @@ description: Generate a handoff markdown file capturing the current session so t
 argument-hint: "[optional free-form notes]"
 ---
 
-You are producing a session handoff for the user. Invoke the `writing-handoff` skill — it contains the full procedure: clarity-check rules, content structure, filename format, and write logic. Follow its instructions exactly.
+You are producing a session handoff for the user. Invoke the `handoff` skill — it contains the full procedure: clarity-check rules, content structure, filename format, and write logic. Follow its instructions exactly.
 
 The user's argument string (everything after `/handoff`, or empty) is captured below as `$ARGUMENTS`. Pass it through to the skill as the "extra notes from user" input — it goes verbatim into Section 7 of the handoff file.
 

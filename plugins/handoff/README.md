@@ -13,8 +13,8 @@ Toolkit untuk **session handoff** di Claude Code. Plugin ini menangkap sesi yang
 
 | Skill | Dipakai oleh | Tugas |
 |---|---|---|
-| `writing-handoff` | `/handoff` | Jalankan clarity check, generate konten 8-section, tulis file ke `.handoff/`. |
-| `resuming-from-handoff` | `/handoff-resume` | Cari file terbaru di `.handoff/`, ringkas, minta konfirmasi user dulu sebelum eksekusi. |
+| `handoff` | `/handoff` | Jalankan clarity check, generate konten 8-section, tulis file ke `.handoff/`. |
+| `handoff-resume` | `/handoff-resume` | Cari file terbaru di `.handoff/`, ringkas, minta konfirmasi user dulu sebelum eksekusi. |
 
 ## Lokasi file handoff
 
@@ -28,7 +28,7 @@ Toolkit untuk **session handoff** di Claude Code. Plugin ini menangkap sesi yang
 - Kalau filename bentrok dalam menit yang sama, append `-2`, `-3`, dst.
 - Lex-sort filename = chronological sort, jadi `/handoff-resume` cukup ambil entry terakhir.
 
-Isi file pakai **8-section template** (Konteks Proyek, Yang Sudah Selesai, Brainstorming Choices, Artefak, Anti-Patterns, Next Session Plan, Catatan User, Hal Penting Lain). Detail lengkap ada di `skills/writing-handoff/SKILL.md` — section structure adalah kontrak antar kedua skill, jangan diubah sebelah pihak.
+Isi file pakai **8-section template** (Konteks Proyek, Yang Sudah Selesai, Brainstorming Choices, Artefak, Anti-Patterns, Next Session Plan, Catatan User, Hal Penting Lain). Detail lengkap ada di `skills/handoff/SKILL.md` — section structure adalah kontrak antar kedua skill, jangan diubah sebelah pihak.
 
 ## Workflow
 

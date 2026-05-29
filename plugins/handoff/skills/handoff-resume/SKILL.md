@@ -1,5 +1,5 @@
 ---
-name: resuming-from-handoff
+name: handoff-resume
 description: Use when the user invokes /handoff-resume at the start of a new Claude Code session to pick up where the previous session left off. Reads the latest file from <repo>/.handoff/, presents a brief summary, and waits for explicit confirmation before continuing the prescribed next steps.
 ---
 
@@ -38,7 +38,7 @@ If multiple files share the same timestamp prefix (collision suffixes `-2`, `-3`
 
 ## Step 3 — Read the file
 
-> **CONTRACT:** the section numbers and headings used below match the 8-section structure produced by `/handoff` (see `skills/writing-handoff/SKILL.md` Step 4). Do **not** edit references to "Section 2", "Section 5", "Section 6" without updating the writer in lockstep.
+> **CONTRACT:** the section numbers and headings used below match the 8-section structure produced by `/handoff` (see `skills/handoff/SKILL.md` Step 4). Do **not** edit references to "Section 2", "Section 5", "Section 6" without updating the writer in lockstep.
 
 Use the Read tool. Load the entire file. You will need the title, dates, Sections 1, 2, 5, 6, 7, 8 to summarise. Section 3 (brainstorming choices) often contains the *why* behind the next step — surface it when non-empty. Section 4 (artefacts) is reference detail; cite items only if directly relevant.
 
