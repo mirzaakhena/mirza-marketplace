@@ -47,6 +47,12 @@
       "description": "Programmatically inject slash commands into a running Claude Code session by going through a companion wrapper process (mirza-cc) that hosts CC inside a node-pty pseudo-terminal. Provides the /new slash command (clears the session via PTY) and the pty_send_slash / pty_status MCP tools. Requires the mirza-cc wrapper running — see plugin README. Pairs well with the telegram plugin (the wrapper drops a session-change event into telegram's outbox so the user gets a post-/clear ping; the telegram plugin owns the /notify-user command itself).",
       "category": "productivity",
       "source": "./plugins/pty-controller"
+    },
+    {
+      "name": "agent-bus",
+      "description": "Bot-to-bot messaging for Claude Code. Lets one registered agent send another a one-way slash command or a natural-language prompt (broadcast-capable to many peers at once) via a per-peer filesystem inbox, coordinated through the shared ~/.claude/agent-registry.json. Provides the agent_list / agent_status / agent_send MCP tools. Prompts arrive at the peer as an inbound channel message and are acted on automatically; there is no reply protocol (loops are prevented by an anti-bounce skill rule plus a hop-count cap). Builds on pty-controller's registry and the mirza-cc wrapper; pairs with the telegram plugin for richer peer status.",
+      "category": "productivity",
+      "source": "./plugins/agent-bus"
     }
   ]
 }
