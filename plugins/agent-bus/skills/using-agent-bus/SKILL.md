@@ -32,8 +32,11 @@ If unsure, ask the user first.
 ## Sending prompts (kind="prompt")
 
 `agent_send` with `kind:"prompt"` delivers a natural-language instruction to a
-peer. The peer's AI receives it as an inbound `<channel source="agent" from="...">`
-message and acts on it automatically — treat it like the peer's user typed it.
+peer. The peer's AI receives it as an inbound `<channel source="agent-bus" from="...">` message
+and acts on it automatically — treat it like the peer's user typed it. (The exact `source` string
+is derived from the MCP server name by the harness — confirm via a live two-bot smoke test. The
+message also carries a `from` field naming the sender bot; the anti-bounce rule keys on "an
+inbound message from the agent-bus channel" regardless of the exact label.)
 
 This is **one-way**. There is no reply channel. If the leader needs a result
 back, the leader must say so *inside the prompt body*:
@@ -46,9 +49,9 @@ happens — there is no automatic pairing.
 
 ## Anti-bounce rule (prevents infinite loops)
 
-An incoming `<channel source="agent">` message is **terminal context**, not a
+An incoming `<channel source="agent-bus">` message is **terminal context**, not a
 trigger to send more agent messages. You MUST NOT call `agent_send` in response
-to an agent message UNLESS:
+to an agent-bus message UNLESS:
 
 1. the user explicitly asks you to, OR
 2. the incoming prompt body explicitly tells you to report back to a named bot.
@@ -106,7 +109,7 @@ User wants a single peer to run a specific command:
 ## Anti-patterns
 
 - **Sending to an offline peer without warning the user.** Inbox file will queue, but the user should know it won't be consumed until the peer boots.
-- **Sending payload >8 KB.** Schema rejects this; don't try.
+- **Sending payload >8 KB.** Runtime validation rejects this (at sender and receiver); don't try.
 - **Including secrets in the command string.** The inbox file lives in the peer's filesystem; treat it as not confidential.
 - **Inferring peer names.** Always read from `agent_list` rather than guessing. Names = basename of peer's project dir.
 - **Initiating prompts autonomously.** Only send `kind:"prompt"` on explicit user request — never as a self-directed idea.
@@ -117,4 +120,4 @@ User wants a single peer to run a specific command:
 
 - `target "<name>" not in registry. Known: <list>` — typo or peer never booted.
 - `command must start with "/"` — you forgot the leading slash.
-- `WARNING: target is offline; file will be consumed on next boot.` — the write succeeded, but tell the user the peer is offline.
+- `{ online: false, ... }` in a result entry — the write succeeded, but the target was offline at send time; tell the user the message is queued and will be consumed on next boot.

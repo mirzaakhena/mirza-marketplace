@@ -3,9 +3,12 @@
  * bot's pty-controller inbox. The peer's wrapper consumes the file and
  * injects the corresponding slash command into its PTY.
  *
- * Phase 1: only `kind: "slash"` is accepted. The `prompt` and `reply`
- * variants land in Phase 2 — we reject them here with a clear error so
- * the AI gets accurate feedback instead of a silent no-op.
+ * This module handles only the **slash path**. Natural-language prompt
+ * delivery ships via a separate inbox (`agent-bus/inbox/`) consumed by
+ * the agent-bus MCP server watcher (see `prompt-inbox.ts` /
+ * `prompt-watcher.ts`). The `kind:"slash"` guard in `validatePayload`
+ * is retained as defense-in-depth — prompt/reply payloads accidentally
+ * routed here will receive a clear error instead of a silent no-op.
  */
 import { mkdirSync, writeFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'

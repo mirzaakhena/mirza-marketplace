@@ -47,6 +47,15 @@ describe('consumeInboxFile', () => {
     expect(got).toHaveLength(0)
     expect(existsSync(join(inbox, '.rejected', 'big.json'))).toBe(true)
   })
+
+  test('consuming the same file twice emits only once (dedup guarantee)', () => {
+    const got: PromptMessage[] = []
+    writeFile(inbox, 'dup.json', { id: 'd', ts: 't', from: 'bot-01', kind: 'prompt', body: 'hi', hop_count: 0 })
+    consumeInboxFile(inbox, 'dup.json', m => got.push(m), noop)
+    consumeInboxFile(inbox, 'dup.json', m => got.push(m), noop) // file already gone
+    expect(got).toHaveLength(1)
+    expect(existsSync(join(inbox, 'dup.json'))).toBe(false)
+  })
 })
 
 describe('sweepInbox', () => {

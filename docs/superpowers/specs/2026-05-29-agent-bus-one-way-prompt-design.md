@@ -37,7 +37,7 @@ agent_send(                             bot-02/.claude/channels/
                                                 │ lalu hapus file inbox
                                                 ▼
                                           AI bot-02 lihat:
-                                          <channel source="agent" from="bot-01" ...>
+                                          <channel source="agent-bus" from="bot-01" ...>
                                           → perlakukan seperti pesan user → auto-eksekusi
 
 Slash path (existing, TIDAK berubah):
@@ -68,7 +68,7 @@ Saat ini agent-bus adalah MCP server stateless (3 tool: `agent_list`, `agent_sta
 
 **b. Background inbox watcher (BARU)** — mirror pola telegram (`fs.watch` + sweep interval fallback):
 - Watch `<self>/.claude/channels/agent-bus/inbox/`.
-- Pada file prompt baru: validasi → emit `notifications/claude/channel` dengan `source="agent"` → hapus file.
+- Pada file prompt baru: validasi → emit `notifications/claude/channel` dengan `source="agent-bus"` → hapus file.
 - `fs.watch` dengan defer ~50ms (Windows tmp-rename commit), plus sweep interval 2s sebagai fallback (Windows fs.watch quirk).
 - **Startup sweep:** saat boot, scan inbox dulu untuk consume backlog (prompt yang tiba saat worker offline), max 50 file; sisanya pindah ke `inbox/.overflow/`.
 
@@ -107,10 +107,12 @@ type AgentInboxMessage = {
 **Channel tag yang dilihat AI worker** (mirror pola telegram, schema `notifications/claude/channel` mensyaratkan `meta: Record<string,string>`):
 
 ```xml
-<channel source="agent" from="bot-01" ts="2026-05-29T04:00:00Z">
+<channel source="agent-bus" from="bot-01" ts="2026-05-29T04:00:00Z">
 tolong review file X dan lapor ke aku
 </channel>
 ```
+
+(exact `source` label is derived from the MCP server name by the harness — confirm via live two-bot smoke test; the `from` meta field authoritatively names the sender)
 
 `content` = `body`. `meta` membawa `from`, `ts`, `kind`, `broadcast_group_id` (semua string).
 
@@ -142,7 +144,7 @@ agent_send(
 ## 6. Skill `using-agent-bus` (Extended)
 
 **Aturan anti-bounce (KUNCI cegah loop):**
-> Pesan masuk `<channel source="agent">` adalah **terminal context**, bukan trigger otomatis. AI **TIDAK BOLEH** memanggil `agent_send` sebagai respons terhadap pesan agent, KECUALI:
+> Pesan masuk `<channel source="agent-bus">` adalah **terminal context**, bukan trigger otomatis. AI **TIDAK BOLEH** memanggil `agent_send` sebagai respons terhadap pesan agent, KECUALI:
 > (a) user secara eksplisit memintanya, ATAU
 > (b) body prompt yang masuk secara eksplisit menyuruh ("...lapor balik ke bot-01").
 > Default: kerjakan tugasnya, lapor ke Telegram sendiri, lalu BERHENTI.
