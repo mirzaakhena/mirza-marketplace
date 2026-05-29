@@ -59,6 +59,7 @@ import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import { promptTextFromPayload } from './prompt-inject'
 
 // Portable equivalent of __dirname under ES modules. `import.meta.dir` only
 // exists on Bun; the wrapper actually runs under tsx (Node), where we need
@@ -460,6 +461,17 @@ function injectSlashCommand(cmd: string): void {
 }
 
 /**
+ * Type arbitrary text into the PTY as a user turn, then submit with Enter.
+ * Used for agent-bus prompts. Unlike injectSlashCommand there is no leading
+ * "/", so no autocomplete picker to dodge — but we keep the same submit
+ * pacing so the \r lands after the text is fully written.
+ */
+function injectText(text: string): void {
+  currentPty.write(text)
+  setTimeout(() => currentPty.write('\r'), SUBMIT_DELAY_MS)
+}
+
+/**
  * Drop a typed JSON event into the telegram plugin's system-outbox dir.
  * The plugin's server.ts watches that directory and translates each
  * event into a Telegram bot.api send — bypassing CC entirely (no AI
@@ -749,6 +761,8 @@ async function consumePending(filename: string): Promise<void> {
     hop_count?: number
     /** Agent-bus extension: correlation id, opaque to wrapper in Phase 1. */
     correlation_id?: string
+    /** Agent-bus prompt: the already-composed text to type into the PTY. */
+    text?: string
   }
   try {
     payload = JSON.parse(raw)
@@ -815,6 +829,17 @@ async function consumePending(filename: string): Promise<void> {
         }`,
       )
     }
+    return
+  }
+
+  if (type === 'prompt') {
+    const text = promptTextFromPayload(payload)
+    if (!text) {
+      log(`ignored ${filename}: prompt payload missing text`)
+      return
+    }
+    log(`injecting prompt text (${text.length} chars, id: ${payload.id ?? '?'}, from: ${payload.from ?? '?'})`)
+    injectText(text)
     return
   }
 
