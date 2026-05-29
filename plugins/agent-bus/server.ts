@@ -41,7 +41,7 @@ function isStaleForList(lastHeartbeatIso: string): boolean {
 }
 
 const mcp = new Server(
-  { name: 'agent-bus', version: '0.0.2' },
+  { name: 'agent-bus', version: '0.0.3' },
   { capabilities: { tools: {} } },
 )
 
@@ -69,7 +69,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: 'agent_send',
       description:
         "Send a one-way message to one or more peer bots. Two kinds:\n" +
-        "  • kind=\"prompt\": deliver a natural-language instruction to the peer's Claude session (it arrives as an inbound message and the peer acts on it). One-way — there is NO reply channel. If you want the peer to report back, say so inside the body (e.g. \"...when done, send a one-line summary back to bot-01\").\n" +
+        "  • kind=\"prompt\": deliver a natural-language instruction to the peer. It is typed into the peer's Claude session as a normal user turn (via the mirza-cc wrapper) and the peer acts on it. One-way — there is NO reply channel. Newlines in the body are flattened to one line. If you want the peer to report back, say so inside the body (e.g. \"...when done, send a one-line summary back to bot-01\").\n" +
         "  • kind=\"slash\": inject a slash command into the peer's PTY via pty-controller (e.g. /clear, /rename, /effort).\n" +
         "`target` may be a single name or an array (broadcast/fan-out). DO NOT call autonomously — only when the user explicitly asks you to message another agent, OR when an inbound agent prompt explicitly told you to report back. Never auto-reply to an incoming agent message otherwise. Destructive slash commands (/clear, /delete) cannot be broadcast to an array.",
       inputSchema: {
