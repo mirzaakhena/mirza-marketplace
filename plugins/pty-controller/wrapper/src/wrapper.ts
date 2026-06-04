@@ -59,7 +59,7 @@ import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { promptTextFromPayload } from './prompt-inject'
+import { promptTextFromPayload, chunkPromptText } from './prompt-inject'
 
 // Portable equivalent of __dirname under ES modules. `import.meta.dir` only
 // exists on Bun; the wrapper actually runs under tsx (Node), where we need
@@ -141,6 +141,16 @@ const POST_INJECTION_DELAY_MS = 1000
 // pressing Enter, so CC treats the trailing \r as a top-level "submit"
 // rather than a "select from picker" action.
 const SUBMIT_DELAY_MS = 250
+
+// Pacing for injectText (agent-bus prompts). A single raw write of one long
+// line into CC's TUI input over Windows ConPTY overflows the input buffer and
+// the head of the message is silently dropped (only the tail survives). We
+// write the body in small code-point slices with a pause between them so the
+// TUI drains its buffer between chunks. Empirical — start 100/30ms; if a long
+// body still truncates on Windows, lower the size and/or raise the delay.
+// A ~3KB body at 100/30ms submits in ~1s.
+const CHUNK_SIZE = 100 // code points per write
+const CHUNK_DELAY_MS = 30 // pause between chunks so CC's input drains
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN ?? 'claude'
 // Default flags load mirza-marketplace's telegram channel (which isn't on
@@ -463,12 +473,23 @@ function injectSlashCommand(cmd: string): void {
 /**
  * Type arbitrary text into the PTY as a user turn, then submit with Enter.
  * Used for agent-bus prompts. Unlike injectSlashCommand there is no leading
- * "/", so no autocomplete picker to dodge — but we keep the same submit
- * pacing so the \r lands after the text is fully written.
+ * "/", so no autocomplete picker to dodge.
+ *
+ * The body is written in small chunks (CHUNK_SIZE code points, CHUNK_DELAY_MS
+ * apart) rather than one shot: a single large write of one long line into CC's
+ * TUI input over Windows ConPTY overflows the input buffer and silently drops
+ * the head, leaving only the tail. Chunking lets the TUI drain between writes
+ * so the full body lands. The submitting \r goes out SUBMIT_DELAY_MS after the
+ * last chunk so it lands once the text has settled.
  */
 function injectText(text: string): void {
-  currentPty.write(text)
-  setTimeout(() => currentPty.write('\r'), SUBMIT_DELAY_MS)
+  const chunks = chunkPromptText(text, CHUNK_SIZE)
+  let elapsed = 0
+  for (const chunk of chunks) {
+    setTimeout(() => currentPty.write(chunk), elapsed)
+    elapsed += CHUNK_DELAY_MS
+  }
+  setTimeout(() => currentPty.write('\r'), elapsed + SUBMIT_DELAY_MS)
 }
 
 /**
