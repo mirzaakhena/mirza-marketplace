@@ -1,109 +1,109 @@
 # inline-buttons
 
-Plugin skill-only yang memaksa Claude menjalankan **self-audit** sebelum mengirim setiap reply Telegram: apakah reply ini **PERTANYAAN** atau sekadar **JAWABAN**? Kalau pertanyaan → wajib pakai inline-keyboard buttons, supaya user bisa menjawab dengan **satu tap** — bukan ngetik.
+A skill-only plugin that forces Claude to run a **self-audit** before sending every Telegram reply: is this reply a **QUESTION** or just an **ANSWER**? If it's a question → it must use inline-keyboard buttons, so the user can answer with **one tap** — not typing.
 
-Plugin ini tidak punya MCP server, tidak punya command, hanya satu skill: `inline-buttons`.
+This plugin has no MCP server, no commands, just a single skill: `inline-buttons`.
 
-## Kenapa
+## Why
 
-User baca Telegram dari HP. Ngetik "B" atau "ya" itu friction. Kalau reply Claude berakhir dengan pertanyaan atau menawarkan pilihan, opsinya harus tampil sebagai tombol. Tap > ketik.
+Users read Telegram on their phones. Typing "B" or "yes" is friction. If Claude's reply ends with a question or offers choices, the options should show up as buttons. Tap > type.
 
-## Aturan inti — self-audit mekanis
+## Core rule — mechanical self-audit
 
-Sebelum mengirim **setiap** reply Telegram, Claude mengklasifikasikan teksnya jadi salah satu dari dua jenis:
+Before sending **every** Telegram reply, Claude classifies the text as one of two kinds:
 
-1. **JAWABAN** — menginformasikan, melaporkan, mengonfirmasi selesai. Tidak menanyakan apa pun → kirim apa adanya, tanpa tombol.
-2. **PERTANYAAN** — diakhiri dengan bertanya atau menawarkan. Penanda (satu saja cukup): teks berakhir `?`, frasa "mau X atau Y" / "lanjut?" / "pilih" / "konfirmasi" / "OK / Cancel" / "ya / tidak" / "setuju?", atau ada menu pilihan → **parameter `buttons` WAJIB dilampirkan. Tanpa kecuali.**
+1. **ANSWER** — informs, reports, confirms done. Doesn't ask anything → send as-is, no buttons.
+2. **QUESTION** — ends by asking or offering. Signals (any single one is enough): text ends with `?`, phrases like "want X or Y" / "continue?" / "pick" / "confirm" / "OK / Cancel" / "yes / no" / "agree?", or there's a menu of choices → the **`buttons` parameter MUST be attached. No exceptions.**
 
-**Set tombol minimum untuk pertanyaan apa pun: `✅ Ya / ❌ Tidak` + fallback manual.** Kalau jawabannya tidak bisa di-enumerasi, minimal selalu bisa ditawarkan framing yes/no plus tombol manual — pertanyaan teks polos tidak pernah jadi pilihan yang benar.
+**Minimum button set for any question: `✅ Ya / ❌ Tidak` + a manual fallback.** If the answer can't be enumerated, you can at least always offer a yes/no framing plus a manual button — a plain-text question is never the right choice.
 
-Check ini sengaja mekanis (klasifikasi PERTANYAAN vs JAWABAN), bukan judgement-based ("apakah tombol lebih enak?") — versi lama yang mengandalkan kesadaran mid-compose terbukti sering kelupaan tepat di akhir reply panjang.
+This check is deliberately mechanical (classify QUESTION vs ANSWER), not judgement-based ("would buttons be nicer?") — the old version that relied on mid-compose awareness proved to forget exactly at the end of long replies.
 
-## Wajib: tombol fallback manual
+## Mandatory: manual fallback button
 
-**SETIAP prompt yang menampilkan tombol — yes/no, single-select, maupun open-ended — WAJIB punya tombol terakhir berlabel `✏️ Jelaskan manual` dengan `callback_id: "manual"`. Tanpa kecuali.**
+**EVERY prompt that shows buttons — yes/no, single-select, or open-ended — MUST have a final button labeled `✏️ Jelaskan manual` ("explain manually") with `callback_id: "manual"`. No exceptions.**
 
-Alasannya:
+The reasons:
 
-- User mungkin mau kombinasi opsi (Telegram nggak punya checkbox)
-- Opsi yang ditawarkan mungkin nggak lengkap atau semuanya salah
-- User mungkin mau tanya balik dulu sebelum commit
-- Bahkan di yes/no, jawaban sebenarnya bisa "dua-duanya bukan — kerjakan, tapi dengan cara lain"
+- The user might want a combination of options (Telegram has no checkboxes)
+- The offered options might be incomplete or all wrong
+- The user might want to ask a question back before committing
+- Even in yes/no, the real answer might be "neither — do it, but a different way"
 
-Ritual self-check yang dikodekan di skill: setelah menyusun array `buttons`, lihat baris terakhirnya — kalau bukan tombol manual, tambahkan. Ini aturan yang paling sering dilupakan, makanya dijadikan ritual eksplisit.
+The self-check ritual encoded in the skill: after assembling the `buttons` array, look at its last row — if it isn't the manual button, add it. This is the most commonly forgotten rule, which is why it's made into an explicit ritual.
 
-Kalau user tap `manual`, balas dengan follow-up pendek (tanpa tombol) yang mengundang free-form text, lalu handle input berikutnya seperti pesan text biasa.
+If the user taps `manual`, reply with a short follow-up (no buttons) inviting free-form text, then handle the next input like a normal text message.
 
-## Layout wajib: label pendek + narasi bernomor
+## Mandatory layout: short labels + numbered narration
 
-Layar HP memotong label tombol yang panjang — user lihat "Eksekusi semua (def..." dan kehilangan konteks. Maka:
+Phone screens truncate long button labels — the user sees "Execute all (def..." and loses context. So:
 
-- **Label tombol wajib pendek.** Untuk menu pilihan: opsi dinarasikan sebagai daftar bernomor di BODY pesan, tombolnya cukup angka (`[1][2][3][4]`) dalam **satu baris** (9+ opsi lanjut ke baris angka berikutnya).
-- Detail/konteks hanya hidup di daftar bernomor body — tidak pernah di label.
-- Konfirmasi yes/no boleh tetap label kata pendek (`✅ Ya` / `❌ Tidak`); label > ~15 karakter → pindah ke narasi bernomor.
-- Dilarang dua tombol berlabel panjang berdampingan dalam satu baris.
-- Tombol manual tetap baris terakhir sendiri.
+- **Button labels must be short.** For a menu of choices: options are narrated as a numbered list in the message BODY, and the buttons are just numbers (`[1][2][3][4]`) on a **single row** (9+ options spill onto the next number row).
+- Detail/context lives only in the numbered list in the body — never in the label.
+- Yes/no confirmations may keep short word labels (`✅ Ya` / `❌ Tidak`); a label > ~15 characters → move it to the numbered narration.
+- No two long-labeled buttons side by side on one row.
+- The manual button stays on its own last row.
 
-Contoh:
+Example:
 
 ```
-narasi penjelasan ...
+explanatory narrative ...
 
-Opsi:
-1. pilihan satu
-2. pilihan dua
-3. pilihan tiga
-4. pilihan empat
+Options:
+1. option one
+2. option two
+3. option three
+4. option four
 
 [1] [2] [3] [4]
 [✏️ Jelaskan manual]
 ```
 
-## Pattern
+## Patterns
 
-**Confirmation** (default untuk "should I do X?") — dua tombol aksi pendek + manual di baris bawah. Action verb pendek (`Lanjutkan / Batalkan`) boleh selama ≤ ~15 karakter.
+**Confirmation** (default for "should I do X?") — two short action buttons + manual on the bottom row. Short action verbs (`Lanjutkan / Batalkan`) are fine as long as they're ≤ ~15 characters.
 
-**Single-Select** — narasi bernomor di body + satu baris tombol angka + manual di baris terakhir (lihat layout wajib di atas).
+**Single-Select** — numbered narration in the body + a single row of number buttons + manual on the last row (see mandatory layout above).
 
-## Mekanisme & constraint tombol
+## Button mechanics & constraints
 
-Parameter `buttons` di tool `reply` / `edit_message` plugin telegram: array baris, tiap baris array tombol `{label, callback_id}`.
+The `buttons` parameter in the telegram plugin's `reply` / `edit_message` tools: an array of rows, each row an array of `{label, callback_id}` buttons.
 
-- `label`: 1–64 karakter
-- `callback_id`: harus match `/^[a-z0-9_]{1,32}$/`, unik dalam satu call
-- Maksimal 8 baris × 8 tombol per baris
-- `buttons` tidak bisa digabung dengan `files` dalam satu call
-- Setelah user tap, tombol di pesan asli otomatis dihapus dan label pilihan ditempel (`→ ✅ Yes`) — prompt yang sama tidak bisa dijawab dua kali
+- `label`: 1–64 characters
+- `callback_id`: must match `/^[a-z0-9_]{1,32}$/`, unique within a single call
+- Maximum 8 rows × 8 buttons per row
+- `buttons` can't be combined with `files` in a single call
+- After the user taps, the buttons in the original message are automatically removed and the chosen label is appended (`→ ✅ Yes`) — the same prompt can't be answered twice
 
-Tap masuk sebagai pesan `<channel>` baru berisi `[button tapped: <label>]` plus `meta.callback_id`. **Handle berdasarkan `callback_id`, bukan teks label** — label bisa berubah, callback_id stabil.
+A tap arrives as a new `<channel>` message containing `[button tapped: <label>]` plus `meta.callback_id`. **Handle based on `callback_id`, not the label text** — labels can change, callback_id is stable.
 
-## Anti-pattern yang dilarang
+## Forbidden anti-patterns
 
-- Mengakhiri reply dengan pertanyaan polos tanpa tombol (pelanggaran #1)
-- Lupa tombol `✏️ Jelaskan manual` di baris terakhir (pelanggaran #2)
-- Daftar opsi "Pilih A / B / C / D" sebagai teks padahal bisa jadi tombol
-- Bertanya "lanjut?" untuk langkah trivial yang jawabannya pasti ya (aturannya: jangan bertanya, langsung proceed — bukan bertanya tanpa tombol)
-- Operasi destructive tanpa konteks di body message (label tombol doang terlalu pendek — tulis aksinya di body)
-- Reuse `callback_id` antar prompt yang aktif bersamaan
+- Ending a reply with a plain question and no buttons (violation #1)
+- Forgetting the `✏️ Jelaskan manual` button on the last row (violation #2)
+- Listing options as text "Pick A / B / C / D" when they could be buttons
+- Asking "continue?" for a trivial step whose answer is obviously yes (the rule: don't ask, just proceed — not ask without buttons)
+- Destructive operations with no context in the message body (a button label alone is too short — write the action in the body)
+- Reusing a `callback_id` across prompts that are active at the same time
 
-## Bergantung pada
+## Depends on
 
-Plugin [`telegram`](../telegram/) (>= `0.0.9-mirza.0`) yang expose parameter `buttons` di tool `reply` dan `edit_message`. Tanpa plugin telegram, skill ini nggak ada yang bisa dipanggil.
+The [`telegram`](../telegram/) plugin (>= `0.0.9-mirza.0`), which exposes the `buttons` parameter in the `reply` and `edit_message` tools. Without the telegram plugin, there's nothing for this skill to call.
 
-## Cocok dipasangkan dengan
+## Pairs well with
 
-[`immediate-reply`](../immediate-reply/) — urutan kedua check saat keduanya berlaku: (1) inbound masuk → check immediate-reply dulu (ack sebelum tools), (2) kerja, (3) reply final disusun → self-audit inline-buttons (PERTANYAAN → tombol). Kalau merumuskan opsi butuh research dulu: ack instan ("🤔 Bentar mikir pilihannya…"), research, lalu kirim pertanyaan + `buttons`.
+[`immediate-reply`](../immediate-reply/) — the ordering of the two checks when both apply: (1) inbound arrives → check immediate-reply first (ack before tools), (2) work, (3) final reply is composed → inline-buttons self-audit (QUESTION → buttons). If formulating the options needs research first: instant ack ("🤔 Hang on, thinking through the options…"), research, then send the question + `buttons`.
 
-## Instalasi
+## Installation
 
-Tambahkan marketplace dulu (lihat [root README](../../README.md)), lalu:
+Add the marketplace first (see [root README](../../README.md)), then:
 
 ```
 /plugin install inline-buttons@mirza-marketplace
 /reload-plugins
 ```
 
-Skill akan langsung aktif — Claude otomatis pakai pattern yang sesuai saat ngobrol via Telegram.
+The skill activates right away — Claude automatically uses the appropriate pattern when chatting via Telegram.
 
 ## Author
 

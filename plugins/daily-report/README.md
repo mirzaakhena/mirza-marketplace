@@ -1,26 +1,26 @@
 # daily-report
 
-Plugin skill-only untuk Claude Code yang membantu kamu menyusun **daily work report siap-paste ke chat app apa pun** (plain text, provider-agnostic) dari aktivitas git terbaru plus prompt bebas. Ada satu slash command (`/daily-report`) dan satu skill (`writing-daily-report`) yang memegang template terkunci, aturan style, dan anti-fabrication guard.
+A skill-only Claude Code plugin that helps you put together a **paste-ready daily work report for any chat app** (plain text, provider-agnostic) from your recent git activity plus a free-form prompt. It ships one slash command (`/daily-report`) and one skill (`writing-daily-report`) that holds the locked template, style rules, and anti-fabrication guard.
 
-Cocok dipakai akhir hari (H) untuk laporan yang akan diposting besok pagi (H+1).
+Best used at the end of the day (D) for a report you'll post the next morning (D+1).
 
 ## Slash commands
 
-| Command | Argumen | Fungsi |
+| Command | Arguments | Function |
 |---|---|---|
-| `/daily-report` | `[prompt bebas opsional]` | Jalankan `gather-context.sh` untuk mengumpulkan konteks git (commits, status, TODO, archive sebelumnya, file extra), invoke skill `writing-daily-report`, lalu generate report final. Simpan ke `.daily-reports/<DATE>.md`, copy ke clipboard (cross-platform: `pbcopy`/`clip.exe`/`xclip`/`wl-copy`, best-effort), dan print preview ke percakapan. |
+| `/daily-report` | `[optional free-form prompt]` | Runs `gather-context.sh` to collect git context (commits, status, TODO, previous archive, extra files), invokes the `writing-daily-report` skill, then generates the final report. Saves it to `.daily-reports/<DATE>.md`, copies it to the clipboard (cross-platform: `pbcopy`/`clip.exe`/`xclip`/`wl-copy`, best-effort), and prints a preview to the conversation. |
 
-Prompt bebas bisa berisi: commit hashes, file paths (akan ikut di-include ke konteks), hint `Today`, override nama project (`project=<name>`), atau override jumlah bullet (mis. `"buat 7 yesterday, 4 today"`).
+The free-form prompt can contain: commit hashes, file paths (which get included in the context), a `Today` hint, a project name override (`project=<name>`), or a bullet count override (e.g. `"make it 7 yesterday, 4 today"`).
 
 ## Skills
 
-| Skill | Kapan trigger | Fungsi |
+| Skill | When it triggers | Function |
 |---|---|---|
-| `writing-daily-report` | Dipanggil oleh `/daily-report` saat user butuh laporan harian siap-paste | Memegang template terkunci `# Yesterday` / `# Today`, prosedur generasi, style rules (≤15 kata per bullet, satu kalimat, no markdown fancy), serta anti-fabrication guard. Default output: 5 bullet Yesterday + 3 bullet Today, bahasa English (auto-translate kalau prompt user bahasa lain). |
+| `writing-daily-report` | Invoked by `/daily-report` when the user needs a paste-ready daily report | Holds the locked `# Yesterday` / `# Today` template, the generation procedure, the style rules (≤15 words per bullet, single sentence, no fancy markdown), and the anti-fabrication guard. Default output: 5 Yesterday bullets + 3 Today bullets, in English (auto-translates if the user's prompt is in another language). |
 
 ## Output format
 
-Plain text, no markdown rendering, paste-ready ke chat app mana pun:
+Plain text, no markdown rendering, paste-ready to any chat app:
 
 ```
 Hello, this is my daily report:
@@ -34,36 +34,36 @@ Hello, this is my daily report:
 - ... (default 3 bullets)
 ```
 
-Hasil disimpan ke `.daily-reports/<YYYY-MM-DD>.md` relatif ke root repo (overwrite kalau sudah ada), lalu di-copy ke clipboard memakai tool yang tersedia di platform (`pbcopy` macOS, `clip.exe` Windows, `xclip`/`wl-copy` Linux). Best-effort — kalau tidak ada, user diminta copy manual dari file.
+The result is saved to `.daily-reports/<YYYY-MM-DD>.md` relative to the repo root (overwriting if it already exists), then copied to the clipboard using whichever tool is available on the platform (`pbcopy` on macOS, `clip.exe` on Windows, `xclip`/`wl-copy` on Linux). Best-effort — if none is available, the user is asked to copy manually from the file.
 
-## Dari mana konteksnya diambil
+## Where the context comes from
 
-`gather-context.sh` mengumpulkan blob konteks deterministik dengan section `===REPO===`, `===DATE===`, `===BRANCH===`, `===COMMITS===`, `===STATUS===`, `===TODO===`, `===PREV_ARCHIVE===`, `===EXTRA_FILES===`. Detail penting:
+`gather-context.sh` collects a deterministic context blob with the sections `===REPO===`, `===DATE===`, `===BRANCH===`, `===COMMITS===`, `===STATUS===`, `===TODO===`, `===PREV_ARCHIVE===`, `===EXTRA_FILES===`. Key details:
 
-- **Pemilihan commit bertingkat:** (1) commit yang lebih baru dari mtime arsip terakhir di `.daily-reports/`; kalau < 2 commit, (2) fallback ke commit 24 jam terakhir; kalau masih < 2, (3) fallback ke 10 commit terakhir.
-- **File TODO opsional:** `.daily-report.todo.md` di root repo — kalau ada, isinya jadi hint section `Today`.
-- **Arsip sebelumnya:** report terakhir di `.daily-reports/` ikut dibaca untuk kontinuitas (item `Today` kemarin yang belum kelar dibawa lagi).
-- **File ekstra:** path file yang disebut di prompt bebas diteruskan sebagai argumen script dan ikut masuk konteks.
+- **Tiered commit selection:** (1) commits newer than the mtime of the last archive in `.daily-reports/`; if there are < 2 commits, (2) fall back to commits from the last 24 hours; if still < 2, (3) fall back to the last 10 commits.
+- **Optional TODO file:** `.daily-report.todo.md` at the repo root — if present, its contents become hints for the `Today` section.
+- **Previous archive:** the last report in `.daily-reports/` is read too for continuity (yesterday's unfinished `Today` items get carried over again).
+- **Extra files:** file paths mentioned in the free-form prompt are passed as script arguments and included in the context.
 
-Section `Today` diisi berdasar urutan prioritas: hint prompt bebas → Section "Akan" dari handoff yang dibuat sesi ini → sisa `Today` arsip sebelumnya → entri TODO → kelanjutan wajar dari `Yesterday`. Kalau semuanya kosong, skill **bertanya ke user** alih-alih mengarang.
+The `Today` section is filled by priority order: free-form prompt hint → the "Akan" (next-up) section from a handoff created this session → leftover `Today` items from the previous archive → TODO entries → a reasonable continuation of `Yesterday`. If everything is empty, the skill **asks the user** instead of making things up.
 
-Contoh report beranotasi ada di `skills/writing-daily-report/examples.md`.
+An annotated example report lives in `skills/writing-daily-report/examples.md`.
 
-### Aturan inti (anti-fabrication)
+### Core rules (anti-fabrication)
 
-Skill ini memegang aturan ketat supaya laporan tetap jujur dan tidak halu:
+This skill holds strict rules to keep the report honest and free of hallucination:
 
-- **Anchoring `Yesterday` vs `Today`** — `Yesterday` = yang **sudah selesai** pada saat menulis (H). `Today` = yang **belum selesai** dan akan dikerjakan H+1. Tidak boleh pre-credit pekerjaan yang "rencananya kelar nanti malam".
-- **No fabrication** — setiap bullet wajib bisa ditelusuri ke evidence: commit subject/body, diff, file path, branch name, TODO entry, archive sebelumnya, atau teks prompt user. Tidak boleh ngarang aktivitas.
-- **Terminologi spesifik hanya kalau token-nya muncul di konteks** — boleh sebut `Postgres`, `JWT middleware`, `argon2` cuma kalau kata itu literal ada di commit/diff/file path. Tidak boleh invent.
-- **Boss-readable strip** — buang commit hash, branch name, PR/MR/issue number, file path internal, nama function dengan underscore, endpoint URL dari bullet. Tulis aktivitas yang nama itu mewakili, bukan nama identifier-nya.
-- **No padding** — kalau konteks tipis, hasilkan lebih sedikit bullet daripada memenuhi target dengan bullshit. Skill akan secara eksplisit flag ke user kalau konteks terlalu thin.
-- **No AI/Claude mention** — meski commit di-generate AI, bullet tetap ditulis seperti pekerjaan manusia ("Implement X").
-- **Word cap** — target 10–15 kata per bullet, **hard cap 15**. Tidak boleh multi-sentence bullet.
+- **Anchoring `Yesterday` vs `Today`** — `Yesterday` = what's **already done** at the time of writing (D). `Today` = what's **not yet done** and will be worked on D+1. No pre-crediting work that's "supposedly finishing tonight".
+- **No fabrication** — every bullet must be traceable to evidence: a commit subject/body, a diff, a file path, a branch name, a TODO entry, the previous archive, or the user's prompt text. No making up activity.
+- **Specific terminology only if the token appears in the context** — you can mention `Postgres`, `JWT middleware`, `argon2` only if that word literally appears in a commit/diff/file path. No inventing.
+- **Boss-readable strip** — drop commit hashes, branch names, PR/MR/issue numbers, internal file paths, function names with underscores, and endpoint URLs from the bullets. Write the activity that name represents, not the identifier itself.
+- **No padding** — when context is thin, produce fewer bullets rather than hitting the target with bullshit. The skill will explicitly flag it to the user when the context is too thin.
+- **No AI/Claude mention** — even if the commits were AI-generated, the bullets are still written as human work ("Implement X").
+- **Word cap** — aim for 10–15 words per bullet, **hard cap 15**. No multi-sentence bullets.
 
 ## Install
 
-Tambah marketplace dulu (lihat [root README](../../README.md) untuk langkah lengkap), lalu:
+Add the marketplace first (see the [root README](../../README.md) for the full steps), then:
 
 ```
 /plugin install daily-report@mirza-marketplace

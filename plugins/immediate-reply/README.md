@@ -1,65 +1,65 @@
-# `immediate-reply` — Bikin Claude terasa cepat di Telegram
+# `immediate-reply` — Make Claude feel fast on Telegram
 
-Plugin **skill-only** yang menyuruh Claude mengirim acknowledgement pendek ke user Telegram dalam ~1 detik sebelum tool call pertama dijalankan. Tidak ada MCP server, tidak ada command — cuma satu skill perilaku yang diaudit setiap kali pesan Telegram masuk.
+A **skill-only** plugin that tells Claude to send a short acknowledgement to the Telegram user within ~1 second before the first tool call runs. No MCP server, no commands — just a single behavior skill that gets audited every time a Telegram message comes in.
 
-## Kenapa ada plugin ini
+## Why this plugin exists
 
-User Telegram baca dari HP. Delay 5 detik tanpa tanda-tanda kehidupan kerasa seperti bot ghosting. Acknowledgement instan ("bentar cek dulu...") sebelum kerjaan dimulai bikin user yakin pesannya sampai dan Claude lagi kerja, walau jawaban final-nya baru muncul 30 detik kemudian.
+Telegram users read from their phones. A 5-second delay with no sign of life feels like the bot is ghosting. An instant acknowledgement ("bentar cek dulu...") before the work starts reassures the user that their message landed and Claude is working, even though the final answer only shows up 30 seconds later.
 
-## Aturan inti — pre-flight check mekanis
+## Core rule — mechanical pre-flight check
 
-Sebelum menyusun respons untuk pesan Telegram apapun, AI menjawab **4 pertanyaan hitung-tool** (bukan menilai "ini berat atau nggak"):
+Before composing a response to any Telegram message, the AI answers **4 tool-counting questions** (not judging "is this heavy or not"):
 
-1. Akan ada tool call selain `reply` sebelum jawaban final?
-2. Akan `Read` file?
-3. Akan menjalankan perintah Bash/shell (termasuk `git`, `ls`, `grep`)?
-4. Akan dispatch Agent / background process / Monitor?
+1. Will there be a tool call other than `reply` before the final answer?
+2. Will it `Read` a file?
+3. Will it run a Bash/shell command (including `git`, `ls`, `grep`)?
+4. Will it dispatch an Agent / background process / Monitor?
 
-**Satu saja "ya" → ack WAJIB dikirim SEBELUM tool pertama jalan.** Semua "tidak" (respons murni teks tanpa tool) → ack tidak perlu, langsung jawab.
+**Even a single "yes" → an ack MUST be sent BEFORE the first tool runs.** All "no" (a pure-text response with no tools) → no ack needed, answer directly.
 
-Check ini sengaja mekanis, bukan judgement-based — versi lama ("kerjaan non-trivial", "lebih dari beberapa detik") terbukti drift di praktik: AI menaksir "cuma 3 detik" padahal 12 detik, atau lupa ack saat sedang in flow.
+This check is deliberately mechanical, not judgement-based — the old version ("non-trivial work", "more than a few seconds") proved to drift in practice: the AI would estimate "only 3 seconds" when it was actually 12, or forget to ack while in flow.
 
-## Dua tanggung jawab
+## Two responsibilities
 
-1. **Instant ack** — tanda kehidupan dalam ~1 detik dari pesan masuk.
-2. **Progress berkelanjutan** — untuk task > 15 detik, narasikan transisi antar tahap. Diam setelah ack hampir sama buruknya dengan tidak ack.
+1. **Instant ack** — a sign of life within ~1 second of the message arriving.
+2. **Continuous progress** — for tasks > 15 seconds, narrate the transitions between stages. Going silent after the ack is almost as bad as not acking at all.
 
-Skill lengkap ada di [`skills/immediate-reply/SKILL.md`](skills/immediate-reply/SKILL.md). Itu source of truth — di sana ada diagram alur, contoh phrasing ack per situasi (riset/baca file/mikir/nulis), dan anti-pattern list.
+The full skill lives in [`skills/immediate-reply/SKILL.md`](skills/immediate-reply/SKILL.md). That's the source of truth — it has the flow diagram, example ack phrasing per situation (research/file read/thinking/writing), and an anti-pattern list.
 
-## Strategi update
+## Update strategies
 
-Setelah ack terkirim, pilih SATU strategi per task (jangan ganti di tengah jalan):
+Once the ack is sent, pick ONE strategy per task (don't switch mid-way):
 
-- **A — Edit-to-final.** Cocok untuk task 5–15 detik. Ack → kerja → `edit_message` jadi jawaban final. Satu pesan bersih di chat.
-- **B — Multi-edit progress + final reply baru.** Cocok untuk task 15–60 detik dengan stage jelas. Ack di-edit beberapa kali sebagai progress ("✅ research done, lagi nyusun..."), jawaban final dikirim sebagai **reply baru** biar push notification HP bunyi.
-- **C — Progressive new messages.** Cocok untuk feel "thinking out loud". Ack pendek, lalu narasi proses dikirim sebagai pesan-pesan baru berturut-turut.
-- **D — Mix.** Mulai dengan edit, switch ke pesan baru kalau ternyata lebih lama dari perkiraan. Boleh, asal jawaban final selalu jadi pesan baru kalau total > ~15 detik.
+- **A — Edit-to-final.** Good for 5–15 second tasks. Ack → work → `edit_message` into the final answer. One clean message in the chat.
+- **B — Multi-edit progress + new final reply.** Good for 15–60 second tasks with clear stages. The ack gets edited a few times as progress ("✅ research done, lagi nyusun..."), and the final answer is sent as a **new reply** so the phone's push notification fires.
+- **C — Progressive new messages.** Good for a "thinking out loud" feel. A short ack, then the process narration sent as successive new messages.
+- **D — Mix.** Start with edits, switch to new messages if it turns out to take longer than expected. That's fine, as long as the final answer is always a new message when the total is > ~15 seconds.
 
-## Constraint Telegram yang wajib dipatuhi
+## Telegram constraints you must obey
 
-1. **Edit tidak memicu push notification.** Kalau task > ~15 detik, output final WAJIB pesan baru, bukan cuma edit — kalau tidak, HP user nggak bunyi dan dia kira Claude menghilang.
-2. **Jangan edit lebih cepat dari 1x per detik per chat.** Itu wilayah rate limit Telegram.
-3. **Edit tidak bisa ganti tipe pesan.** Ack teks tidak bisa di-edit jadi gambar — gambar harus pesan baru.
-4. **Satu ack per pesan user.** Kalau user kirim 3 pesan dalam 5 detik, ack pesan terakhirnya — jangan kirim 3 ack.
-5. **Skip ack hanya untuk respons murni teks tanpa tool.** Jalur "semua tidak" di pre-flight check — sapaan, fakta singkat dari ingatan — langsung jawab. Begitu ada satu Read/Bash/tool lain, ack wajib.
+1. **Edits don't trigger a push notification.** If a task takes > ~15 seconds, the final output MUST be a new message, not just an edit — otherwise the user's phone won't ping and they'll think Claude vanished.
+2. **Don't edit faster than 1x per second per chat.** That's Telegram rate limit territory.
+3. **Edits can't change the message type.** A text ack can't be edited into an image — an image has to be a new message.
+4. **One ack per user message.** If the user sends 3 messages within 5 seconds, ack the last one — don't send 3 acks.
+5. **Skip the ack only for pure-text responses with no tools.** The "all no" path of the pre-flight check — greetings, a quick fact from memory — answer directly. The moment there's a single Read/Bash/other tool, an ack is mandatory.
 
-## Pasangan plugin
+## Plugin pairing
 
-Plugin ini cuma masuk akal kalau channel Telegram aktif. Install bareng:
+This plugin only makes sense if a Telegram channel is active. Install it alongside:
 
-- **[`telegram`](../telegram/)** — wajib. Tanpa channel Telegram, skill ini tidak akan pernah ke-trigger.
-- **[`inline-buttons`](../inline-buttons/)** — pelengkap bagus. Saat akhirnya butuh tanya konfirmasi ke user, render pilihan sebagai tombol inline keyboard supaya user bisa jawab satu-tap.
+- **[`telegram`](../telegram/)** — required. Without a Telegram channel, this skill will never get triggered.
+- **[`inline-buttons`](../inline-buttons/)** — a nice complement. When you eventually need to ask the user for confirmation, render the options as inline keyboard buttons so the user can answer with a single tap.
 
-## Instalasi
+## Installation
 
-Marketplace setup sudah dibahas di [root README](../../README.md). Setelah marketplace `mirza-marketplace` ter-add, install dengan:
+Marketplace setup is covered in the [root README](../../README.md). Once the `mirza-marketplace` marketplace is added, install with:
 
 ```
 /plugin install immediate-reply@mirza-marketplace
 /reload-plugins
 ```
 
-Skill akan otomatis terload — tidak ada konfigurasi tambahan.
+The skill loads automatically — no extra configuration.
 
 ## Author
 

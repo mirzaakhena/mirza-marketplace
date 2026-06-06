@@ -1,64 +1,64 @@
 # handoff
 
-Toolkit untuk **session handoff** di Claude Code. Plugin ini menangkap sesi yang sedang berjalan ke dalam file markdown terstruktur, lalu memuatnya kembali di sesi baru sehingga konteks tidak hilang setiap kali Anda mulai dari nol. Skill-only — tidak ada MCP server, tidak ada hook, tidak ada channel.
+Toolkit for **session handoff** in Claude Code. This plugin captures a running session into a structured markdown file, then reloads it in a new session so context isn't lost every time you start from scratch. Skill-only — no MCP server, no hooks, no channel.
 
 ## Slash commands
 
-| Command | Fungsi |
+| Command | Function |
 |---|---|
-| `/handoff [catatan opsional]` | Simpan sesi sekarang ke file handoff baru di `<repo>/.handoff/`. Argumen bebas masuk verbatim ke Section 9. |
-| `/handoff-resume` | Di sesi baru: baca handoff terakhir, tampilkan ringkasan singkat, tunggu konfirmasi sebelum lanjut eksekusi. |
-| `/handoff-resume yes` | Pre-confirmed: ringkasan tetap ditampilkan (supaya bisa diinterupsi kalau ada yang aneh), tapi langsung lanjut eksekusi tanpa menunggu jawaban. |
+| `/handoff [optional note]` | Save the current session to a new handoff file in `<repo>/.handoff/`. Free-form arguments go verbatim into Section 9. |
+| `/handoff-resume` | In a new session: read the latest handoff, show a brief summary, wait for confirmation before continuing execution. |
+| `/handoff-resume yes` | Pre-confirmed: the summary is still shown (so you can interrupt if something looks off), but execution continues immediately without waiting for an answer. |
 
-Konfirmasi `/handoff-resume` sadar-Telegram: kalau skill `inline-buttons` tersedia di sesi, pertanyaan "lanjutkan handoff ini?" dirender sebagai tombol inline (`✅ Lanjutkan / ❌ Mulai segar / ✏️ Jelaskan manual`); kalau tidak, fallback ke konfirmasi teks biasa.
+`/handoff-resume` confirmation is Telegram-aware: if the `inline-buttons` skill is available in the session, the question "resume this handoff?" is rendered as inline buttons (`✅ Lanjutkan / ❌ Mulai segar / ✏️ Jelaskan manual`); otherwise it falls back to a plain text confirmation.
 
 ## Skills
 
-| Skill | Dipakai oleh | Tugas |
+| Skill | Used by | Task |
 |---|---|---|
-| `handoff` | `/handoff` | Jalankan clarity check, generate konten 10-section (chain + plan pointer + commit SHA), tulis file ke `.handoff/`. |
-| `handoff-resume` | `/handoff-resume` | Cari file terbaru di `.handoff/`, ikuti pointer plan-nya, ringkas, minta konfirmasi user dulu sebelum eksekusi. |
+| `handoff` | `/handoff` | Run the clarity check, generate the 10-section content (chain + plan pointer + commit SHA), write the file to `.handoff/`. |
+| `handoff-resume` | `/handoff-resume` | Find the latest file in `.handoff/`, follow its plan pointer, summarize, ask for user confirmation before executing. |
 
-## Lokasi file handoff
+## Handoff file location
 
 ```
 <repo-root>/.handoff/<yyyymmddhhmm>-prompt-<title>.md
 ```
 
-- **Repo root** = hasil `git rev-parse --show-toplevel`. Kalau bukan git repo, fallback ke `pwd` dengan warning.
-- **Timestamp** = local time, format `YYYYMMDDHHMM` (tanpa detik).
-- **Title** = kebab-case, ≤6 kata, diturunkan dari isi sesi (atau dari argumen `/handoff`).
-- Kalau filename bentrok dalam menit yang sama, append `-2`, `-3`, dst.
-- Lex-sort filename = chronological sort, jadi `/handoff-resume` cukup ambil entry terakhir.
+- **Repo root** = result of `git rev-parse --show-toplevel`. If it's not a git repo, fall back to `pwd` with a warning.
+- **Timestamp** = local time, format `YYYYMMDDHHMM` (no seconds).
+- **Title** = kebab-case, ≤6 words, derived from the session content (or from the `/handoff` argument).
+- If filenames collide within the same minute, append `-2`, `-3`, etc.
+- Lexical sort of filenames = chronological sort, so `/handoff-resume` just grabs the last entry.
 
-Isi file pakai **10-section template** dengan spine **Sudah → Sedang → Blocker → Akan**: Konteks Proyek, Yang Sudah Selesai, Yang Sedang Dikerjakan/Belum Selesai, Blocker, Next Session Plan, Brainstorming Choices, Artefak, Anti-Patterns, Catatan User, Hal Penting Lain. Header juga membawa dua pointer:
+The file content uses a **10-section template** with the spine **Sudah → Sedang → Blocker → Akan** (Done → In Progress → Blocker → Next): Konteks Proyek (Project Context), Yang Sudah Selesai (What's Done), Yang Sedang Dikerjakan/Belum Selesai (In Progress/Unfinished), Blocker, Next Session Plan, Brainstorming Choices, Artefak (Artifacts), Anti-Patterns, Catatan User (User Notes), Hal Penting Lain (Other Important Things). The header also carries two pointers:
 
-- **Lanjutan dari** — path handoff sebelumnya kalau sesi ini lanjutannya (chain append-only; tiap file immutable, tidak pernah di-edit ulang).
-- **Plan terkait** — path file plan multi-fase (mis. dari `superpowers:writing-plans`) + posisi `fase N/total`. Plan itu **source of truth** roadmap-nya; handoff cuma menunjuk posisi, tidak menduplikasi checklist. Progress lintas-session dibaca dari plan, bukan direkonstruksi dari rantai handoff.
+- **Lanjutan dari** (Continued from) — path of the previous handoff if this session is a continuation (append-only chain; each file is immutable, never re-edited).
+- **Plan terkait** (Related plan) — path of a multi-phase plan file (e.g. from `superpowers:writing-plans`) + position `phase N/total`. That plan is the **source of truth** for the roadmap; the handoff just points to a position, it doesn't duplicate the checklist. Cross-session progress is read from the plan, not reconstructed from the handoff chain.
 
-Artefak juga mencatat **HEAD SHA** (anchor), **commit range** sesi, dan SHA **per-fase** kalau plan multi-fase — supaya "apa yang dikerjakan" bisa diverifikasi via `git diff`, bukan cuma dari prosa. Detail lengkap ada di `skills/handoff/SKILL.md` — header fields + section structure adalah kontrak antar kedua skill, jangan diubah sebelah pihak.
+Artifacts also record the **HEAD SHA** (anchor), the session's **commit range**, and **per-phase** SHAs if the plan is multi-phase — so "what was done" can be verified via `git diff`, not just from prose. Full details are in `skills/handoff/SKILL.md` — the header fields + section structure are a contract between the two skills, don't change them unilaterally.
 
 ## Workflow
 
-1. **Akhir sesi:** jalankan `/handoff`. Opsional kasih catatan: `/handoff fokus ke bug login besok`.
-   - Kalau arah next-step belum jelas (misal sesi cuma eksplorasi, atau ditinggal mid-debug), skill **brainstorming dulu** — tidak akan langsung nulis file sampai user pilih arah eksplisit. Ini sengaja — handoff samar lebih buruk daripada tidak ada handoff.
-2. **Sesi baru di repo yang sama:** jalankan `/handoff-resume`.
-   - Skill load handoff terakhir, baca file plan yang ditautkan (kalau ada), tampilkan ringkasan (termasuk state "sedang" & blocker), lalu **tunggu konfirmasi** ("ya"/"lanjut") sebelum eksekusi Section 5. User boleh redirect ("ganti haluan, hari ini saya mau X") — handoff tetap jadi background context. Rantai `Lanjutan dari` hanya ditelusuri kalau konteksnya memang kurang — default cukup handoff terakhir + plan.
+1. **End of session:** run `/handoff`. Optionally add a note: `/handoff focus on the login bug tomorrow`.
+   - If the next-step direction isn't clear yet (e.g. the session was just exploration, or got left mid-debug), the skill **brainstorms first** — it won't write the file until the user picks an explicit direction. This is intentional — a vague handoff is worse than no handoff.
+2. **New session in the same repo:** run `/handoff-resume`.
+   - The skill loads the latest handoff, reads the linked plan file (if any), shows a summary (including the "in progress" state & blockers), then **waits for confirmation** ("yes"/"continue") before executing Section 5. The user can redirect ("change course, today I want X") — the handoff still serves as background context. The `Lanjutan dari` chain is only traversed if context is actually lacking — by default the latest handoff + plan is enough.
 
-## Catatan `.gitignore`
+## Note on `.gitignore`
 
-Plugin **tidak menyentuh** `.gitignore` Anda. Mau commit folder `.handoff/` atau ignore — itu keputusan Anda. Beberapa orang suka commit (journal yang bisa di-grep), sebagian lebih suka ignore (privacy / noise).
+The plugin **doesn't touch** your `.gitignore`. Whether you commit the `.handoff/` folder or ignore it — that's your call. Some people like to commit it (a greppable journal), others prefer to ignore it (privacy / noise).
 
 ## Install
 
-Lihat [root README](../../README.md#instalasi-di-claude-code) untuk langkah lengkap menambahkan marketplace ini. Setelah marketplace ter-add:
+See the [root README](../../README.md#installation-in-claude-code) for full steps to add this marketplace. Once the marketplace is added:
 
 ```
 /plugin install handoff@mirza-marketplace
 /reload-plugins
 ```
 
-Skill-only plugin, jadi tidak perlu MCP enable atau dev flag — langsung jalan begitu di-install.
+Skill-only plugin, so there's no need to enable MCP or set a dev flag — it just works as soon as it's installed.
 
 ## Author
 

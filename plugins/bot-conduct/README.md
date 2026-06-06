@@ -1,39 +1,39 @@
 # bot-conduct
 
-Plugin skill-only berisi **aturan kerja untuk agent bot** (bot-01, bot-02, ...) yang bekerja di mesin yang sama atas nama user. Tidak punya MCP server, tidak punya command — hanya satu skill: `bot-conduct`.
+A skill-only plugin containing **working rules for agent bots** (bot-01, bot-02, ...) that work on the same machine on behalf of the user. No MCP server, no commands — just one skill: `bot-conduct`.
 
-Identitas bot = basename project directory (mis. `C:\Users\Mirza\workspace\bot-06` → `bot-06`).
+Bot identity = the basename of the project directory (e.g. `C:\Users\Mirza\workspace\bot-06` → `bot-06`).
 
-## Aturan yang dikodekan
+## Rules encoded here
 
-| # | Aturan | Inti |
+| # | Rule | Gist |
 |---|---|---|
-| 1 | **Git worktree, bukan branch-switch** | Kerja yang butuh isolasi dilakukan di worktree (`EnterWorktree` / `git worktree add`), bukan ganti branch di working tree utama — bot lain atau user mungkin sedang memakai tree yang sama. |
-| 2 | **Commit ber-identitas** | Setiap commit memuat trailer `Agent: <bot-name>` (sebelum `Co-Authored-By:`), supaya user bisa melacak bot mana yang mengerjakan apa. `git config user.name` tidak diubah. |
-| 3 | **Subagent-first** | Kerja berat (search luas, refactor multi-file, test run, riset) didelegasikan ke subagent supaya main loop tetap responsif menjawab user. Heuristik: >~1 menit tool calls + user mungkin chat di tengah → subagent. |
-| 4 | **Playbook lintas-bot** | File bersama `~/.claude/agent-playbook/PLAYBOOK.md`: best practice teruji + kesalahan yang tidak boleh diulang + gotcha mesin. Dibaca di awal task substansial, di-update saat ada pelajaran durable. Format entry + template + aturan hygiene ada di SKILL.md. |
-| 5 | **Disiplin channel** | Jawab di channel tempat pertanyaan datang: pertanyaan Telegram → jawaban final WAJIB lewat tool `reply` (transcript bukan user!); pertanyaan di terminal CC → jawab di transcript. Menyilang hanya atas permintaan eksplisit. Self-check mekanis di akhir turn: "jawaban final saya sudah lewat reply tool?" |
-| 6 | **Rumah untuk rule baru** | Aturan kerja baru dari user ditambahkan sebagai rule bernomor di skill ini (lalu bump version), bukan tersebar di CLAUDE.md per-repo — kecuali memang spesifik satu repo. |
+| 1 | **Git worktree, not branch-switch** | Work that needs isolation is done in a worktree (`EnterWorktree` / `git worktree add`), not by switching branches in the main working tree — another bot or the user might be using that same tree. |
+| 2 | **Identity-stamped commits** | Every commit carries an `Agent: <bot-name>` trailer (before `Co-Authored-By:`), so the user can trace which bot did what. `git config user.name` is left untouched. |
+| 3 | **Subagent-first** | Heavy work (broad search, multi-file refactor, test runs, research) is delegated to a subagent so the main loop stays responsive to the user. Heuristic: >~1 minute of tool calls + the user might chat mid-task → subagent. |
+| 4 | **Cross-bot playbook** | The shared file `~/.claude/agent-playbook/PLAYBOOK.md`: proven best practices + mistakes that must not be repeated + machine gotchas. Read at the start of a substantial task, updated whenever there's a durable lesson. Entry format + template + hygiene rules live in SKILL.md. |
+| 5 | **Channel discipline** | Answer in the channel the question came from: a Telegram question → the final answer MUST go through the `reply` tool (the transcript isn't the user!); a question in the CC terminal → answer in the transcript. Cross over only on explicit request. Mechanical self-check at the end of the turn: "did my final answer go through the reply tool?" |
+| 6 | **A home for new rules** | A new working rule from the user gets added as a numbered rule in this skill (then bump the version), not scattered across per-repo CLAUDE.md files — unless it really is specific to one repo. |
 
-## Kenapa playbook?
+## Why a playbook?
 
-Kesinambungan. Bot datang dan pergi per-session; pelajaran tidak boleh ikut hilang. Apa yang dipelajari satu bot (praktik yang terbukti, kesalahan yang mahal, keanehan setup Windows) diwariskan ke bot berikutnya lewat satu file yang selalu dibaca sebelum kerja.
+Continuity. Bots come and go per session; the lessons must not vanish with them. What one bot learns (proven practices, costly mistakes, Windows setup quirks) is passed down to the next bot through one file that's always read before work begins.
 
-Yang TIDAK masuk playbook: trivia spesifik session, secrets, dan hal yang sudah tercatat di CLAUDE.md repo masing-masing.
+What does NOT go in the playbook: session-specific trivia, secrets, and things already recorded in each repo's CLAUDE.md.
 
-## Instalasi
+## Installation
 
-Tambahkan marketplace dulu (lihat [root README](../../README.md)), lalu:
+Add the marketplace first (see [root README](../../README.md)), then:
 
 ```
 /plugin install bot-conduct@mirza-marketplace
 /reload-plugins
 ```
 
-## Cocok dipasangkan dengan
+## Pairs well with
 
-- [`immediate-reply`](../immediate-reply/) — rule subagent-first bekerja paling baik dengan pola ack instan.
-- [`agent-bus`](../agent-bus/) — koordinasi antar bot yang sama-sama mematuhi conduct ini.
+- [`immediate-reply`](../immediate-reply/) — the subagent-first rule works best alongside the instant-ack pattern.
+- [`agent-bus`](../agent-bus/) — coordination between bots that all abide by this conduct.
 
 ## Author
 

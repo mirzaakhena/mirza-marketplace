@@ -1,66 +1,66 @@
 # Mirza Marketplace
 
-Marketplace plugin pribadi untuk **Claude Code**, milik [@mirzaakhena](https://github.com/mirzaakhena).
+Personal plugin marketplace for **Claude Code**, owned by [@mirzaakhena](https://github.com/mirzaakhena).
 
-Isinya satu fork dari plugin resmi [`claude-plugins-official`](https://github.com/anthropics/claude-plugins-official) yang dimodifikasi berat (telegram), plus tujuh plugin orisinal yang ditulis dari nol. Plugin-plugin ini dirancang sebagai satu ekosistem: bot Telegram sebagai antarmuka utama, wrapper PTY sebagai tangan yang mengendalikan Claude Code, dan sekumpulan behavioral skill yang mengatur cara AI berkomunikasi.
+It contains one fork of the official [`claude-plugins-official`](https://github.com/anthropics/claude-plugins-official) plugin that has been heavily modified (telegram), plus seven original plugins written from scratch. These plugins are designed as a single ecosystem: a Telegram bot as the primary interface, a PTY wrapper as the hand that controls Claude Code, and a set of behavioral skills that govern how the AI communicates.
 
-## Daftar Plugin
+## Plugin List
 
-Katalog resmi ada di [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json). Tiap plugin punya README sendiri dengan detail lengkap.
+The official catalog lives in [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json). Each plugin has its own README with full details.
 
-### Infrastruktur (MCP server)
+### Infrastructure (MCP server)
 
-| Plugin | Versi | Apa itu |
+| Plugin | Version | What it is |
 |---|---|---|
-| [`telegram`](plugins/telegram/) | 0.0.28-mirza.0 | **Bridge Telegram ↔ Claude Code** (fork upstream, dimodifikasi berat). State per-project, 5 MCP tools (`reply` + buttons, `react`, `edit_message`, `download_attachment`, `get_message_by_id`), bot commands registry-driven (`/context`, `/version`, `/new`, `/switch`, `/delete` soft/hard/all, `/rename`, `/effort`, `/help`, `/start`), album batching, quoted-message context, conversation logging ke SQLite, permission relay, system-outbox untuk sibling plugin. |
-| [`pty-controller`](plugins/pty-controller/) | 0.0.23 | **Claude Code mengontrol dirinya sendiri.** Wrapper `mirza-cc` menjalankan CC di dalam node-pty; plugin menulis request ke inbox filesystem, wrapper menyuntikkan keystroke (`/clear`, `/resume`, prompt text dari agent-bus). MCP tools: `pty_send_slash`, `pty_status`, `pty_list_agents`. Wrapper juga mendaftarkan bot ke agent registry global. |
-| [`agent-bus`](plugins/agent-bus/) | 0.0.6 | **Komunikasi bot-to-bot** antar instance Claude Code di mesin yang sama. MCP tools: `agent_list`, `agent_status`, `agent_send` (prompt natural-language atau slash command, bisa broadcast). One-way dengan anti-bounce rule + hop limit. Bergantung pada pty-controller. |
+| [`telegram`](plugins/telegram/) | 0.0.28-mirza.0 | **Telegram ↔ Claude Code bridge** (upstream fork, heavily modified). Per-project state, 5 MCP tools (`reply` + buttons, `react`, `edit_message`, `download_attachment`, `get_message_by_id`), registry-driven bot commands (`/context`, `/version`, `/new`, `/switch`, `/delete` soft/hard/all, `/rename`, `/effort`, `/help`, `/start`), album batching, quoted-message context, conversation logging to SQLite, permission relay, system-outbox for sibling plugins. |
+| [`pty-controller`](plugins/pty-controller/) | 0.0.23 | **Claude Code controls itself.** The `mirza-cc` wrapper runs CC inside node-pty; the plugin writes requests to a filesystem inbox, the wrapper injects keystrokes (`/clear`, `/resume`, prompt text from agent-bus). MCP tools: `pty_send_slash`, `pty_status`, `pty_list_agents`. The wrapper also registers the bot in the global agent registry. |
+| [`agent-bus`](plugins/agent-bus/) | 0.0.6 | **Bot-to-bot communication** between Claude Code instances on the same machine. MCP tools: `agent_list`, `agent_status`, `agent_send` (natural-language prompt or slash command, can broadcast). One-way with an anti-bounce rule + hop limit. Depends on pty-controller. |
 
-### Behavioral skills (tanpa MCP server)
+### Behavioral skills (no MCP server)
 
-| Plugin | Versi | Apa itu |
+| Plugin | Version | What it is |
 |---|---|---|
-| [`immediate-reply`](plugins/immediate-reply/) | 0.0.5 | Ack instan (~1 detik) sebelum tool call pertama di setiap inbound Telegram — pre-flight check mekanis 4 pertanyaan, plus narasi progress untuk task panjang. |
-| [`inline-buttons`](plugins/inline-buttons/) | 0.0.6 | Self-audit setiap reply Telegram: PERTANYAAN atau JAWABAN? Pertanyaan WAJIB pakai inline-keyboard buttons — minimum Ya/Tidak + tombol escape `✏️ Jelaskan manual`, label pendek (opsi dinarasikan bernomor di body, tombol cukup angkanya). Butuh telegram ≥ 0.0.9-mirza.0. |
-| [`teach-me`](plugins/teach-me/) | 0.0.1 | Mode mengajar: bangun mental model selangkah demi selangkah saat user ingin memahami konsep — 10 elemen gaya + daftar anti-pattern. |
-| [`handoff`](plugins/handoff/) | 0.0.8 | `/handoff` menangkap sesi ke file markdown 10-section di `<repo>/.handoff/` (dengan clarity check + brainstorm); `/handoff-resume [yes]` memuatnya kembali di sesi baru dengan human gate. |
-| [`daily-report`](plugins/daily-report/) | 0.0.3 | `/daily-report` menyusun laporan kerja harian plain-text siap-paste ke chat app mana pun dari aktivitas git, dengan template terkunci Yesterday/Today dan aturan anti-fabrication. |
-| [`bot-conduct`](plugins/bot-conduct/) | 0.0.2 | Aturan kerja agent bot: git worktree (bukan branch-switch), commit ber-trailer `Agent: <bot-name>`, subagent-first supaya main loop tetap responsif, disiplin channel (jawab di channel asal pertanyaan), dan playbook lintas-bot di `~/.claude/agent-playbook/PLAYBOOK.md`. |
+| [`immediate-reply`](plugins/immediate-reply/) | 0.0.5 | Instant ack (~1 second) before the first tool call on every Telegram inbound — a mechanical 4-question pre-flight check, plus progress narration for long tasks. |
+| [`inline-buttons`](plugins/inline-buttons/) | 0.0.6 | Self-audit on every Telegram reply: QUESTION or ANSWER? A question MUST use inline-keyboard buttons — minimum Yes/No + an escape button `✏️ Jelaskan manual`, short labels (options narrated as a numbered list in the body, buttons just hold the numbers). Requires telegram ≥ 0.0.9-mirza.0. |
+| [`teach-me`](plugins/teach-me/) | 0.0.1 | Teaching mode: build a mental model step by step when the user wants to understand a concept — 10 style elements + an anti-pattern list. |
+| [`handoff`](plugins/handoff/) | 0.0.8 | `/handoff` captures the session into a 10-section markdown file in `<repo>/.handoff/` (with a clarity check + brainstorm); `/handoff-resume [yes]` reloads it in a new session with a human gate. |
+| [`daily-report`](plugins/daily-report/) | 0.0.3 | `/daily-report` assembles a paste-ready plain-text daily work report for any chat app from git activity, with a locked Yesterday/Today template and anti-fabrication rules. |
+| [`bot-conduct`](plugins/bot-conduct/) | 0.0.2 | Working rules for agent bots: git worktree (not branch-switching), commits with an `Agent: <bot-name>` trailer, subagent-first so the main loop stays responsive, channel discipline (answer in the channel the question came from), and a cross-bot playbook at `~/.claude/agent-playbook/PLAYBOOK.md`. |
 
-### Bagaimana semuanya saling terkait
+### How it all fits together
 
 ```
-Telegram (HP user)
+Telegram (user's phone)
    │  DM / commands / button taps
    ▼
 [telegram plugin] ──── meta-commands (/new, /switch, /effort, ...) ───┐
-   │  <channel> notification                                          │ tulis inbox
+   │  <channel> notification                                          │ write inbox
    ▼                                                                  ▼
 [ Claude Code session ] ◄── inject keystrokes ── [ mirza-cc wrapper (pty-controller) ]
    │                                                       ▲
-   │  agent_send (prompt/slash)                            │ inbox peer
-   └──────────────► [agent-bus] ───────────────────────────┘  → bot lain di mesin yang sama
+   │  agent_send (prompt/slash)                            │ peer inbox
+   └──────────────► [agent-bus] ───────────────────────────┘  → other bots on the same machine
 
-immediate-reply / inline-buttons / teach-me  → mengatur GAYA respons AI di Telegram
-handoff / daily-report                            → ritual akhir-sesi & akhir-hari
-bot-conduct                                       → aturan KERJA agent bot (worktree, commit identity, subagent, playbook)
+immediate-reply / inline-buttons / teach-me  → govern the AI's response STYLE on Telegram
+handoff / daily-report                            → end-of-session & end-of-day rituals
+bot-conduct                                       → WORKING rules for agent bots (worktree, commit identity, subagent, playbook)
 ```
 
 ---
 
-## Instalasi di Claude Code
+## Installation in Claude Code
 
-### Langkah 1 — Tambahkan marketplace ini
+### Step 1 — Add this marketplace
 
-Dari sesi Claude Code apa pun, jalankan:
+From any Claude Code session, run:
 
 ```
 /plugin marketplace add mirzaakhena/mirza-marketplace
 ```
 
-Verifikasi dengan `/plugin marketplace list` — `mirza-marketplace` harus muncul.
+Verify with `/plugin marketplace list` — `mirza-marketplace` should appear.
 
-### Langkah 2 — Install plugin yang Anda butuhkan
+### Step 2 — Install the plugins you need
 
 ```
 /plugin install telegram@mirza-marketplace
@@ -70,98 +70,98 @@ Verifikasi dengan `/plugin marketplace list` — `mirza-marketplace` harus muncu
 /reload-plugins
 ```
 
-Saat ditanya scope, pilih **`user`** — satu install global, state tetap per-folder otomatis. Sintaks `@mirza-marketplace` penting kalau Anda juga punya plugin official dengan nama sama.
+When asked for scope, pick **`user`** — one global install, with state staying per-folder automatically. The `@mirza-marketplace` syntax matters if you also have an official plugin with the same name.
 
-Behavioral skill plugins (immediate-reply, inline-buttons, teach-me, handoff, daily-report, bot-conduct) langsung jalan setelah install — tidak ada konfigurasi. **Catatan:** skill yang baru di-enable belum terdaftar di sesi yang sedang berjalan — restart sesi dulu (lihat `docs/2026-06-06-issue-skill-not-loaded-on-new-session.md`).
+The behavioral skill plugins (immediate-reply, inline-buttons, teach-me, handoff, daily-report, bot-conduct) work right after install — no configuration. **Note:** a newly enabled skill is not yet registered in the currently running session — restart the session first (see `docs/2026-06-06-issue-skill-not-loaded-on-new-session.md`).
 
-### Langkah 3 (khusus channel plugin telegram) — Token & dev flag
+### Step 3 (telegram channel plugin only) — Token & dev flag
 
-Plugin `telegram` adalah **channel plugin**, butuh langkah ekstra:
+The `telegram` plugin is a **channel plugin**, so it needs extra steps:
 
-**A. Konfigurasi token bot.** Buat bot via [@BotFather](https://t.me/BotFather) (`/newbot`), salin token, buka CC session di folder project target, lalu:
+**A. Configure the bot token.** Create a bot via [@BotFather](https://t.me/BotFather) (`/newbot`), copy the token, open a CC session in the target project folder, then:
 
 ```
 /telegram:configure 123456789:AAH...
 ```
 
-Token disimpan di `<project>/.claude/channels/telegram/.env` (chmod 600, otomatis ter-`.gitignore`). Satu token per project — project lain butuh bot berbeda.
+The token is stored in `<project>/.claude/channels/telegram/.env` (chmod 600, automatically `.gitignore`d). One token per project — other projects need a different bot.
 
-**B. Restart dengan dev flag.** Plugin marketplace pribadi tidak ada di allowlist Anthropic (channels masih research preview):
+**B. Restart with the dev flag.** A personal marketplace plugin isn't on Anthropic's allowlist (channels are still a research preview):
 
 ```bash
 claude --dangerously-load-development-channels plugin:telegram@mirza-marketplace
 ```
 
-Atau — kalau pty-controller terpasang — jalankan lewat wrapper, yang sudah memakai flag itu by default:
+Or — if pty-controller is installed — run it through the wrapper, which already uses that flag by default:
 
 ```bash
 cd plugins/pty-controller/wrapper && npm run wrapper
 ```
 
-**C. Enable MCP server.** Channel plugin MCP-nya disabled by default per session. Jalankan `/mcp`, toggle `telegram` on.
+**C. Enable the MCP server.** A channel plugin's MCP is disabled by default per session. Run `/mcp`, toggle `telegram` on.
 
-**D. Pair akun Anda.** DM bot di Telegram → dapat kode 6 karakter. Di CC:
+**D. Pair your account.** DM the bot on Telegram → you get a 6-character code. In CC:
 
 ```
 /telegram:access pair <code>
 /telegram:access policy allowlist
 ```
 
-Setelah paired, coba kirim `/context` di Telegram — bot harus membalas info context window + session.
+Once paired, try sending `/context` on Telegram — the bot should reply with context window + session info.
 
-> Catatan: satu bot token hanya boleh punya satu poller. Dua project dengan token sama → `409 Conflict`.
+> Note: one bot token may only have one poller. Two projects with the same token → `409 Conflict`.
 
-### Langkah 4 (opsional) — Wrapper untuk session control & bot-to-bot
+### Step 4 (optional) — Wrapper for session control & bot-to-bot
 
-Command Telegram `/new`, `/switch`, `/delete`, `/rename`, `/effort` dan seluruh plugin agent-bus butuh wrapper `mirza-cc` berjalan. Lihat [README pty-controller](plugins/pty-controller/README.md) untuk setup-nya.
+The Telegram commands `/new`, `/switch`, `/delete`, `/rename`, `/effort` and the entire agent-bus plugin require the `mirza-cc` wrapper to be running. See the [pty-controller README](plugins/pty-controller/README.md) for its setup.
 
 ---
 
-## Mengembangkan / Memodifikasi
+## Developing / Modifying
 
-Workflow standar:
+Standard workflow:
 
 ```bash
 git clone https://github.com/mirzaakhena/mirza-marketplace.git
 cd mirza-marketplace
 ```
 
-1. **Edit kode plugin** di `plugins/<name>/`.
-2. **Bump version** di `plugins/<name>/.claude-plugin/plugin.json` (konvensi: `<semver>-mirza.<N>` untuk fork, semver biasa untuk plugin orisinal).
+1. **Edit the plugin code** in `plugins/<name>/`.
+2. **Bump the version** in `plugins/<name>/.claude-plugin/plugin.json` (convention: `<semver>-mirza.<N>` for forks, plain semver for original plugins).
 
-   > ⚠️ **`package.json` does NOT count.** Cache marketplace Claude Code me-resolve versi dari `.claude-plugin/plugin.json` saja. Bump `package.json` doang = cache tetap serve kode lama dan `/reload-plugins` jadi no-op. Lihat `CLAUDE.md` untuk prosedur lengkap.
-3. **Update README** — plugin yang berubah wajib disertai update `plugins/<name>/README.md` + root README ini (aturan di `CLAUDE.md`).
-4. **Validasi** manifest:
+   > ⚠️ **`package.json` does NOT count.** Claude Code's marketplace cache resolves the version from `.claude-plugin/plugin.json` only. Bumping `package.json` alone = the cache keeps serving old code and `/reload-plugins` becomes a no-op. See `CLAUDE.md` for the full procedure.
+3. **Update the README** — a plugin that changes must come with an update to `plugins/<name>/README.md` + this root README (rules in `CLAUDE.md`).
+4. **Validate** the manifest:
    ```bash
    claude plugin validate .
    claude plugin validate plugins/<name>
    ```
-5. **Test** — plugin ber-MCP-server pakai Bun: `bun test` dari dalam folder plugin.
-6. **Test lokal** sebelum push:
+5. **Test** — plugins with an MCP server use Bun: `bun test` from inside the plugin folder.
+6. **Test locally** before pushing:
    ```bash
    claude plugin marketplace add /absolute/path/to/mirza-marketplace
    claude --dangerously-load-development-channels plugin:telegram@mirza-marketplace
    ```
-7. **Commit & push** ke `main`.
-8. **Update di sisi pengguna:** `/plugin marketplace update mirza-marketplace` lalu `/plugin update <name>` (atau `/reload-plugins`).
+7. **Commit & push** to `main`.
+8. **Update on the user's side:** `/plugin marketplace update mirza-marketplace` then `/plugin update <name>` (or `/reload-plugins`).
 
-Spec & plan desain di-commit bersama kode: repo-level di `docs/superpowers/{specs,plans}/`, per-plugin di `plugins/<name>/docs/`.
+Design specs & plans are committed alongside the code: repo-level in `docs/superpowers/{specs,plans}/`, per-plugin in `plugins/<name>/docs/`.
 
-### Sinkronisasi dengan upstream (telegram)
+### Syncing with upstream (telegram)
 
-Repo `claude-plugins-official` di-update Anthropic berkala. Untuk merge perubahan upstream ke fork telegram:
+The `claude-plugins-official` repo is updated by Anthropic periodically. To merge upstream changes into the telegram fork:
 
-1. Bandingkan `plugins/telegram/` dengan `external_plugins/telegram/` upstream (clone fresh atau git diff).
-2. Cherry-pick yang relevan — hati-hati: fork ini sudah menyimpang jauh (state per-project, meta-commands, messages.db, system-outbox, buttons, dll). Lihat daftar perubahan di [README plugin telegram](plugins/telegram/README.md).
-3. Bump version, commit, push.
+1. Compare `plugins/telegram/` against the upstream `external_plugins/telegram/` (fresh clone or git diff).
+2. Cherry-pick what's relevant — be careful: this fork has diverged significantly (per-project state, meta-commands, messages.db, system-outbox, buttons, etc.). See the list of changes in the [telegram plugin README](plugins/telegram/README.md).
+3. Bump the version, commit, push.
 
 ---
 
-## Lisensi
+## License
 
-- `telegram` mempertahankan **Apache-2.0** dari upstream (lihat `plugins/telegram/LICENSE`).
-- `pty-controller` dirilis di bawah **MIT** (lihat `plugins/pty-controller/LICENSE`).
-- Plugin lain belum mencantumkan file lisensi eksplisit.
+- `telegram` retains **Apache-2.0** from upstream (see `plugins/telegram/LICENSE`).
+- `pty-controller` is released under **MIT** (see `plugins/pty-controller/LICENSE`).
+- The other plugins do not yet include an explicit license file.
 
 ## Author
 

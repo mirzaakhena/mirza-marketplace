@@ -1,10 +1,10 @@
 # pty-controller — Claude Code plugin
 
-Plugin orisinal (bukan fork) yang memungkinkan **Claude Code mengirim slash command ke sesinya sendiri** dengan cara melewatkan request lewat parent process bernama `mirza-cc`. Wrapper itu menjalankan `claude` di dalam `node-pty` pseudo-terminal, lalu menulis keystrokes ke stdin CC — jadi command seperti `/clear`, `/compact`, `/resume <id>` benar-benar dieksekusi di level PTY, bukan di-fake oleh AI state.
+An original plugin (not a fork) that lets **Claude Code send slash commands to its own session** by routing the request through a parent process called `mirza-cc`. That wrapper runs `claude` inside a `node-pty` pseudo-terminal, then writes keystrokes to CC's stdin — so commands like `/clear`, `/compact`, `/resume <id>` actually get executed at the PTY level, not faked by AI state.
 
-Kenapa perlu? AI di dalam CC tidak bisa "memerintahkan dirinya sendiri" untuk clear context — itu state internal CC, dan satu-satunya cara legit untuk men-trigger-nya adalah keystroke dari TTY. Dengan plugin + wrapper ini, AI tinggal panggil satu MCP tool dan wrapper yang melakukan injeksinya.
+Why is this needed? The AI inside CC can't "command itself" to clear context — that's CC's internal state, and the only legit way to trigger it is a keystroke from the TTY. With this plugin + wrapper, the AI just calls one MCP tool and the wrapper does the injection.
 
-## Arsitektur singkat
+## Architecture at a glance
 
 ```
 [ user terminal ]
@@ -23,163 +23,163 @@ Kenapa perlu? AI di dalam CC tidak bisa "memerintahkan dirinya sendiri" untuk cl
                        <state>/wrapper.heartbeat
 ```
 
-Plugin alone tidak berguna — dia cuma menulis file JSON ke direktori inbox. Wrapper-lah yang baca file itu dan inject keystrokes ke PTY. Kalau wrapper tidak jalan, MCP tool `pty_send_slash` return error eksplisit ("wrapper not detected") dan slash command jadi no-op.
+The plugin alone is useless — all it does is write JSON files to an inbox directory. It's the wrapper that reads those files and injects keystrokes into the PTY. If the wrapper isn't running, the MCP tool `pty_send_slash` returns an explicit error ("wrapper not detected") and the slash command becomes a no-op.
 
-## Instalasi plugin
+## Plugin installation
 
-Lihat [README marketplace](../../README.md#instalasi-di-claude-code) untuk langkah `/plugin install`. Pilih scope **user** saat ditanya, sama seperti plugin lain.
+See the [marketplace README](../../README.md#installation-in-claude-code) for the `/plugin install` steps. Pick the **user** scope when asked, same as the other plugins.
 
-Plugin sendiri tidak butuh konfigurasi — manifest di `.claude-plugin/plugin.json` mendeklarasikan MCP server `pty-controller` dengan command `bun server.ts` (lewat script `start` di `package.json`).
+The plugin itself needs no configuration — the manifest in `.claude-plugin/plugin.json` declares the MCP server `pty-controller` with the command `bun server.ts` (via the `start` script in `package.json`).
 
-## Instalasi wrapper (`mirza-cc`)
+## Wrapper installation (`mirza-cc`)
 
-Source wrapper ada di [`wrapper/`](./wrapper) di folder plugin yang sama. Wrapper bukan sesuatu yang di-install ke Claude Code — dia adalah binary terpisah yang Anda jalankan dari terminal, dan dia yang akan men-spawn `claude` untuk Anda.
+The wrapper source lives in [`wrapper/`](./wrapper) inside the same plugin folder. The wrapper isn't something you install into Claude Code — it's a separate binary you run from your terminal, and it's the one that spawns `claude` for you.
 
 ```bash
 cd plugins/pty-controller/wrapper
 npm install
 ```
 
-`npm install` akan menarik prebuilt native binary `node-pty` untuk platform Anda. Untuk platform tidak umum (Alpine, ARM Windows) mungkin compile from source — install build tools dulu.
+`npm install` pulls down the prebuilt native `node-pty` binary for your platform. For uncommon platforms (Alpine, ARM Windows) it may compile from source — install the build tools first.
 
-Prereq:
+Prereqs:
 
-- Node.js 20+ (dibutuhkan oleh prebuild `node-pty`).
-- `claude` ada di `PATH`. Verifikasi: `claude --version`.
-- Windows: ConPTY sudah bundled di Windows 10 1809+, tidak perlu install apa-apa.
+- Node.js 20+ (required by the `node-pty` prebuild).
+- `claude` on `PATH`. Verify with: `claude --version`.
+- Windows: ConPTY is already bundled in Windows 10 1809+, nothing to install.
 
-Tidak ada step "install ke `PATH`". Anda jalankan langsung dari folder wrapper via `npm run wrapper`.
+There's no "install into `PATH`" step. You run it directly from the wrapper folder via `npm run wrapper`.
 
-## Menjalankan CC lewat wrapper
+## Running CC through the wrapper
 
 ```bash
 cd plugins/pty-controller/wrapper
 npm run wrapper
 ```
 
-Yang berbeda vs. `claude` polos:
+What's different vs. plain `claude`:
 
-1. **Wrapper menentukan dirinya yang menjalankan `claude`**, bukan Anda. Default args yang di-pass:
+1. **The wrapper decides how it runs `claude`**, not you. The default args it passes:
    ```
    --dangerously-skip-permissions
    --dangerously-load-development-channels plugin:telegram@mirza-marketplace
    ```
-   Override dengan env `CLAUDE_ARGS` (kosongkan untuk vanilla, atau pass string custom). Binary CC bisa di-override dengan `CLAUDE_BIN`.
+   Override with the `CLAUDE_ARGS` env (empty it for vanilla, or pass a custom string). The CC binary can be overridden with `CLAUDE_BIN`.
 
-2. **Auto-resume**. Saat start, wrapper memeriksa `~/.claude/projects/<encoded-cwd>/` dan kalau ada session `.jsonl` di sana, dia spawn `claude --resume <latest-session-id>` (mtime terbaru menang). Kalau folder kosong → spawn fresh.
+2. **Auto-resume**. At startup the wrapper checks `~/.claude/projects/<encoded-cwd>/`, and if there's a session `.jsonl` in there, it spawns `claude --resume <latest-session-id>` (newest mtime wins). If the folder is empty → spawn fresh.
 
-3. **Per-project state**. Wrapper bikin `<CLAUDE_PROJECT_DIR>/.claude/channels/pty-controller/` (atau `cwd` kalau env tidak ada) berisi:
-   - `pending/` — inbox yang plugin tulis.
-   - `wrapper.heartbeat` — di-touch tiap 5 detik, dipakai plugin untuk cek "alive".
+3. **Per-project state**. The wrapper creates `<CLAUDE_PROJECT_DIR>/.claude/channels/pty-controller/` (or `cwd` if the env isn't set) containing:
+   - `pending/` — the inbox the plugin writes to.
+   - `wrapper.heartbeat` — touched every 5 seconds, used by the plugin to check "alive".
    - `wrapper.log` — best-effort log file.
-   - `wrapper.current_session_id` — id session yang lagi live di PTY (dipakai plugin telegram untuk exclude session aktif dari picker `/delete`).
+   - `wrapper.current_session_id` — the id of the session currently live in the PTY (used by the telegram plugin to exclude the active session from the `/delete` picker).
 
-4. **Raw mode stdin**. Wrapper menaruh terminal host di raw mode supaya keypress langsung diteruskan. Kalau wrapper crash mid-run, terminal Anda bisa stuck di raw mode — recover dengan `reset` (Unix) atau tutup-buka window.
+4. **Raw mode stdin**. The wrapper puts the host terminal into raw mode so keypresses get forwarded straight through. If the wrapper crashes mid-run, your terminal can get stuck in raw mode — recover with `reset` (Unix) or close-and-reopen the window.
 
-5. **Signal handling**. `SIGINT` (Ctrl+C) di terminal wrapper di-forward ke PTY supaya membatalkan operasi AI yang sedang jalan, bukan kill wrapper. `SIGTERM` kill PTY.
+5. **Signal handling**. `SIGINT` (Ctrl+C) in the wrapper terminal is forwarded to the PTY so it cancels the running AI operation, rather than killing the wrapper. `SIGTERM` kills the PTY.
 
-6. **Side effects untuk plugin `telegram`**. Wrapper menulis ke `<project>/.claude/channels/telegram/system-outbox/` event `session-change` setiap kali session berganti (initial spawn, post-`/clear`, post-`/resume`). Juga menulis label "main session" ke `<telegram-state>/session-names.json` saat first-run, kalau label itu belum dipakai. Coupling ini sengaja — wrapper dan plugin telegram dimaintain oleh maintainer yang sama.
+6. **Side effects for the `telegram` plugin**. The wrapper writes a `session-change` event to `<project>/.claude/channels/telegram/system-outbox/` every time the session changes (initial spawn, post-`/clear`, post-`/resume`). It also writes a "main session" label to `<telegram-state>/session-names.json` on first run, if that label isn't already taken. This coupling is intentional — the wrapper and the telegram plugin are maintained by the same maintainer.
 
-7. **Registrasi ke agent registry global.** Saat boot, wrapper mendaftarkan dirinya (nama = basename project dir) ke `~/.claude/agent-registry.json` — heartbeat tiap 5 detik, unregister saat shutdown. Registry ini yang dibaca `pty_list_agents` dan plugin `agent-bus` untuk komunikasi bot-to-bot. Write diserialisasi file-lock + atomic rename (dengan retry untuk race EPERM/EBUSY khas antivirus Windows).
+7. **Registration into the global agent registry.** At boot, the wrapper registers itself (name = basename of the project dir) into `~/.claude/agent-registry.json` — heartbeat every 5 seconds, unregister on shutdown. This registry is what `pty_list_agents` and the `agent-bus` plugin read for bot-to-bot communication. Writes are serialized with a file-lock + atomic rename (with retries for the EPERM/EBUSY races typical of Windows antivirus).
 
-Quit dengan `/exit` di dalam Claude atau Ctrl+C di terminal wrapper.
+Quit with `/exit` inside Claude or Ctrl+C in the wrapper terminal.
 
 ## MCP tools
 
-Server di [`server.ts`](./server.ts) expose tiga tool. Dipanggil via stdio MCP transport.
+The server in [`server.ts`](./server.ts) exposes three tools. Called over the stdio MCP transport.
 
 ### `pty_send_slash({ command, target? })`
 
-Queue sebuah slash command supaya wrapper inject ke PTY. Bisa target diri sendiri (default) atau satu/lebih agent peer.
+Queue a slash command for the wrapper to inject into the PTY. Can target itself (default) or one/more peer agents.
 
 - **Input**:
-  - `command: string` — mulai dengan `/`. Harus match regex `/^\/[a-z][a-z0-9_:-]{0,63}(\s[\s\S]{0,256})?$/`. Mendukung command bare (`/clear`) dan namespaced plugin command (`/telegram:notify-user brief`). Tool **menolak raw text injection** by design — kalau bukan slash command structurally valid, error.
-  - `target?: string | string[]` — opsional. Tanpa = target self (current CC session), aman dipanggil autonomously. Satu nama = peer single, harus user explicit asked. Array = broadcast ke beberapa peer; **destructive command (`/clear`, `/delete`) ditolak** untuk array target sebagai blast-radius guard.
+  - `command: string` — starts with `/`. Must match the regex `/^\/[a-z][a-z0-9_:-]{0,63}(\s[\s\S]{0,256})?$/`. Supports bare commands (`/clear`) and namespaced plugin commands (`/telegram:notify-user brief`). The tool **rejects raw text injection** by design — if it's not a structurally valid slash command, it errors.
+  - `target?: string | string[]` — optional. Omitted = target self (current CC session), safe to call autonomously. A single name = a single peer, requires the user to explicitly ask. An array = broadcast to several peers; **destructive commands (`/clear`, `/delete`) are rejected** for array targets as a blast-radius guard.
 - **Behavior**:
-  - **Self path**: cek heartbeat wrapper lokal → tulis ke `<state>/pending/<uuid>.json` atomic (tmp + rename).
-  - **Peer path**: resolve tiap nama di `~/.claude/agent-registry.json`, validasi alive (heartbeat <30s), lalu writeCommand per peer state_dir. Validasi semua nama dulu sebelum tulis satu file pun — kalau ada nama unknown atau offline, fail upfront (tidak partial dispatch).
-- **Return**: text dengan `id`, `path`, dan agent name (untuk peer path). Multi-target: hasil per-peer dipisah dengan separator.
-- **Use case self**: `/clear`, `/compact`, `/notify-user` di sesi sendiri.
-- **Use case peer**: `target: "bot-03"` untuk satu peer, atau `target: ["bot-02", "bot-03"]` untuk broadcast. Panggil `pty_list_agents` dulu untuk discover nama valid.
+  - **Self path**: check the local wrapper heartbeat → write to `<state>/pending/<uuid>.json` atomically (tmp + rename).
+  - **Peer path**: resolve each name in `~/.claude/agent-registry.json`, validate alive (heartbeat <30s), then writeCommand per peer state_dir. Validate all names first before writing a single file — if any name is unknown or offline, fail upfront (no partial dispatch).
+- **Return**: text with `id`, `path`, and the agent name (for the peer path). Multi-target: per-peer results separated by a separator.
+- **Self use case**: `/clear`, `/compact`, `/notify-user` in your own session.
+- **Peer use case**: `target: "bot-03"` for a single peer, or `target: ["bot-02", "bot-03"]` for a broadcast. Call `pty_list_agents` first to discover valid names.
 
 ### `pty_status()`
 
-Probe apakah wrapper lagi running.
+Probe whether the wrapper is running.
 
 - **Input**: none.
-- **Behavior**: cek `<state>/wrapper.heartbeat`. Kalau ada DAN timestamp di dalamnya < 30 detik dari sekarang → `wrapper_alive: true`. Selain itu → false.
+- **Behavior**: check `<state>/wrapper.heartbeat`. If it exists AND its timestamp is < 30 seconds from now → `wrapper_alive: true`. Otherwise → false.
 - **Return**: JSON `{ wrapper_alive: boolean, state_dir: string }`.
 
 ### `pty_list_agents({ only_alive?: boolean })`
 
-List semua peer agent (Claude Code session lain) yang terdaftar di shared agent registry `~/.claude/agent-registry.json`. Registry itu di-tulis oleh setiap wrapper `mirza-cc` saat startup + heartbeat tick.
+List all peer agents (other Claude Code sessions) registered in the shared agent registry `~/.claude/agent-registry.json`. That registry is written by every `mirza-cc` wrapper at startup + on each heartbeat tick.
 
-- **Input**: opsional `only_alive: boolean` — kalau `true`, filter entri yang heartbeat-nya stale (>30 detik).
-- **Behavior**: baca registry file (atau pakai `AGENT_REGISTRY_PATH` env var), proyeksikan tiap entri jadi `{name, project_dir, state_dir, last_heartbeat, last_heartbeat_age_s, alive, wrapper_pid}`.
+- **Input**: optional `only_alive: boolean` — if `true`, filters out entries whose heartbeat is stale (>30 seconds).
+- **Behavior**: read the registry file (or use the `AGENT_REGISTRY_PATH` env var), project each entry into `{name, project_dir, state_dir, last_heartbeat, last_heartbeat_age_s, alive, wrapper_pid}`.
 - **Return**: JSON `{ registry_path, agents: [...] }`.
 
 ## Slash command
 
-Cuma satu, ada di `commands/`:
+Just one, in `commands/`:
 
 ### `/new`
 
-Clear sesi CC sekarang dan start fresh. Flow yang dieksekusi AI:
+Clear the current CC session and start fresh. The flow the AI executes:
 
-1. Panggil `pty_status`. Kalau `wrapper_alive: false` → abort dan kasih tahu user untuk launch via `mirza-cc`.
-2. Panggil `pty_send_slash` dengan `command: "/clear"`.
-3. Kalau request originate dari Telegram (terlihat dari `<channel source="telegram">` block di input), kirim acknowledgement Telegram dulu supaya user tahu clear sedang diproses.
-4. Stop response. Jangan lanjut kerja apa-apa — next thing CC process adalah `/clear` yang baru saja di-queue.
+1. Call `pty_status`. If `wrapper_alive: false` → abort and tell the user to launch via `mirza-cc`.
+2. Call `pty_send_slash` with `command: "/clear"`.
+3. If the request originated from Telegram (visible from the `<channel source="telegram">` block in the input), send a Telegram acknowledgement first so the user knows the clear is being processed.
+4. Stop the response. Don't go on to do any work — the next thing CC processes is the `/clear` that was just queued.
 
-Notifikasi "fresh session ready" **bukan tanggung jawab AI** — wrapper yang nge-trigger setelah session baru materialize (lihat post-`/clear` chain di bawah).
+The "fresh session ready" notification is **not the AI's responsibility** — the wrapper triggers it after the new session materializes (see the post-`/clear` chain below).
 
-## Payload yang wrapper terima
+## Payloads the wrapper accepts
 
-`server.ts` cuma tahu cara nulis `{ type: "slash", command }`, tapi wrapper ([`src/wrapper.ts`](./wrapper/src/wrapper.ts)) sebenarnya menerima tiga bentuk payload (tagged union; field `type` dan `kind` sinonim, default `slash`):
+`server.ts` only knows how to write `{ type: "slash", command }`, but the wrapper ([`src/wrapper.ts`](./wrapper/src/wrapper.ts)) actually accepts three payload shapes (tagged union; the `type` and `kind` fields are synonyms, default `slash`):
 
-| `type`    | Field tambahan                       | Aksi wrapper                                                                                |
+| `type`    | Extra fields                       | Wrapper action                                                                                |
 |-----------|--------------------------------------|---------------------------------------------------------------------------------------------|
-| `slash` (default kalau `type`/`kind` tidak ada) | `command: string`, optional `sessionName` (untuk `/clear`), optional `confirmAfterMs` | Tulis `command` lalu `\r` (dipisah 250ms) ke PTY stdin. `confirmAfterMs` (clamp 50–5000ms) mengirim satu `\r` ekstra setelah delay — untuk commit picker konfirmasi command seperti `/effort`. |
-| `prompt`  | `text: string` (sudah dikomposisi pengirim, termasuk marker anti-bounce) | Ketik `text` ke PTY sebagai user turn biasa, lalu submit. Ditulis **per-chunk 100 code point dengan jeda 30ms** — satu write besar di Windows ConPTY meluapkan input buffer dan kepala pesan hilang diam-diam (tinggal ekornya). Chunking di code point (bukan UTF-16 unit) supaya surrogate pair emoji tidak terbelah. |
-| `switch`  | `sessionId: string`, optional `sessionName` | Inject `/resume <sessionId>` ke PTY, tulis `current_session_id`, dan emit event `session-change` ke telegram system-outbox setelah 1 detik. |
+| `slash` (default if `type`/`kind` is absent) | `command: string`, optional `sessionName` (for `/clear`), optional `confirmAfterMs` | Write `command` then `\r` (separated by 250ms) to PTY stdin. `confirmAfterMs` (clamped 50–5000ms) sends one extra `\r` after the delay — to commit the confirmation picker of commands like `/effort`. |
+| `prompt`  | `text: string` (already composed by the sender, including the anti-bounce marker) | Type `text` into the PTY as a normal user turn, then submit. Written **in chunks of 100 code points with a 30ms gap** — a single big write on Windows ConPTY overflows the input buffer and the head of the message silently goes missing (only the tail survives). Chunking on code points (not UTF-16 units) so emoji surrogate pairs don't get split. |
+| `switch`  | `sessionId: string`, optional `sessionName` | Inject `/resume <sessionId>` into the PTY, write `current_session_id`, and emit a `session-change` event to the telegram system-outbox after 1 second. |
 
-Payload yang membawa field `from` (kiriman antar-agent via plugin `agent-bus`) dikenai **hop limit**: `hop_count > 5` di-drop — pengaman loop antar bot. Pesan lokal (tanpa `from`) lolos tanpa cek ini.
+Payloads carrying a `from` field (inter-agent messages sent via the `agent-bus` plugin) are subject to a **hop limit**: `hop_count > 5` is dropped — a loop guard between bots. Local messages (no `from`) pass without this check.
 
-Plugin `pty-controller` sendiri tidak punya jalur untuk emit payload `switch` atau `prompt` — `switch` di-emit plugin telegram (saat user pilih session di picker), `prompt` di-emit plugin agent-bus (instruksi natural-language dari bot peer). Slash command apa pun yang valid menurut regex bisa diinject lewat `pty_send_slash`. Contoh yang sudah terverifikasi jalan: `/clear`, `/compact`, `/resume <id>`, `/rename <name>`, `/notify-user <msg>` (namespaced: `/telegram:notify-user`), `/exit`. Yang lainnya tergantung apakah CC mengenal slash command tersebut di sesi yang lagi jalan.
+The `pty-controller` plugin itself has no path to emit a `switch` or `prompt` payload — `switch` is emitted by the telegram plugin (when the user picks a session in the picker), `prompt` is emitted by the agent-bus plugin (a natural-language instruction from a peer bot). Any slash command valid per the regex can be injected via `pty_send_slash`. Examples verified to work: `/clear`, `/compact`, `/resume <id>`, `/rename <name>`, `/notify-user <msg>` (namespaced: `/telegram:notify-user`), `/exit`. The rest depend on whether CC recognizes that slash command in the session currently running.
 
 ### Post-`/clear` chain
 
-Kalau command yang baru di-inject adalah `/clear` exactly, wrapper masuk state machine khusus:
+If the command just injected is exactly `/clear`, the wrapper enters a special state machine:
 
-1. Snapshot list session `.jsonl` di `~/.claude/projects/<encoded-cwd>/` saat ini.
-2. Poll tiap 500ms sampai ada file baru muncul (= fresh session sudah live).
-3. Begitu ketemu: tulis `wrapper.current_session_id`, optional inject `/rename <sessionName>` kalau payload bawa nama, lalu emit event `session-change` ke telegram system-outbox (pesan Telegram dikirim oleh plugin telegram, tanpa AI roundtrip).
+1. Snapshot the current list of `.jsonl` sessions in `~/.claude/projects/<encoded-cwd>/`.
+2. Poll every 500ms until a new file appears (= the fresh session is live).
+3. As soon as it's found: write `wrapper.current_session_id`, optionally inject `/rename <sessionName>` if the payload carries a name, then emit a `session-change` event to the telegram system-outbox (the Telegram message is sent by the telegram plugin, with no AI roundtrip).
 
-Pacing antar injeksi: konstanta `POST_INJECTION_DELAY_MS = 1000` dan `SUBMIT_DELAY_MS = 250`. Yang kedua memisahkan write teks dari trailing `\r` — perlu karena untuk command namespaced (`/telegram:foo`), kalau `\r` masuk dalam chunk yang sama, autocomplete picker CC menelannya alih-alih submit.
+Pacing between injections: the constants `POST_INJECTION_DELAY_MS = 1000` and `SUBMIT_DELAY_MS = 250`. The second one separates the text write from the trailing `\r` — needed because for namespaced commands (`/telegram:foo`), if the `\r` lands in the same chunk, CC's autocomplete picker swallows it instead of submitting.
 
-## Mekanisme IPC
+## IPC mechanism
 
-State directory diresolve oleh [`ipc.ts`](./ipc.ts) dengan urutan:
+The state directory is resolved by [`ipc.ts`](./ipc.ts) in this order:
 
-1. Env `PTY_CONTROLLER_STATE_DIR` (escape hatch, set oleh wrapper saat spawn CC).
+1. The `PTY_CONTROLLER_STATE_DIR` env (escape hatch, set by the wrapper when it spawns CC).
 2. `<CLAUDE_PROJECT_DIR>/.claude/channels/pty-controller/`.
 
-Kalau dua-duanya tidak ada, MCP server exit dengan error eksplisit di stderr.
+If neither exists, the MCP server exits with an explicit error on stderr.
 
-Layout state per-project:
+Per-project state layout:
 
 ```
 <project>/.claude/channels/pty-controller/
-├── pending/                       # plugin nulis di sini
+├── pending/                       # plugin writes here
 │   └── <uuid>.json
-├── wrapper.heartbeat              # wrapper update tiap 5 detik
-├── wrapper.pid                    # PID wrapper, sinyal liveness kedua (unlink saat clean shutdown)
-├── wrapper.current_session_id     # session id CC yang lagi live
-├── wrapper.version                # {plugin_version, wrapper_version} ditulis saat boot (dibaca /status telegram)
-└── wrapper.log                    # log wrapper (best-effort)
+├── wrapper.heartbeat              # wrapper updates every 5 seconds
+├── wrapper.pid                    # wrapper PID, second liveness signal (unlinked on clean shutdown)
+├── wrapper.current_session_id     # the live CC session id
+├── wrapper.version                # {plugin_version, wrapper_version} written at boot (read by telegram /status)
+└── wrapper.log                    # wrapper log (best-effort)
 ```
 
-Format file `pending/<uuid>.json`:
+Format of the `pending/<uuid>.json` file:
 
 ```json
 {
@@ -189,32 +189,32 @@ Format file `pending/<uuid>.json`:
 }
 ```
 
-Atomic write dipakai semua-side: tulis ke `<final>.tmp.<pid>`, lalu `rename` ke nama final. Wrapper skip file yang masih `.tmp.*` di sweep fallback-nya. Wrapper baca file (via `fs.watch` + interval sweep 2 detik sebagai belt-and-suspenders), delete file segera (sebelum dispatch) supaya tidak double-process kalau crash mid-handle.
+Atomic writes are used on all sides: write to `<final>.tmp.<pid>`, then `rename` to the final name. The wrapper skips files still named `.tmp.*` in its fallback sweep. The wrapper reads the file (via `fs.watch` + a 2-second interval sweep as belt-and-suspenders), deletes the file immediately (before dispatch) so it won't double-process if it crashes mid-handle.
 
-`wrapperLikelyRunning()` pakai **cek dua sinyal**: (1) heartbeat file — timestamp di dalamnya harus kurang dari 30 detik; (2) PID liveness — kalau `wrapper.pid` ada, probe dengan `process.kill(pid, 0)`; `ESRCH` (proses hilang) → false, menangkap kasus "wrapper baru crash tapi heartbeat masih kelihatan fresh". PID check best-effort: file PID tidak ada (build wrapper lama) atau tidak bisa diprobe → percaya heartbeat saja. Plugin pakai metrik ini untuk gate `pty_send_slash` dan untuk jawaban `pty_status`.
+`wrapperLikelyRunning()` uses a **two-signal check**: (1) the heartbeat file — its timestamp must be less than 30 seconds old; (2) PID liveness — if `wrapper.pid` exists, probe with `process.kill(pid, 0)`; `ESRCH` (process gone) → false, catching the "wrapper just crashed but the heartbeat still looks fresh" case. The PID check is best-effort: if the PID file is absent (older wrapper build) or can't be probed → trust the heartbeat alone. The plugin uses this metric to gate `pty_send_slash` and for the `pty_status` answer.
 
 ## Limitations / caveats
 
-- **Tanpa wrapper, plugin no-op.** Plugin load fine ke CC tapi `pty_send_slash` akan selalu error sampai wrapper jalan. `pty_status` adalah cara teraman untuk cek.
-- **Single CC per project.** Wrapper asumsikan satu sesi Claude per project pada satu waktu. Jalankan dua wrapper terhadap project sama → file inbox bisa di-double-process dan downstream channel (Telegram bot) konflik.
-- **Windows quirks.** `fs.watch` di Windows historis flaky untuk create+delete cepat, makanya wrapper punya interval sweep 2 detik sebagai cadangan. `node-pty` di-spawn lewat `cmd.exe /c` di Windows vs. `$SHELL -l -i -c` di Unix.
-- **First-run timing tidak relevan untuk production wrapper.** Diagnostic `auto-clear` punya env `READY_DELAY_MS`; wrapper produksi tidak butuh karena request baru datang kalau CC sudah idle.
-- **Liveness check tetap heuristik.** Dua sinyal (heartbeat + PID probe) menutup kasus crash, tapi build wrapper lama tanpa `wrapper.pid` masih mengandalkan heartbeat 30 detik saja.
-- **Coupling ke plugin telegram.** Wrapper menulis ke `<project>/.claude/channels/telegram/system-outbox/` dan `<telegram-state>/session-names.json`. Kalau plugin telegram tidak terpasang, file-file itu mendarat di direktori yang bisa-bikin atau tidak — wrapper tetap jalan, tapi event-event itu jadi yatim.
-- **Nama agent bisa bentrok.** Nama = basename project dir. Dua project berbeda dengan basename sama akan rebutan slot registry (di-log sebagai WARNING, tidak diblok di v1).
+- **Without the wrapper, the plugin is a no-op.** The plugin loads fine into CC but `pty_send_slash` will always error until the wrapper is running. `pty_status` is the safest way to check.
+- **Single CC per project.** The wrapper assumes one Claude session per project at a time. Run two wrappers against the same project → the inbox files can get double-processed and downstream channels (the Telegram bot) conflict.
+- **Windows quirks.** `fs.watch` on Windows has historically been flaky for fast create+delete, which is why the wrapper has a 2-second interval sweep as a backup. `node-pty` is spawned via `cmd.exe /c` on Windows vs. `$SHELL -l -i -c` on Unix.
+- **First-run timing isn't relevant for the production wrapper.** The `auto-clear` diagnostic has a `READY_DELAY_MS` env; the production wrapper doesn't need it because requests only arrive once CC is idle.
+- **The liveness check is still a heuristic.** The two signals (heartbeat + PID probe) cover the crash case, but older wrapper builds without `wrapper.pid` still rely on the 30-second heartbeat alone.
+- **Coupling to the telegram plugin.** The wrapper writes to `<project>/.claude/channels/telegram/system-outbox/` and `<telegram-state>/session-names.json`. If the telegram plugin isn't installed, those files land in a directory that may or may not get created — the wrapper still runs, but those events become orphans.
+- **Agent names can collide.** Name = basename of the project dir. Two different projects with the same basename will fight over the registry slot (logged as a WARNING, not blocked in v1).
 
-## Diagnostic scripts (jarang dibutuhkan)
+## Diagnostic scripts (rarely needed)
 
-Di folder `wrapper/`:
+In the `wrapper/` folder:
 
 ```bash
-npm run interactive     # spawn claude di PTY, bidirectional pipe, no plugin loop
+npm run interactive     # spawn claude in a PTY, bidirectional pipe, no plugin loop
 npm run auto-clear      # spawn claude, programmatically inject /clear, capture, exit
 ```
 
-`auto-clear` nge-dump capture PTY ke `last-capture.ansi` (raw) dan `last-capture.txt` (ANSI-stripped) saat exit. Jangan jalankan diagnostic ini bersamaan dengan wrapper produksi — keduanya akan rebutan PTY CC.
+`auto-clear` dumps the PTY capture to `last-capture.ansi` (raw) and `last-capture.txt` (ANSI-stripped) on exit. Don't run this diagnostic alongside the production wrapper — both will fight over CC's PTY.
 
 ## Author / license
 
 - **Author**: Mirza ([@mirzaakhena](https://github.com/mirzaakhena))
-- **License**: MIT (lihat [`LICENSE`](./LICENSE)).
+- **License**: MIT (see [`LICENSE`](./LICENSE)).
