@@ -8,6 +8,9 @@ Toolkit untuk **session handoff** di Claude Code. Plugin ini menangkap sesi yang
 |---|---|
 | `/handoff [catatan opsional]` | Simpan sesi sekarang ke file handoff baru di `<repo>/.handoff/`. Argumen bebas masuk verbatim ke Section 9. |
 | `/handoff-resume` | Di sesi baru: baca handoff terakhir, tampilkan ringkasan singkat, tunggu konfirmasi sebelum lanjut eksekusi. |
+| `/handoff-resume yes` | Pre-confirmed: ringkasan tetap ditampilkan (supaya bisa diinterupsi kalau ada yang aneh), tapi langsung lanjut eksekusi tanpa menunggu jawaban. |
+
+Konfirmasi `/handoff-resume` sadar-Telegram: kalau skill `interactive-prompts` tersedia di sesi, pertanyaan "lanjutkan handoff ini?" dirender sebagai tombol inline (`✅ Lanjutkan / ❌ Mulai segar / ✏️ Jelaskan manual`); kalau tidak, fallback ke konfirmasi teks biasa.
 
 ## Skills
 

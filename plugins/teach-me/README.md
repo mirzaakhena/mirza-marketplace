@@ -40,6 +40,19 @@ Skill ini bukan soal **apa** yang dijelaskan, tapi **gimana** menjelaskannya. Se
 
 Filosofi inti: **bangun pemahaman, jangan dump informasi.** Jawaban pendek yang nempel lebih berharga daripada sepuluh paragraf yang lewat begitu saja.
 
+## Anti-pattern yang dijaga
+
+Skill ini juga memuat daftar failure mode yang harus dihindari AI saat menjelaskan, lengkap dengan cara perbaikannya:
+
+- **Encyclopedia mode** — dump semua yang diketahui padahal user cuma nanya satu hal
+- **Premature technicality** — loncat ke detail implementasi sebelum user punya model high-level
+- **Correcting without confirming** — buka jawaban dengan "sebenarnya tidak begitu"
+- **Refusing to commit** — semua dijawab "tergantung..." padahal ada satu jawaban terbaik untuk konteks user
+- **Trailing summary** — menutup dengan rekap hal yang baru saja dibaca user
+- **Lecture momentum** — terus menambah detail setelah jawaban sebenarnya sudah selesai
+
+Plus checklist self-audit 9 poin yang dicek AI sebelum mengirim jawaban teach-mode.
+
 ## Install
 
 Pastikan marketplace `mirza-marketplace` sudah ditambahkan (lihat [root README](../../README.md) langkah 1). Lalu:

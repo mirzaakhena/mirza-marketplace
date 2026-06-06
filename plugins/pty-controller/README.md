@@ -80,6 +80,8 @@ Yang berbeda vs. `claude` polos:
 
 6. **Side effects untuk plugin `telegram`**. Wrapper menulis ke `<project>/.claude/channels/telegram/system-outbox/` event `session-change` setiap kali session berganti (initial spawn, post-`/clear`, post-`/resume`). Juga menulis label "main session" ke `<telegram-state>/session-names.json` saat first-run, kalau label itu belum dipakai. Coupling ini sengaja — wrapper dan plugin telegram dimaintain oleh maintainer yang sama.
 
+7. **Registrasi ke agent registry global.** Saat boot, wrapper mendaftarkan dirinya (nama = basename project dir) ke `~/.claude/agent-registry.json` — heartbeat tiap 5 detik, unregister saat shutdown. Registry ini yang dibaca `pty_list_agents` dan plugin `agent-bus` untuk komunikasi bot-to-bot. Write diserialisasi file-lock + atomic rename (dengan retry untuk race EPERM/EBUSY khas antivirus Windows).
+
 Quit dengan `/exit` di dalam Claude atau Ctrl+C di terminal wrapper.
 
 ## MCP tools
@@ -133,14 +135,17 @@ Notifikasi "fresh session ready" **bukan tanggung jawab AI** — wrapper yang ng
 
 ## Payload yang wrapper terima
 
-`server.ts` cuma tahu cara nulis `{ type: "slash", command }`, tapi wrapper ([`src/wrapper.ts`](./wrapper/src/wrapper.ts)) sebenarnya menerima dua bentuk payload (tagged union):
+`server.ts` cuma tahu cara nulis `{ type: "slash", command }`, tapi wrapper ([`src/wrapper.ts`](./wrapper/src/wrapper.ts)) sebenarnya menerima tiga bentuk payload (tagged union; field `type` dan `kind` sinonim, default `slash`):
 
 | `type`    | Field tambahan                       | Aksi wrapper                                                                                |
 |-----------|--------------------------------------|---------------------------------------------------------------------------------------------|
-| `slash` (default kalau `type` tidak ada) | `command: string`             | Tulis `command` lalu `\r` (dipisah 250ms) ke PTY stdin.                                     |
+| `slash` (default kalau `type`/`kind` tidak ada) | `command: string`, optional `sessionName` (untuk `/clear`), optional `confirmAfterMs` | Tulis `command` lalu `\r` (dipisah 250ms) ke PTY stdin. `confirmAfterMs` (clamp 50–5000ms) mengirim satu `\r` ekstra setelah delay — untuk commit picker konfirmasi command seperti `/effort`. |
+| `prompt`  | `text: string` (sudah dikomposisi pengirim, termasuk marker anti-bounce) | Ketik `text` ke PTY sebagai user turn biasa, lalu submit. Ditulis **per-chunk 100 code point dengan jeda 30ms** — satu write besar di Windows ConPTY meluapkan input buffer dan kepala pesan hilang diam-diam (tinggal ekornya). Chunking di code point (bukan UTF-16 unit) supaya surrogate pair emoji tidak terbelah. |
 | `switch`  | `sessionId: string`, optional `sessionName` | Inject `/resume <sessionId>` ke PTY, tulis `current_session_id`, dan emit event `session-change` ke telegram system-outbox setelah 1 detik. |
 
-Plugin `pty-controller` sendiri tidak punya jalur untuk emit payload `switch` — itu di-emit oleh client lain (plugin telegram menulis langsung ke `pending/` saat user pilih session di picker). Slash command apa pun yang valid menurut regex bisa diinject lewat `pty_send_slash`. Contoh yang sudah terverifikasi jalan: `/clear`, `/compact`, `/resume <id>`, `/rename <name>`, `/notify-user <msg>` (namespaced: `/telegram:notify-user`), `/exit`. Yang lainnya tergantung apakah CC mengenal slash command tersebut di sesi yang lagi jalan.
+Payload yang membawa field `from` (kiriman antar-agent via plugin `agent-bus`) dikenai **hop limit**: `hop_count > 5` di-drop — pengaman loop antar bot. Pesan lokal (tanpa `from`) lolos tanpa cek ini.
+
+Plugin `pty-controller` sendiri tidak punya jalur untuk emit payload `switch` atau `prompt` — `switch` di-emit plugin telegram (saat user pilih session di picker), `prompt` di-emit plugin agent-bus (instruksi natural-language dari bot peer). Slash command apa pun yang valid menurut regex bisa diinject lewat `pty_send_slash`. Contoh yang sudah terverifikasi jalan: `/clear`, `/compact`, `/resume <id>`, `/rename <name>`, `/notify-user <msg>` (namespaced: `/telegram:notify-user`), `/exit`. Yang lainnya tergantung apakah CC mengenal slash command tersebut di sesi yang lagi jalan.
 
 ### Post-`/clear` chain
 
@@ -168,7 +173,9 @@ Layout state per-project:
 ├── pending/                       # plugin nulis di sini
 │   └── <uuid>.json
 ├── wrapper.heartbeat              # wrapper update tiap 5 detik
+├── wrapper.pid                    # PID wrapper, sinyal liveness kedua (unlink saat clean shutdown)
 ├── wrapper.current_session_id     # session id CC yang lagi live
+├── wrapper.version                # {plugin_version, wrapper_version} ditulis saat boot (dibaca /status telegram)
 └── wrapper.log                    # log wrapper (best-effort)
 ```
 
@@ -184,7 +191,7 @@ Format file `pending/<uuid>.json`:
 
 Atomic write dipakai semua-side: tulis ke `<final>.tmp.<pid>`, lalu `rename` ke nama final. Wrapper skip file yang masih `.tmp.*` di sweep fallback-nya. Wrapper baca file (via `fs.watch` + interval sweep 2 detik sebagai belt-and-suspenders), delete file segera (sebelum dispatch) supaya tidak double-process kalau crash mid-handle.
 
-`wrapperLikelyRunning()` cuma cek heartbeat file: kalau timestamp di dalamnya kurang dari 30 detik dari sekarang → "alive". Tidak ada PID check, jadi false-positive teoretis kalau wrapper crash tepat dalam 30 detik terakhir. Plugin pakai metrik ini untuk gate `pty_send_slash` dan untuk jawaban `pty_status`.
+`wrapperLikelyRunning()` pakai **cek dua sinyal**: (1) heartbeat file — timestamp di dalamnya harus kurang dari 30 detik; (2) PID liveness — kalau `wrapper.pid` ada, probe dengan `process.kill(pid, 0)`; `ESRCH` (proses hilang) → false, menangkap kasus "wrapper baru crash tapi heartbeat masih kelihatan fresh". PID check best-effort: file PID tidak ada (build wrapper lama) atau tidak bisa diprobe → percaya heartbeat saja. Plugin pakai metrik ini untuk gate `pty_send_slash` dan untuk jawaban `pty_status`.
 
 ## Limitations / caveats
 
@@ -192,9 +199,9 @@ Atomic write dipakai semua-side: tulis ke `<final>.tmp.<pid>`, lalu `rename` ke 
 - **Single CC per project.** Wrapper asumsikan satu sesi Claude per project pada satu waktu. Jalankan dua wrapper terhadap project sama → file inbox bisa di-double-process dan downstream channel (Telegram bot) konflik.
 - **Windows quirks.** `fs.watch` di Windows historis flaky untuk create+delete cepat, makanya wrapper punya interval sweep 2 detik sebagai cadangan. `node-pty` di-spawn lewat `cmd.exe /c` di Windows vs. `$SHELL -l -i -c` di Unix.
 - **First-run timing tidak relevan untuk production wrapper.** Diagnostic `auto-clear` punya env `READY_DELAY_MS`; wrapper produksi tidak butuh karena request baru datang kalau CC sudah idle.
-- **Heartbeat tidak proof of liveness sesungguhnya.** 30 detik window berarti wrapper baru-saja-crash bisa lolos cek selama satu cycle.
+- **Liveness check tetap heuristik.** Dua sinyal (heartbeat + PID probe) menutup kasus crash, tapi build wrapper lama tanpa `wrapper.pid` masih mengandalkan heartbeat 30 detik saja.
 - **Coupling ke plugin telegram.** Wrapper menulis ke `<project>/.claude/channels/telegram/system-outbox/` dan `<telegram-state>/session-names.json`. Kalau plugin telegram tidak terpasang, file-file itu mendarat di direktori yang bisa-bikin atau tidak — wrapper tetap jalan, tapi event-event itu jadi yatim.
-- **Description mismatch.** Description tool `pty_send_slash` di `server.ts` menyebut regex `^\/[a-z][a-z0-9_-]{0,31}(\s.{0,256})?$/` (max 32 char, tanpa `:`), padahal regex aktual mengizinkan 64 char dan karakter `:` untuk namespaced command. Cuma kosmetik untuk model, tidak mempengaruhi runtime.
+- **Nama agent bisa bentrok.** Nama = basename project dir. Dua project berbeda dengan basename sama akan rebutan slot registry (di-log sebagai WARNING, tidak diblok di v1).
 
 ## Diagnostic scripts (jarang dibutuhkan)
 
@@ -210,4 +217,4 @@ npm run auto-clear      # spawn claude, programmatically inject /clear, capture,
 ## Author / license
 
 - **Author**: Mirza ([@mirzaakhena](https://github.com/mirzaakhena))
-- **License**: tidak ada `LICENSE` file di folder ini. Plugin ini orisinal (bukan fork) — perlakukan sebagai "all rights reserved" sampai maintainer menambahkan lisensi eksplisit.
+- **License**: MIT (lihat [`LICENSE`](./LICENSE)).

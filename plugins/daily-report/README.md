@@ -36,6 +36,19 @@ Hello, this is my daily report:
 
 Hasil disimpan ke `.daily-reports/<YYYY-MM-DD>.md` relatif ke root repo (overwrite kalau sudah ada), lalu di-copy ke clipboard via `pbcopy`.
 
+## Dari mana konteksnya diambil
+
+`gather-context.sh` mengumpulkan blob konteks deterministik dengan section `===REPO===`, `===DATE===`, `===BRANCH===`, `===COMMITS===`, `===STATUS===`, `===TODO===`, `===PREV_ARCHIVE===`, `===EXTRA_FILES===`. Detail penting:
+
+- **Pemilihan commit bertingkat:** (1) commit yang lebih baru dari mtime arsip terakhir di `.daily-reports/`; kalau < 2 commit, (2) fallback ke commit 24 jam terakhir; kalau masih < 2, (3) fallback ke 10 commit terakhir.
+- **File TODO opsional:** `.daily-report.todo.md` di root repo — kalau ada, isinya jadi hint section `Today`.
+- **Arsip sebelumnya:** report terakhir di `.daily-reports/` ikut dibaca untuk kontinuitas (item `Today` kemarin yang belum kelar dibawa lagi).
+- **File ekstra:** path file yang disebut di prompt bebas diteruskan sebagai argumen script dan ikut masuk konteks.
+
+Section `Today` diisi berdasar urutan prioritas: hint prompt bebas → Section "Akan" dari handoff yang dibuat sesi ini → sisa `Today` arsip sebelumnya → entri TODO → kelanjutan wajar dari `Yesterday`. Kalau semuanya kosong, skill **bertanya ke user** alih-alih mengarang.
+
+Contoh report beranotasi ada di `skills/writing-daily-report/examples.md`.
+
 ### Aturan inti (anti-fabrication)
 
 Skill ini memegang aturan ketat supaya laporan tetap jujur dan tidak halu:

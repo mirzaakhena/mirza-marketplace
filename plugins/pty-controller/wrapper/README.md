@@ -43,8 +43,9 @@ This starts `mirza-cc` in the foreground. It:
 1. Creates `<project>/.claude/channels/pty-controller/` if missing (per-project state dir, picked from `CLAUDE_PROJECT_DIR` or `cwd`).
 2. Spawns `claude` inside a PTY and bidirectional-pipes with your terminal — you can use Claude exactly as if you ran `claude` directly.
 3. Touches `<state>/wrapper.heartbeat` every 5 seconds so the plugin can prove the wrapper is alive.
-4. Watches `<state>/pending/` for `<uuid>.json` request files. When one arrives, it reads the `command` field, deletes the file, and writes the slash command (plus carriage return) into the PTY.
-5. After a `/clear` specifically, it watches `~/.claude/projects/<encoded-cwd>/` for a new session `.jsonl` and then auto-injects `/notify-user` so the fresh AI session can ping Telegram (or whatever the slash command in the plugin decides to do).
+4. Watches `<state>/pending/` for `<uuid>.json` request files. When one arrives it deletes the file and dispatches by payload type: `slash` (write the command + carriage return into the PTY), `prompt` (type free text from agent-bus as a user turn, chunked 100 code points / 30ms so Windows ConPTY doesn't truncate it), or `switch` (inject `/resume <sessionId>`).
+5. After a `/clear` specifically, it watches `~/.claude/projects/<encoded-cwd>/` for a new session `.jsonl`, records it as the current session, optionally chains `/rename <sessionName>`, and drops a `session-change` event into the telegram plugin's system-outbox — the Telegram "fresh session ready" ping goes out via direct bot API, no AI roundtrip.
+6. Registers itself in the global agent registry (`~/.claude/agent-registry.json`) on boot, heartbeats it, and unregisters on shutdown — this is what makes the bot discoverable to `pty_list_agents` and the `agent-bus` plugin.
 
 Quit by typing `/exit` inside Claude or pressing Ctrl+C in the wrapper terminal.
 
@@ -68,10 +69,12 @@ plugins/pty-controller/wrapper/
 ├── README.md          (this file)
 ├── .gitignore
 └── src/
-    ├── wrapper.ts     production entry — what `npm run wrapper` runs
-    ├── probe.ts       diagnostic — minimal PTY echo test
-    ├── interactive.ts diagnostic — claude under PTY, bidirectional
-    └── auto-clear.ts  diagnostic — claude under PTY + auto /clear
+    ├── wrapper.ts            production entry — what `npm run wrapper` runs
+    ├── prompt-inject.ts      pure helpers for type:"prompt" payloads (chunking) — unit-testable
+    ├── prompt-inject.test.ts tests for the above
+    ├── probe.ts              diagnostic — minimal PTY echo test
+    ├── interactive.ts        diagnostic — claude under PTY, bidirectional
+    └── auto-clear.ts         diagnostic — claude under PTY + auto /clear
 ```
 
 ## Known caveats
