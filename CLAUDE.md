@@ -2,6 +2,17 @@
 
 This repo is Mirza's personal [Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/plugins). Plugins live under `plugins/<name>/`; the catalog is `.claude-plugin/marketplace.json`.
 
+## ⚠️ MANDATORY pre-commit checklist — run this for EVERY plugin change
+
+Agents keep forgetting these. Before committing ANY change that touches `plugins/<name>/`, mechanically verify all four — no judgement call, no "this change is too small to count":
+
+- [ ] **1. Version bumped** in `plugins/<name>/.claude-plugin/plugin.json` — strictly higher than every version in `~/.claude/plugins/cache/mirza-marketplace/<name>/`. (`package.json` does NOT count.) Without this, `/reload-plugins` silently serves stale code. → details in "Release rule" below.
+- [ ] **2. Plugin README updated** — `plugins/<name>/README.md` reflects what the source NOW does. → "README sync rule" below.
+- [ ] **3. Root README updated** — the plugin's row/summary in the root `README.md` still accurate.
+- [ ] **4. Catalog description checked** — `.claude-plugin/marketplace.json` entry for the plugin not stale (counts, command names, feature claims).
+
+A plugin change that skips any of these is an INCOMPLETE change. If you notice you already committed without one of them, add an immediate follow-up commit — do not leave it for "later".
+
 ## Release rule — bump the plugin version before pushing
 
 Every plugin you change MUST get a version bump in its **`plugins/<plugin>/.claude-plugin/plugin.json`** BEFORE you push or merge. No exceptions.
