@@ -41,7 +41,7 @@ Trigger saat user minta koordinasi antar bot ("tell bot-02 to run /handoff-resum
 
 - `agent_send` **tidak boleh** dipanggil atas inisiatif AI sendiri — hanya atas permintaan eksplisit user, atau saat prompt masuk secara eksplisit minta lapor balik.
 - **Anti-bounce:** pesan masuk dari agent-bus adalah konteks terminal, bukan trigger balas-membalas. Default: kerjakan, lapor ke Telegram sendiri, STOP. Mencegah infinite loop antar bot.
-- **Command destruktif** (`/clear`, `/clear`+`sessionName`, `/delete`) wajib konfirmasi ulang ke user tepat sebelum kirim — pakai tombol interactive-prompts kalau tersedia.
+- **Command destruktif** (`/clear`, `/clear`+`sessionName`, `/delete`) wajib konfirmasi ulang ke user tepat sebelum kirim — pakai tombol inline-buttons kalau tersedia.
 - Pattern siap pakai: **leader fan-out** (broadcast slash / prompt ke banyak peer) dan **targeted relay** (cek status → kirim → lapor correlation id).
 
 ## Arsitektur & state

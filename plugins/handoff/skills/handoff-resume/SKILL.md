@@ -77,7 +77,7 @@ Apakah Anda yakin ingin melanjutkan task handover ini?
 
 Then stop and wait for the user's reply. Do NOT begin executing the plan from Section 5 until the user confirms.
 
-**If the `interactive-prompts` skill is available** (listed in the session's available skills), render the confirmation as inline-keyboard buttons instead of plain text — the user is likely on Telegram and tapping is faster than typing. Invoke the skill, then attach `buttons` to your `reply` call:
+**If the `inline-buttons` skill is available** (listed in the session's available skills; older installs may know it as `interactive-prompts`), render the confirmation as inline-keyboard buttons instead of plain text — the user is likely on Telegram and tapping is faster than typing. Invoke the skill, then attach `buttons` to your `reply` call:
 
 ```json
 "buttons": [
@@ -91,7 +91,7 @@ Then stop and wait for the user's reply. Do NOT begin executing the plan from Se
 ]
 ```
 
-Map the tap in Step 5: `resume_yes` → confirm branch; `resume_no` → decline-without-redirect branch; `manual` → invite free-form text and treat the next message as the redirect/clarification. If `interactive-prompts` is not installed, fall back to plain-text confirmation.
+Map the tap in Step 5: `resume_yes` → confirm branch; `resume_no` → decline-without-redirect branch; `manual` → invite free-form text and treat the next message as the redirect/clarification. If `inline-buttons` is not installed, fall back to plain-text confirmation.
 
 **If pre-confirmed via the `yes` argument:** skip the question entirely. Reply with only the summary plus a short acknowledgement (e.g. `"Auto-confirmed — langsung mulai eksekusi Section 5."`), then proceed straight to Step 5's confirm branch without waiting. Still show the summary so the user can intervene if something looks wrong (e.g. wrong branch).
 

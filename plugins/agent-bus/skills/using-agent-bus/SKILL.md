@@ -75,7 +75,7 @@ These commands are destructive — they destroy or replace peer state:
 - `/clear` with `sessionName` (= `/new <name>` — wipes + renames)
 - `/delete` (removes a session)
 
-For destructive commands you MUST confirm with the user immediately before sending, even if they already said "do it". Restate the action concretely: *"about to send `/clear` to bot-02, which will erase its current conversation — confirm?"*. Use the `interactive-prompts` skill (yes/no buttons) so the confirmation lands fast on Telegram.
+For destructive commands you MUST confirm with the user immediately before sending, even if they already said "do it". Restate the action concretely: *"about to send `/clear` to bot-02, which will erase its current conversation — confirm?"*. Use the `inline-buttons` skill (yes/no buttons) so the confirmation lands fast on Telegram.
 
 Non-destructive commands (`/rename`, `/effort`, `/switch`) do not require this extra confirmation step beyond the user's original request.
 

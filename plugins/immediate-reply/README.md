@@ -48,7 +48,7 @@ Setelah ack terkirim, pilih SATU strategi per task (jangan ganti di tengah jalan
 Plugin ini cuma masuk akal kalau channel Telegram aktif. Install bareng:
 
 - **[`telegram`](../telegram/)** — wajib. Tanpa channel Telegram, skill ini tidak akan pernah ke-trigger.
-- **[`interactive-prompts`](../interactive-prompts/)** — pelengkap bagus. Saat akhirnya butuh tanya konfirmasi ke user, render pilihan sebagai tombol inline keyboard supaya user bisa jawab satu-tap.
+- **[`inline-buttons`](../inline-buttons/)** — pelengkap bagus. Saat akhirnya butuh tanya konfirmasi ke user, render pilihan sebagai tombol inline keyboard supaya user bisa jawab satu-tap.
 
 ## Instalasi
 
