@@ -698,15 +698,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const reply_to = args.reply_to != null ? Number(args.reply_to) : undefined
         const files = (args.files as string[] | undefined) ?? []
         const format = (args.format as string | undefined) ?? 'text'
-        // 'markdown' is the auto-converted mode: take CommonMark, produce MV2.
+        // 'markdown' is the auto-converted mode: take CommonMark, produce MV2
+        // (conversion happens per-chunk below — see the chunk-planning block).
         // 'markdownv2' stays raw passthrough for backward compatibility with
         // callers that already escape themselves.
-        const text =
-          format === 'markdown' ? commonMarkToMarkdownV2(rawText) : rawText
-        const parseMode =
-          format === 'markdown' || format === 'markdownv2'
-            ? ('MarkdownV2' as const)
-            : undefined
         const source = (args.source as 'assistant' | 'system' | undefined) ?? 'assistant'
 
         // Optional inline keyboard. Validated at the boundary; mutually
@@ -738,29 +733,73 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const limit = Math.max(1, Math.min(access.textChunkLimit ?? MAX_CHUNK_LIMIT, MAX_CHUNK_LIMIT))
         const mode = access.chunkMode ?? 'length'
         const replyMode = access.replyToMode ?? 'first'
-        const chunks = chunk(text, limit, mode)
+
+        // Chunk planning. For format:'markdown' the RAW CommonMark is chunked
+        // first and each chunk is converted separately — converting the whole
+        // text before chunking can split a MarkdownV2 entity across the cut
+        // (`*bold` opened in chunk 1, closed in chunk 2) and Telegram rejects
+        // the chunk with "can't parse entities". Escaping inflates length, so
+        // raw text is chunked against a half-limit margin and each converted
+        // chunk is verified; a pathological escape blow-up falls back to
+        // sending that chunk as readable plain text instead of failing.
+        type PlannedChunk = { text: string; raw: string; mv2: boolean }
+        let planned: PlannedChunk[]
+        if (format === 'markdown') {
+          const margin = Math.max(1, Math.floor(limit / 2))
+          // Paragraph-boundary splitting keeps inline entities intact far more
+          // often than a hard length cut, so force 'newline' here.
+          planned = chunk(rawText, margin, 'newline').map(raw => {
+            const converted = commonMarkToMarkdownV2(raw)
+            return converted.length <= limit
+              ? { text: converted, raw, mv2: true }
+              : { text: raw, raw, mv2: false }
+          })
+        } else {
+          const mv2 = format === 'markdownv2'
+          planned = chunk(rawText, limit, mode).map(t => ({ text: t, raw: t, mv2 }))
+        }
+
         const sentIds: number[] = []
+        const sentTexts: string[] = []
 
         try {
-          for (let i = 0; i < chunks.length; i++) {
+          for (let i = 0; i < planned.length; i++) {
+            const pc = planned[i]!
             const shouldReplyTo =
               reply_to != null &&
               replyMode !== 'off' &&
               (replyMode === 'all' || i === 0)
             // Buttons attach to the LAST chunk only — if attached to earlier
             // chunks, the keyboard sits orphaned above continuation text.
-            const isLastChunk = i === chunks.length - 1
-            const sent = await bot.api.sendMessage(chat_id, chunks[i], {
+            const isLastChunk = i === planned.length - 1
+            const opts = (mv2: boolean) => ({
               ...(shouldReplyTo ? { reply_parameters: { message_id: reply_to } } : {}),
-              ...(parseMode ? { parse_mode: parseMode } : {}),
+              ...(mv2 ? { parse_mode: 'MarkdownV2' as const } : {}),
               ...(keyboard && isLastChunk ? { reply_markup: keyboard } : {}),
             })
+            let sent
+            try {
+              sent = await bot.api.sendMessage(chat_id, pc.text, opts(pc.mv2))
+              sentTexts.push(pc.text)
+            } catch (err) {
+              // Last-resort degrade for format:'markdown': if Telegram still
+              // refuses the entities (converter edge case), resend the raw
+              // CommonMark as plain text — readable beats a failed reply.
+              const parseError =
+                err instanceof GrammyError && /parse entities/i.test(err.description)
+              if (!(pc.mv2 && format === 'markdown' && parseError)) throw err
+              process.stderr.write(
+                `telegram channel: chunk ${i + 1}/${planned.length} failed MarkdownV2 parse — resending plain\n`,
+              )
+              sent = await bot.api.sendMessage(chat_id, pc.raw, opts(false))
+              sentTexts.push(pc.raw)
+            }
             sentIds.push(sent.message_id)
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           throw new Error(
-            `reply failed after ${sentIds.length} of ${chunks.length} chunk(s) sent: ${msg}`,
+            `reply failed after ${sentIds.length} of ${planned.length} chunk(s) sent: ${msg}`,
           )
         }
 
@@ -784,7 +823,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         // Log all sent messages to the store. One row per chunk + one row per file
         // attachment (each is a distinct Telegram message with its own message_id).
         const ts = Date.now()
-        for (let i = 0; i < chunks.length; i++) {
+        for (let i = 0; i < planned.length; i++) {
           // Mirror shouldReplyTo logic from the send loop above:
           // record reply_to only on chunks that actually got threaded.
           const chunkReplyTo =
@@ -798,20 +837,20 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
             chat_id,
             message_id: String(sentIds[i]),
             source,
-            text: chunks[i],
+            text: sentTexts[i],
             reply_to: chunkReplyTo,
             metadata: format !== 'text' ? { format } : undefined,
           })
         }
-        // Files start at index `chunks.length` in sentIds (set by the second loop above).
+        // Files start at index `planned.length` in sentIds (set by the second loop above).
         for (let j = 0; j < files.length; j++) {
           const f = files[j]
           const ext = extname(f).toLowerCase()
           const type = PHOTO_EXTS.has(ext) ? 'photo' : 'document'
           messagesStore.logOutbound({
-            ts: ts + chunks.length + j,
+            ts: ts + planned.length + j,
             chat_id,
-            message_id: String(sentIds[chunks.length + j]),
+            message_id: String(sentIds[planned.length + j]),
             source,
             attachments: [{ type, path: f }],
           })

@@ -283,6 +283,8 @@ Buttons dari AI carry callback_data `ai:<callback_id>` (namespace untuk isolasi 
 
 `format: 'markdown'` di `reply`/`edit_message` lewat `commonMarkToMarkdownV2()` (`markdown.ts`) yang bungkus [`telegramify-markdown`](https://www.npmjs.com/package/telegramify-markdown). AI bebas pakai `**bold**`, `*italic*`, `` `inline` ``, fenced code, `[link](url)` tanpa harus escape `.` `-` `(` `!` dst manual. `format: 'markdownv2'` tetap ada sebagai raw passthrough (legacy).
 
+**Chunk-safe:** untuk pesan panjang, CommonMark mentah di-chunk dulu di batas paragraf (margin setengah limit), lalu tiap chunk dikonversi terpisah — konversi sebelum chunking bisa membelah entity MV2 di tengah dan membuat Telegram menolak chunk ("can't parse entities"). Kalau Telegram tetap menolak entity sebuah chunk (edge case converter), chunk itu dikirim ulang sebagai plain text — degradasi yang terbaca lebih baik daripada reply gagal.
+
 ### Permission relay
 
 Plugin declare `claude/channel/permission` capability — saat CC butuh permission untuk tool call, request muncul di Telegram sebagai inline button (`✅ Allow` / `❌ Deny` / `See more`). Reply manual via text `yes <code>` / `no <code>` juga didukung (regex strict: 5 huruf a-z minus `l`, case-insensitive). Hanya `allowFrom` yang bisa approve.
