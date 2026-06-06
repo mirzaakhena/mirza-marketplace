@@ -1,7 +1,7 @@
 {
   "name": "handoff",
   "description": "Session handoff toolkit. Ships /handoff (capture the current session into a structured 10-section markdown file in <repo>/.handoff/ — tracking done/in-progress/blockers/next-step, chaining to the previous handoff, and pinning the related plan + commit SHAs) and /handoff-resume (load the latest handoff in a new session, follow its plan pointer, summarise it, and proceed after user confirmation).",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "author": {
     "name": "Mirza"
   },

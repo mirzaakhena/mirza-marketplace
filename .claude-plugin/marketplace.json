@@ -38,7 +38,7 @@
     },
     {
       "name": "handoff",
-      "description": "Session handoff toolkit. /handoff captures the current session into a structured 8-section markdown file in <repo>/.handoff/; /handoff-resume loads the latest handoff in a new session, summarises it, and proceeds after user confirmation.",
+      "description": "Session handoff toolkit. /handoff captures the current session into a structured 10-section markdown file in <repo>/.handoff/; /handoff-resume loads the latest handoff in a new session, summarises it, and proceeds after user confirmation.",
       "category": "productivity",
       "source": "./plugins/handoff"
     },
