@@ -25,6 +25,15 @@ Every plugin you change MUST get a version bump in its **`plugins/<plugin>/.clau
 - `/mcp` reconnect for the affected plugin
 - For Telegram specifically: force-close + reopen Telegram on the user's phone, otherwise the slash-menu cache hides any `setMyCommands` change
 
+## README sync rule — update READMEs whenever a plugin changes
+
+Whenever you **add a new plugin** or **update/change an existing plugin** (new features, behavior changes, removed commands, renamed tools, new dependencies), you MUST also update, in the same branch/commit series:
+
+1. **`plugins/<plugin>/README.md`** — must reflect what the source code actually does (features, commands, tools, configuration). Describe only what exists in the code — never leave stale features documented or new features undocumented.
+2. **Root `README.md`** — the plugin list/summary there must stay in sync with the plugin's current purpose and feature set.
+
+Treat this like the version-bump rule above: a plugin change without its README updates is an incomplete change. Stale READMEs have repeatedly drifted from the source code in this repo and are expensive to re-sync later.
+
 ## Plugin layout
 
 - `plugins/telegram/` — Telegram bridge for Claude Code. Per-project state isolation, registry-driven slash menu (`commands-registry.ts`), `/status` shows context-window + session info + plugin version.
