@@ -8,7 +8,7 @@ Cocok dipakai akhir hari (H) untuk laporan yang akan diposting besok pagi (H+1).
 
 | Command | Argumen | Fungsi |
 |---|---|---|
-| `/daily-report` | `[prompt bebas opsional]` | Jalankan `gather-context.sh` untuk mengumpulkan konteks git (commits, status, TODO, archive sebelumnya, file extra), invoke skill `writing-daily-report`, lalu generate report final. Simpan ke `.daily-reports/<DATE>.md`, copy ke clipboard via `pbcopy`, dan print preview ke percakapan. |
+| `/daily-report` | `[prompt bebas opsional]` | Jalankan `gather-context.sh` untuk mengumpulkan konteks git (commits, status, TODO, archive sebelumnya, file extra), invoke skill `writing-daily-report`, lalu generate report final. Simpan ke `.daily-reports/<DATE>.md`, copy ke clipboard (cross-platform: `pbcopy`/`clip.exe`/`xclip`/`wl-copy`, best-effort), dan print preview ke percakapan. |
 
 Prompt bebas bisa berisi: commit hashes, file paths (akan ikut di-include ke konteks), hint `Today`, override nama project (`project=<name>`), atau override jumlah bullet (mis. `"buat 7 yesterday, 4 today"`).
 
@@ -34,7 +34,7 @@ Hello, this is my daily report:
 - ... (default 3 bullets)
 ```
 
-Hasil disimpan ke `.daily-reports/<YYYY-MM-DD>.md` relatif ke root repo (overwrite kalau sudah ada), lalu di-copy ke clipboard via `pbcopy`.
+Hasil disimpan ke `.daily-reports/<YYYY-MM-DD>.md` relatif ke root repo (overwrite kalau sudah ada), lalu di-copy ke clipboard memakai tool yang tersedia di platform (`pbcopy` macOS, `clip.exe` Windows, `xclip`/`wl-copy` Linux). Best-effort — kalau tidak ada, user diminta copy manual dari file.
 
 ## Dari mana konteksnya diambil
 

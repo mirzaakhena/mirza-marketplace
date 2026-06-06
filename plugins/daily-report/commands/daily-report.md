@@ -58,10 +58,16 @@ Apply the generation procedure from the skill. Produce the final report in the l
 Using the `DATE` value from the context blob:
 
 1. Use the Write tool to save the report to `.daily-reports/<DATE>.md` relative to the repo root. Overwrite if it exists.
-2. Pipe the report to `pbcopy` via the Bash tool:
+2. Copy the report to the clipboard via the Bash tool. The clipboard tool differs per platform — run this best-effort snippet (do NOT fail the command if no clipboard tool exists; the file on disk is the source of truth):
 
    ```bash
-   cat .daily-reports/<DATE>.md | pbcopy
+   REPORT=".daily-reports/<DATE>.md"
+   if command -v pbcopy >/dev/null 2>&1; then pbcopy < "$REPORT"          # macOS
+   elif command -v clip.exe >/dev/null 2>&1; then clip.exe < "$REPORT"    # Windows (incl. Git Bash/WSL)
+   elif command -v xclip >/dev/null 2>&1; then xclip -selection clipboard < "$REPORT"  # Linux X11
+   elif command -v wl-copy >/dev/null 2>&1; then wl-copy < "$REPORT"      # Linux Wayland
+   else echo "no clipboard tool found — copy manually from $REPORT" >&2
+   fi
    ```
 
 3. Print the full report to the conversation so the user sees a preview.
@@ -71,6 +77,10 @@ Using the `DATE` value from the context blob:
 End with a short, literal confirmation — no bulleted summary:
 
 > Report saved to `.daily-reports/<DATE>.md` and copied to clipboard.
+
+If no clipboard tool was found, say so instead of claiming the copy succeeded:
+
+> Report saved to `.daily-reports/<DATE>.md` (no clipboard tool found — copy manually).
 
 If context was thin (fewer than 2 commits, no TODO, no free prompt, no prev archive), also add:
 

@@ -86,7 +86,7 @@ If the user explicitly says they will post the report at a different time (e.g.,
 
 9. **`Today` is forward-looking and must be grounded.** Remember `Today` describes the next session, not what was just finished (see "What 'Yesterday' and 'Today' actually mean"). Populate it, in priority order, from:
    - Free-prompt hints ("besok mau X", "today X", "next X").
-   - The latest handoff's `Section 6` ("Apa yang Akan Dikerjakan di Sesi Berikutnya"), if a `.handoff/` file was generated this session.
+   - The latest handoff's `Section 5` ("Apa yang Akan Dikerjakan di Sesi Berikutnya"), if a `.handoff/` file was generated this session.
    - Unfinished items carried from the previous archive's `Today`.
    - TODO file entries.
    - Reasonable continuations of `Yesterday` — e.g., if `Yesterday` has `Add schema` and there is a visible integration task, `Today` may list `Wire schema into endpoint X`.
@@ -129,7 +129,7 @@ Follow this procedure step by step:
    - Cap each bullet at 10–15 words (hard cap 15). If a sub-bullet wants to be 16+ words, split into two bullets or trim. No multi-sentence bullets.
    - Do NOT include work the writer is "about to finish" but hasn't completed yet. If it isn't done, it belongs in `Today`.
 
-4. **Draft `Today`** — remaining work that will be picked up on day H+1 (items not yet completed at the writing moment). Apply the priority ladder in rule 9. If a `.handoff/` markdown was generated this session, its Section 6 ("Apa yang Akan Dikerjakan di Sesi Berikutnya") is the strongest source. Same 10–15 word cap per bullet.
+4. **Draft `Today`** — remaining work that will be picked up on day H+1 (items not yet completed at the writing moment). Apply the priority ladder in rule 9. If a `.handoff/` markdown was generated this session, its Section 5 ("Apa yang Akan Dikerjakan di Sesi Berikutnya") is the strongest source. Same 10–15 word cap per bullet.
 
 5. **Self-check before emitting.**
    - Every bullet: does it trace to at least one piece of context? If not, remove it.
@@ -150,7 +150,7 @@ Follow this procedure step by step:
 
 7. **Persist.** After printing the report:
    - Write it to `.daily-reports/YYYY-MM-DD.md` (using the `DATE` from the context blob; overwrite if the file exists).
-   - Pipe it to `pbcopy` so it lands on the clipboard.
+   - Copy it to the clipboard with whichever tool the platform has (`pbcopy` on macOS, `clip.exe` on Windows, `xclip`/`wl-copy` on Linux — see the snippet in the /daily-report command). Best-effort: if none exists, tell the user to copy manually; do not fail.
 
 ## When context is thin
 
