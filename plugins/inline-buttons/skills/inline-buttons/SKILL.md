@@ -1,6 +1,6 @@
 ---
 name: inline-buttons
-description: MANDATORY before sending every Telegram reply. Self-audit your reply - is it a QUESTION (ends with "?", offers options, asks confirmation) or just an ANSWER? Question means you MUST attach the reply tool's `buttons` parameter - minimum Yes/No plus a final "✏️ Jelaskan manual" fallback. Never send a bare question as plain text.
+description: MANDATORY before sending every Telegram reply. Self-audit your reply - is it a QUESTION (ends with "?", offers options, asks confirmation) or just an ANSWER? Question means you MUST attach the reply tool's `buttons` parameter - minimum Yes/No plus a final "✏️ Jelaskan manual" fallback. Labels stay SHORT - narrate options as a numbered list in the body, buttons are just the numbers. Never send a bare question as plain text.
 ---
 
 # Inline Buttons (Telegram)
@@ -35,10 +35,49 @@ never the right call.
 
 | Answer shape | Buttons |
 |---|---|
-| Confirmation (yes/no, OK/cancel) | `✅ Ya` / `❌ Tidak` (or action verbs) + `✏️ Jelaskan manual` last |
-| Enumerable (A/B/C, ≤ ~8 choices) | one button per choice + `✏️ Jelaskan manual` last |
-| Open-ended ("bagaimana sebaiknya...?") | seed options if any make sense; reframe as yes/no when possible; ALWAYS `✏️ Jelaskan manual` last (the manual button alone is fine) |
-| Overflows 8×8 | as many real buttons as fit, `✏️ Jelaskan manual` last; numbered text list only if it genuinely overflows |
+| Confirmation (yes/no, OK/cancel) | `✅ Ya` / `❌ Tidak` + `✏️ Jelaskan manual` last |
+| Enumerable (A/B/C, options have real descriptions) | **numbered-narration layout** (see below) + `✏️ Jelaskan manual` last |
+| Open-ended ("bagaimana sebaiknya...?") | seed options via numbered narration if any make sense; reframe as yes/no when possible; ALWAYS `✏️ Jelaskan manual` last (the manual button alone is fine) |
+
+## MANDATORY LAYOUT: Short labels + numbered narration
+
+Phone screens truncate long button labels — the user sees "Eksekusi semua
+(def..." and loses the context. Therefore:
+
+**Button labels MUST be short.** For choice menus, narrate the options in
+the message BODY as a numbered list, and make the buttons just the
+numbers:
+
+```
+<narasi penjelasan>
+
+Opsi:
+1. <pilihan satu — boleh panjang, ini di body>
+2. <pilihan dua>
+3. <pilihan tiga>
+4. <pilihan empat>
+```
+
+```json
+"buttons": [
+  [
+    {"label": "1", "callback_id": "opt_1"},
+    {"label": "2", "callback_id": "opt_2"},
+    {"label": "3", "callback_id": "opt_3"},
+    {"label": "4", "callback_id": "opt_4"}
+  ],
+  [{"label": "✏️ Jelaskan manual", "callback_id": "manual"}]
+]
+```
+
+Layout rules:
+- All numeric buttons go in **one row** (they're 1–2 chars wide; up to 8
+  fit). 9+ options: continue on a second row of numbers.
+- The manual button is its own last row, as always.
+- Detail/context lives ONLY in the body's numbered list — never in labels.
+- Yes/no confirmations may keep short word labels (`✅ Ya` / `❌ Tidak`);
+  anything longer than ~15 chars per label → switch to numbered narration.
+- Never put two long-labelled buttons side by side in one row.
 
 ## MANDATORY: The Manual-Fallback Button
 
@@ -96,14 +135,26 @@ original keyboard is auto-stripped — same prompt can't be answered twice.
   [{"label": "✏️ Jelaskan manual", "callback_id": "manual"}]
 ]
 ```
-Use action verbs ("Lanjutkan / Batalkan") over raw yes/no when the action
-is non-trivial.
+Short action verbs ("Lanjutkan / Batalkan") are fine for confirmations —
+keep each label under ~15 chars or switch to numbered narration.
 
-**Single-select (mimic radio) — one row per option, easier on mobile:**
+**Single-select — numbered narration (the default for menus):**
+
+Body:
+```
+Ada 2 cara implementasi:
+
+Opsi:
+1. Daemon Bundle — jalan sebagai service terpisah, lebih stabil
+2. Runtime API — embedded, lebih simpel tapi ikut lifecycle host
+```
+Buttons:
 ```json
 "buttons": [
-  [{"label": "A. Daemon Bundle", "callback_id": "opt_a"}],
-  [{"label": "B. Runtime API", "callback_id": "opt_b"}],
+  [
+    {"label": "1", "callback_id": "opt_1"},
+    {"label": "2", "callback_id": "opt_2"}
+  ],
   [{"label": "✏️ Jelaskan manual", "callback_id": "manual"}]
 ]
 ```
@@ -122,16 +173,21 @@ is non-trivial.
    OK?" + [Ya, hapus][Batal][manual]).
 5. **Don't reuse callback_ids** across simultaneous prompts.
 6. **Manual fallback always last.** Check the last row before sending.
+7. **Short labels only.** Long labels truncate on phones. Menus → numbered
+   narration in the body + numeric buttons in one row.
 
 ## Anti-patterns
 
 ❌ End a reply with a bare question and no buttons (the #1 violation).
-❌ "Pilih A / B / C" as a text list when buttons would render as taps.
+❌ "Pilih A / B / C" as a text list with NO buttons at all.
 ❌ Buttons without the `✏️ Jelaskan manual` last row (#2 violation).
+❌ Long descriptive button labels ("✅ Eksekusi semua (default)") — they
+   truncate on phones; narrate in body, label with a number.
+❌ Two long-labelled buttons squeezed into one row.
 ❌ "OK?" + [Yes][No] with an ambiguous body — spell out the action.
 ✅ Classify QUESTION vs ANSWER before every send.
 ✅ Minimum yes/no + manual on every question, even rhetorical-feeling ones.
-✅ Vertical layout (one button per row) when labels are long.
+✅ Numbered narration in body + one row of numeric buttons + manual last.
 
 ## Pairs With `immediate-reply`
 
@@ -147,7 +203,7 @@ pilihannya..."), research, then `edit_message`/new reply with buttons.
 
 | Situation | Buttons |
 |---|---|
-| "Lanjut?" / "OK?" / "Setuju?" | ✅/❌ + ✏️ manual |
-| "Pilih A/B/C?" | row per option + ✏️ manual |
-| Open-ended question | seed options or yes/no + ✏️ manual |
+| "Lanjut?" / "OK?" / "Setuju?" | ✅ Ya / ❌ Tidak + ✏️ manual |
+| Menu of options | numbered list in body, `[1][2][3]…` one row + ✏️ manual |
+| Open-ended question | seed options (numbered) or yes/no + ✏️ manual |
 | Reply is pure ANSWER (no ask) | no buttons |

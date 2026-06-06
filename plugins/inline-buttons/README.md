@@ -36,11 +36,36 @@ Ritual self-check yang dikodekan di skill: setelah menyusun array `buttons`, lih
 
 Kalau user tap `manual`, balas dengan follow-up pendek (tanpa tombol) yang mengundang free-form text, lalu handle input berikutnya seperti pesan text biasa.
 
+## Layout wajib: label pendek + narasi bernomor
+
+Layar HP memotong label tombol yang panjang — user lihat "Eksekusi semua (def..." dan kehilangan konteks. Maka:
+
+- **Label tombol wajib pendek.** Untuk menu pilihan: opsi dinarasikan sebagai daftar bernomor di BODY pesan, tombolnya cukup angka (`[1][2][3][4]`) dalam **satu baris** (9+ opsi lanjut ke baris angka berikutnya).
+- Detail/konteks hanya hidup di daftar bernomor body — tidak pernah di label.
+- Konfirmasi yes/no boleh tetap label kata pendek (`✅ Ya` / `❌ Tidak`); label > ~15 karakter → pindah ke narasi bernomor.
+- Dilarang dua tombol berlabel panjang berdampingan dalam satu baris.
+- Tombol manual tetap baris terakhir sendiri.
+
+Contoh:
+
+```
+narasi penjelasan ...
+
+Opsi:
+1. pilihan satu
+2. pilihan dua
+3. pilihan tiga
+4. pilihan empat
+
+[1] [2] [3] [4]
+[✏️ Jelaskan manual]
+```
+
 ## Pattern
 
-**Confirmation** (default untuk "should I do X?") — dua tombol aksi + manual di baris bawah. Pakai action verb (`Lanjutkan / Batalkan`) daripada Yes/No kalau action-nya non-trivial.
+**Confirmation** (default untuk "should I do X?") — dua tombol aksi pendek + manual di baris bawah. Action verb pendek (`Lanjutkan / Batalkan`) boleh selama ≤ ~15 karakter.
 
-**Single-Select** — tiap opsi satu baris (vertical layout, lebih kebaca di HP buat label panjang), ditutup tombol manual. Untuk 8+ opsi: render sebanyak yang diizinkan server (maks 8×8), fallback ke numbered text list hanya kalau benar-benar overflow.
+**Single-Select** — narasi bernomor di body + satu baris tombol angka + manual di baris terakhir (lihat layout wajib di atas).
 
 ## Mekanisme & constraint tombol
 

@@ -20,7 +20,7 @@
     },
     {
       "name": "inline-buttons",
-      "description": "Behavioral skill (renamed from interactive-prompts) that forces a self-audit before every Telegram reply: replies that ask a question MUST carry inline-keyboard buttons — minimum Yes/No plus a final manual-fallback button — so the user answers with one tap. Requires telegram >= 0.0.9-mirza.0.",
+      "description": "Behavioral skill (renamed from interactive-prompts) that forces a self-audit before every Telegram reply: replies that ask a question MUST carry inline-keyboard buttons — minimum Yes/No plus a final manual-fallback button — so the user answers with one tap. Labels stay short: options are narrated as a numbered list in the body, buttons are just the numbers. Requires telegram >= 0.0.9-mirza.0.",
       "category": "productivity",
       "source": "./plugins/inline-buttons"
     },

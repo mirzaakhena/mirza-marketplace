@@ -1,7 +1,7 @@
 {
   "name": "inline-buttons",
-  "description": "Self-audit before every Telegram reply: a reply that asks a question MUST carry inline-keyboard buttons (minimum Yes/No) plus a final '✏️ Jelaskan manual' fallback, so the user answers with one tap. Renamed from interactive-prompts. Requires the `telegram` plugin (>= 0.0.9-mirza.0) which exposes the `buttons` parameter on the reply and edit_message tools.",
-  "version": "0.0.4",
+  "description": "Self-audit before every Telegram reply: a reply that asks a question MUST carry inline-keyboard buttons (minimum Yes/No) plus a final '✏️ Jelaskan manual' fallback, so the user answers with one tap. Button labels stay short — options are narrated as a numbered list in the body, buttons are just the numbers. Renamed from interactive-prompts. Requires the `telegram` plugin (>= 0.0.9-mirza.0) which exposes the `buttons` parameter on the reply and edit_message tools.",
+  "version": "0.0.5",
   "author": {
     "name": "Mirza"
   },
