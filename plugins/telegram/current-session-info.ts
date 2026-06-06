@@ -1,5 +1,5 @@
 /**
- * Resolves the currently-active Claude Code session for the /status footer.
+ * Resolves the currently-active Claude Code session for the /context footer.
  *
  * Two layers:
  *   - readCurrentSessionId: reads <pty-state>/wrapper.current_session_id,
@@ -7,7 +7,7 @@
  *   - resolveCurrentSessionName: looks the sessionId up in the persistent
  *     session-names-registry to get the human-readable name.
  *
- * Both layers return null on absence rather than throwing — /status renders
+ * Both layers return null on absence rather than throwing — /context renders
  * a fallback when either is missing.
  */
 import { readFileSync, existsSync } from 'node:fs'

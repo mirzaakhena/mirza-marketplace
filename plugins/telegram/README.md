@@ -4,8 +4,8 @@
 >
 > **Perubahan utama dari upstream:**
 > - **State per-project** — token, database, pairing, dst. disimpan di `<project>/.claude/channels/telegram/`, bukan `~/.claude/channels/telegram/` global. Multi-folder paralel dengan token berbeda.
-> - **Bot commands registry-driven** — `/status`, `/new`, `/switch`, `/delete` (soft/hard/all), `/rename`, `/effort`, `/help`, `/start` didefinisikan di `commands-registry.ts`; slash-menu Telegram di-scope per-audience (unpaired vs paired) via `setMyCommands`.
-> - **`/status` terpadu** — context window %, rate limit 5 jam & 7 hari, model, session, cost, plus versi plugin telegram + pty-controller + wrapper. Bridge statusLine ditulis dalam TypeScript (`scripts/context-bridge.ts`) supaya cross-platform, auto-install saat `/status` pertama.
+> - **Bot commands registry-driven** — `/context`, `/version`, `/new`, `/switch`, `/delete` (soft/hard/all), `/rename`, `/effort`, `/help`, `/start` didefinisikan di `commands-registry.ts`; slash-menu Telegram di-scope per-audience (unpaired vs paired) via `setMyCommands`.
+> - **`/context` terpadu** — context window %, rate limit 5 jam & 7 hari, model, session, cost. Bridge statusLine ditulis dalam TypeScript (`scripts/context-bridge.ts`) supaya cross-platform, auto-install saat `/context` pertama. Versi plugin/wrapper dipisah ke `/version` (telegram + pty-controller + mirza-cc + agent-bus, semuanya di-resolve dinamis — tidak ada yang hardcoded).
 > - **Conversation logging** — semua inbound/outbound/edit dicatat ke `messages.db` (SQLite via `bun:sqlite`); recall via MCP tool `get_message_by_id`.
 > - **Quoted-message support** — reply user membawa `quote_text` + `quote_is_manual` di meta `<channel>`, jadi AI tahu pesan mana yang dirujuk.
 > - **Album batching** — beberapa foto/dokumen yang dikirim sebagai satu Telegram album dikumpulkan jadi 1 notifikasi `<channel>`, bukan N notifikasi terpisah.
@@ -210,8 +210,9 @@ Command yang user ketik **di chat Telegram** (bukan di CC). DM-only — di group
 | Command | Effect |
 |---|---|
 | `/start` | Belum paired: instruksi pairing + kode. Sudah paired: tampilkan identitas (paired as, project dir, session aktif). |
-| `/help [name]` | Tanpa argumen: list command sesuai audience. Dengan nama (mis. `/help status`): detail lengkap + troubleshooting. |
-| `/status` | Pasang statusLine bridge kalau belum (tulis ke `.claude/settings.json`, chain statusLine lama), lalu tampilkan: context window %, rate limit 5 jam & 7 hari, model, session id+nama, working dir, cost, thinking/fast mode, dan versi plugin telegram + pty-controller + wrapper mirza-cc. |
+| `/help [name]` | Tanpa argumen: list command sesuai audience. Dengan nama (mis. `/help context`): detail lengkap + troubleshooting. |
+| `/context` | Pasang statusLine bridge kalau belum (tulis ke `.claude/settings.json`, chain statusLine lama), lalu tampilkan: context window %, rate limit 5 jam & 7 hari, model, session id+nama, working dir, cost, thinking/fast mode, effort level. |
+| `/version` | Tampilkan versi terinstall: plugin telegram (dari `plugin.json`-nya sendiri), plugin pty-controller + wrapper mirza-cc (self-reported via `wrapper.version`), dan plugin agent-bus (dari registry `~/.claude/plugins/installed_plugins.json`). Tidak ada versi yang hardcoded; entry yang sumbernya tidak tersedia di-skip. |
 | `/new <name>` | Clear CC session (via wrapper) dan rename session fresh ke `<name>`. Nama wajib & harus unik di project. Satu pesan transisi dikirim saat session baru benar-benar siap (via system-outbox, tanpa AI). |
 | `/switch` | Picker inline-keyboard ber-pagination untuk pindah session. Tap → wrapper inject `/resume <id>`. |
 | `/delete` | **Soft delete** (default): picker session non-aktif → konfirmasi → session disembunyikan via `archived-sessions.json` (jsonl tetap di disk; unarchive = edit file manual di laptop). |
@@ -235,7 +236,7 @@ Command yang user ketik **di chat Telegram** (bukan di CC). DM-only — di group
     ├── approved/           ← drop-file inbox dari /telegram:access pair (server poll & confirm)
     ├── system-outbox/      ← drop-file inbox dari sibling plugins (mis. session-change events)
     ├── bot.pid             ← process lock (cegah dua poller paralel di project sama)
-    ├── last-status.json    ← capture statusLine terakhir (dipakai /status & /effort)
+    ├── last-status.json    ← capture statusLine terakhir (dipakai /context & /effort)
     ├── chained-statusline  ← original statusLine command (di-chain saat bridge dipasang)
     ├── session-names.json  ← registry session name → sessionId (untuk /switch/rename uniqueness)
     └── archived-sessions.json ← daftar session id yang di-soft-delete via /delete (unarchive = edit manual)

@@ -12,7 +12,7 @@ Katalog resmi ada di [`.claude-plugin/marketplace.json`](.claude-plugin/marketpl
 
 | Plugin | Versi | Apa itu |
 |---|---|---|
-| [`telegram`](plugins/telegram/) | 0.0.25-mirza.0 | **Bridge Telegram ↔ Claude Code** (fork upstream, dimodifikasi berat). State per-project, 5 MCP tools (`reply` + buttons, `react`, `edit_message`, `download_attachment`, `get_message_by_id`), bot commands registry-driven (`/status`, `/new`, `/switch`, `/delete` soft/hard/all, `/rename`, `/effort`, `/help`, `/start`), album batching, quoted-message context, conversation logging ke SQLite, permission relay, system-outbox untuk sibling plugin. |
+| [`telegram`](plugins/telegram/) | 0.0.27-mirza.0 | **Bridge Telegram ↔ Claude Code** (fork upstream, dimodifikasi berat). State per-project, 5 MCP tools (`reply` + buttons, `react`, `edit_message`, `download_attachment`, `get_message_by_id`), bot commands registry-driven (`/context`, `/version`, `/new`, `/switch`, `/delete` soft/hard/all, `/rename`, `/effort`, `/help`, `/start`), album batching, quoted-message context, conversation logging ke SQLite, permission relay, system-outbox untuk sibling plugin. |
 | [`pty-controller`](plugins/pty-controller/) | 0.0.23 | **Claude Code mengontrol dirinya sendiri.** Wrapper `mirza-cc` menjalankan CC di dalam node-pty; plugin menulis request ke inbox filesystem, wrapper menyuntikkan keystroke (`/clear`, `/resume`, prompt text dari agent-bus). MCP tools: `pty_send_slash`, `pty_status`, `pty_list_agents`. Wrapper juga mendaftarkan bot ke agent registry global. |
 | [`agent-bus`](plugins/agent-bus/) | 0.0.3 | **Komunikasi bot-to-bot** antar instance Claude Code di mesin yang sama. MCP tools: `agent_list`, `agent_status`, `agent_send` (prompt natural-language atau slash command, bisa broadcast). One-way dengan anti-bounce rule + hop limit. Bergantung pada pty-controller. |
 
@@ -105,7 +105,7 @@ cd plugins/pty-controller/wrapper && npm run wrapper
 /telegram:access policy allowlist
 ```
 
-Setelah paired, coba kirim `/status` di Telegram — bot harus membalas info context window + session.
+Setelah paired, coba kirim `/context` di Telegram — bot harus membalas info context window + session.
 
 > Catatan: satu bot token hanya boleh punya satu poller. Dua project dengan token sama → `409 Conflict`.
 

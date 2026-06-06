@@ -1,13 +1,18 @@
 /**
- * Resolves the telegram plugin's identity for the /status footer.
+ * Resolves plugin identities for the /version reply.
  *
- * Two-layer split:
+ * Three resolvers, none hardcoded:
  *   - formatPluginVersionLine — pure, easy to test.
- *   - readPluginVersion — I/O: reads package.json and tries git rev-parse.
- *     Falls back gracefully when git isn't available or the plugin isn't
- *     in a git checkout (marketplace install path).
+ *   - readPluginVersion — I/O: reads plugin.json/package.json and tries
+ *     git rev-parse. Falls back gracefully when git isn't available or the
+ *     plugin isn't in a git checkout (marketplace install path).
+ *   - readInstalledPluginVersion — I/O: reads Claude Code's
+ *     ~/.claude/plugins/installed_plugins.json to resolve the installed
+ *     version of a *sibling* plugin (e.g. agent-bus) that doesn't publish
+ *     a runtime version file of its own.
  */
 import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
 
@@ -76,4 +81,39 @@ export function readPluginVersion(pluginDir: string): PluginVersion {
   }
 
   return { name, version, sha }
+}
+
+/**
+ * Resolve the installed version of a sibling plugin from Claude Code's
+ * registry at <registryPath> (defaults to ~/.claude/plugins/installed_plugins.json).
+ *
+ * `pluginName` is matched against registry keys of the form
+ * "<name>@<marketplace>" — the marketplace part is ignored so callers don't
+ * need to know where the plugin was installed from. When multiple installs
+ * exist (registry value is an array), the first entry's version wins.
+ *
+ * Returns null when the registry or the plugin entry is missing, or the
+ * file is malformed — callers omit the line, never crash.
+ */
+export function readInstalledPluginVersion(
+  pluginName: string,
+  registryPath: string = join(homedir(), '.claude', 'plugins', 'installed_plugins.json'),
+): string | null {
+  let parsed: { plugins?: Record<string, unknown> }
+  try {
+    parsed = JSON.parse(readFileSync(registryPath, 'utf8'))
+  } catch {
+    return null
+  }
+  const plugins = parsed?.plugins
+  if (!plugins || typeof plugins !== 'object') return null
+  for (const [key, value] of Object.entries(plugins)) {
+    if (key !== pluginName && !key.startsWith(`${pluginName}@`)) continue
+    const entries = Array.isArray(value) ? value : [value]
+    for (const entry of entries) {
+      const version = (entry as { version?: unknown } | null)?.version
+      if (typeof version === 'string' && version.length > 0) return version
+    }
+  }
+  return null
 }

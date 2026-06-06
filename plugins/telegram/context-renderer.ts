@@ -1,4 +1,4 @@
-// Renderer for Telegram /status reply.
+// Renderer for Telegram /context reply.
 // Pure functions only — no I/O, no bot, no env access. Lives in its own
 // module so it can be unit-tested without booting server.ts.
 
@@ -55,8 +55,10 @@ export function formatJakartaHM(epochMs: number): string {
 }
 
 export function formatResetRemain(resetsAtSec: number, nowMs: number = Date.now()): string {
+  // NB: callers prefix the output with "reset " — never include the word
+  // "reset" here or it doubles up ("reset reset just now").
   const remainSec = resetsAtSec - Math.floor(nowMs / 1000)
-  if (remainSec <= 0) return 'reset just now'
+  if (remainSec <= 0) return 'just now'
   const days = Math.floor(remainSec / 86400)
   const hours = Math.floor((remainSec % 86400) / 3600)
   const minutes = Math.floor((remainSec % 3600) / 60)
@@ -85,8 +87,6 @@ export function shortSession(id: string): string {
 export interface RenderOptions {
   /** When set, displays "Session: <name> (<shortId>)" instead of just shortId. */
   sessionName?: string | null
-  /** Pre-formatted plugin version line (or null/empty to omit). */
-  pluginVersion?: string | null
 }
 
 export function renderContextReply(
@@ -159,11 +159,6 @@ export function renderContextReply(
     meta.push(`Fast: ${p.fast_mode ? 'on' : 'off'}`)
   }
   if (meta.length > 0) sections.push(meta.join('\n'))
-
-  // --- Plugin version (only if caller provided one) ---
-  if (opts.pluginVersion && opts.pluginVersion.length > 0) {
-    sections.push(opts.pluginVersion)
-  }
 
   // --- Last update (always shown) ---
   const age = nowMs - status.captured_at_ms

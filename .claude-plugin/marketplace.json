@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "telegram",
-      "description": "Custom Telegram channel for Claude Code. Forked from the official Telegram plugin, with per-project state, a registry-driven slash menu, /status that shows context window plus session info plus effort level, /delete (safe-default soft delete; /delete hard for permanent), Prev/Next pagination across the session pickers, /effort picker to set Claude's reasoning depth from a phone, quoted-message context forwarded inline to the agent, and get_message_by_id MCP tool for fetching older messages (text + attachments) by ID.",
+      "description": "Custom Telegram channel for Claude Code. Forked from the official Telegram plugin, with per-project state, a registry-driven slash menu, /context that shows context window plus session info plus effort level, /version that lists installed plugin and wrapper versions (telegram, pty-controller, mirza-cc, agent-bus — all resolved dynamically), /delete (safe-default soft delete; /delete hard for permanent), Prev/Next pagination across the session pickers, /effort picker to set Claude's reasoning depth from a phone, quoted-message context forwarded inline to the agent, and get_message_by_id MCP tool for fetching older messages (text + attachments) by ID.",
       "category": "productivity",
       "source": "./plugins/telegram"
     },

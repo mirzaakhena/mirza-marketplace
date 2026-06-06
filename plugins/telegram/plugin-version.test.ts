@@ -2,7 +2,11 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, test, expect } from 'bun:test'
-import { formatPluginVersionLine, readPluginVersion } from './plugin-version'
+import {
+  formatPluginVersionLine,
+  readPluginVersion,
+  readInstalledPluginVersion,
+} from './plugin-version'
 
 describe('formatPluginVersionLine', () => {
   test('with sha → two lines "Plugin: <name>\\nv<version> (<sha>)"', () => {
@@ -64,5 +68,72 @@ describe('readPluginVersion', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('readInstalledPluginVersion', () => {
+  const registryFixture = {
+    version: 2,
+    plugins: {
+      'agent-bus@mirza-marketplace': [
+        { scope: 'user', version: '0.0.3', installPath: '/x/agent-bus/0.0.3' },
+      ],
+      'telegram@mirza-marketplace': [
+        { scope: 'user', version: '0.0.25-mirza.0' },
+      ],
+    },
+  }
+
+  function withRegistry(content: string, fn: (path: string) => void): void {
+    const dir = mkdtempSync(join(tmpdir(), 'ipv-'))
+    const path = join(dir, 'installed_plugins.json')
+    try {
+      writeFileSync(path, content)
+      fn(path)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  test('resolves version by plugin name, ignoring the @marketplace suffix', () => {
+    withRegistry(JSON.stringify(registryFixture), path => {
+      expect(readInstalledPluginVersion('agent-bus', path)).toBe('0.0.3')
+      expect(readInstalledPluginVersion('telegram', path)).toBe('0.0.25-mirza.0')
+    })
+  })
+
+  test('does not match a plugin whose name merely starts the same', () => {
+    withRegistry(JSON.stringify(registryFixture), path => {
+      // "agent" is a prefix of "agent-bus" but not an entry — must be null,
+      // and "agent-bus" must not match a hypothetical "agent" lookup.
+      expect(readInstalledPluginVersion('agent', path)).toBeNull()
+    })
+  })
+
+  test('returns null for an unknown plugin', () => {
+    withRegistry(JSON.stringify(registryFixture), path => {
+      expect(readInstalledPluginVersion('nope', path)).toBeNull()
+    })
+  })
+
+  test('returns null when the registry file is missing', () => {
+    expect(
+      readInstalledPluginVersion('agent-bus', join(tmpdir(), 'does-not-exist.json')),
+    ).toBeNull()
+  })
+
+  test('returns null on malformed JSON', () => {
+    withRegistry('not json', path => {
+      expect(readInstalledPluginVersion('agent-bus', path)).toBeNull()
+    })
+  })
+
+  test('tolerates a non-array entry value', () => {
+    withRegistry(
+      JSON.stringify({ plugins: { 'agent-bus@m': { version: '1.2.3' } } }),
+      path => {
+        expect(readInstalledPluginVersion('agent-bus', path)).toBe('1.2.3')
+      },
+    )
   })
 })

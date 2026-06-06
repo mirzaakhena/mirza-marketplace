@@ -38,12 +38,20 @@ export interface CommandSpec {
 
 export const COMMANDS: CommandSpec[] = [
   {
-    name: 'status',
+    name: 'context',
     audience: 'paired',
     menuHint: 'Context window and session info',
-    helpSummary: 'Context, rate limits, session info, plugin version',
+    helpSummary: 'Context, rate limits, session info',
     helpDetail:
-      'Shows the active Claude Code session\'s context-window usage, 5-hour and 7-day rate-limit usage, model, session id and name, working directory, cost, thinking mode, fast mode, and the plugin version. On the very first call it installs a statusLine bridge into <project>/.claude/settings.json so Claude Code can publish these stats. Troubleshooting: if the "⏳ Installing bridge..." message persists past 15 seconds, make sure Claude Code is running in the project directory.',
+      'Shows the active Claude Code session\'s context-window usage, 5-hour and 7-day rate-limit usage, model, session id and name, working directory, cost, thinking mode, fast mode, and effort level. On the very first call it installs a statusLine bridge into <project>/.claude/settings.json so Claude Code can publish these stats. Troubleshooting: if the "⏳ Installing bridge..." message persists past 15 seconds, make sure Claude Code is running in the project directory. For plugin versions, use /version.',
+  },
+  {
+    name: 'version',
+    audience: 'paired',
+    menuHint: 'Plugin and wrapper versions',
+    helpSummary: 'Installed plugin & wrapper versions',
+    helpDetail:
+      'Shows the installed versions of the telegram plugin (from its plugin.json), the pty-controller plugin and mirza-cc wrapper (self-reported by the running wrapper), and the agent-bus plugin (from Claude Code\'s installed-plugins registry). Entries whose source is unavailable are omitted — e.g. pty-controller/mirza-cc lines disappear when the wrapper is not running.',
   },
   {
     name: 'switch',

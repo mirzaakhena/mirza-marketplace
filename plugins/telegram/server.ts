@@ -34,7 +34,7 @@ import { commonMarkToMarkdownV2 } from './markdown.ts'
 import { tryRouteMetaCommand, tryHandleMetaCallback } from './meta-commands.ts'
 import { readCurrentSessionId, resolveCurrentSessionName } from './current-session-info.ts'
 import { listProjectSessions } from './sessions-list.ts'
-import { readPluginVersion, formatPluginVersionLine } from './plugin-version.ts'
+import { readPluginVersion, formatPluginVersionLine, readInstalledPluginVersion } from './plugin-version.ts'
 
 const STATE_DIR = (() => {
   const resolved = resolveStateDir(process.env)
@@ -1004,7 +1004,7 @@ setInterval(() => {
 }, 5000).unref()
 
 // Commands are DM-only. Responding in groups would: (1) leak pairing codes via
-// /status to other group members, (2) confirm bot presence in non-allowlisted
+// /context to other group members, (2) confirm bot presence in non-allowlisted
 // groups, (3) spam channels the operator never approved. Silent drop matches
 // the gate's behavior for unrecognized groups.
 
@@ -1068,7 +1068,7 @@ bot.command('help', async ctx => {
   )
 })
 
-bot.command('status', async ctx => {
+bot.command('context', async ctx => {
   if (!dmCommandGate(ctx)) return
 
   const install = ensureContextBridgeInstalled()
@@ -1082,15 +1082,12 @@ bot.command('status', async ctx => {
     if (!status) {
       return (
         `Bridge installed, but no data yet.\n\n` +
-        `Claude Code's statusLine has not triggered. Be active in Claude Code for a moment, then send /status again.`
+        `Claude Code's statusLine has not triggered. Be active in Claude Code for a moment, then send /context again.`
       )
     }
     const sessionId = readCurrentSessionId(process.env as Record<string, string | undefined>)
     const sessionName = resolveCurrentSessionName(sessionId, STATE_DIR)
-    return renderContextReply(status, Date.now(), {
-      sessionName,
-      pluginVersion: buildVersionBlock(),
-    })
+    return renderContextReply(status, Date.now(), { sessionName })
   }
 
   if (install.kind === 'installed') {
@@ -1111,12 +1108,17 @@ bot.command('status', async ctx => {
   await ctx.reply(renderNow())
 })
 
+bot.command('version', async ctx => {
+  if (!dmCommandGate(ctx)) return
+  await ctx.reply(buildVersionBlock())
+})
+
 const CONTEXT_BRIDGE_SCRIPT = join(import.meta.dir, 'scripts', 'context-bridge.ts')
 const CONTEXT_BRIDGE_PATH = `bun run "${CONTEXT_BRIDGE_SCRIPT}"`
 
 const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR?.trim() || null
 
-// Resolved once at boot for the /status footer.
+// Resolved once at boot for the /version reply.
 const PLUGIN_VERSION_LINE = (() => {
   const v = readPluginVersion(import.meta.dir)
   return formatPluginVersionLine(v.name, v.version, v.sha)
@@ -1126,7 +1128,7 @@ const PLUGIN_VERSION_LINE = (() => {
  * Read the pty-controller wrapper's self-reported versions, written at boot
  * to <state>/pty-controller/wrapper.version. Returns null for either field
  * if the file is missing, malformed, or pre-dates the version-publishing
- * feature. Best-effort; failures yield null so the /status footer just omits
+ * feature. Best-effort; failures yield null so the /version reply just omits
  * the line.
  */
 function readWrapperVersions(): { plugin_version: string | null; wrapper_version: string | null } | null {
@@ -1145,11 +1147,16 @@ function readWrapperVersions(): { plugin_version: string | null; wrapper_version
 }
 
 /**
- * Build the full version block shown at the bottom of /status. Each entry
- * is rendered as two lines (label on the first, "v<version>" on the second)
- * with a blank line between entries — same shape as the telegram entry
- * produced by formatPluginVersionLine. Entries whose source is missing are
- * dropped silently. The telegram plugin's own version is always present.
+ * Build the full /version reply. Each entry is rendered as two lines (label
+ * on the first, "v<version>" on the second) with a blank line between
+ * entries — same shape as the telegram entry produced by
+ * formatPluginVersionLine. Entries whose source is missing are dropped
+ * silently. The telegram plugin's own version is always present.
+ *
+ * Nothing here is hardcoded: telegram comes from its own plugin.json at
+ * boot, pty-controller + mirza-cc from the wrapper's self-reported
+ * wrapper.version file, and agent-bus from Claude Code's
+ * installed_plugins.json registry.
  */
 function buildVersionBlock(): string {
   const blocks = [PLUGIN_VERSION_LINE]
@@ -1160,10 +1167,14 @@ function buildVersionBlock(): string {
   if (wrapper?.wrapper_version) {
     blocks.push(`Wrapper: mirza-cc\nv${wrapper.wrapper_version}`)
   }
+  const agentBus = readInstalledPluginVersion('agent-bus')
+  if (agentBus) {
+    blocks.push(`Plugin: agent-bus\nv${agentBus}`)
+  }
   return blocks.join('\n\n')
 }
 
-// /status helper: load the most recent statusLine payload (written by
+// /context helper: load the most recent statusLine payload (written by
 // scripts/context-bridge.ts). Returns null if Claude Code hasn't run yet.
 function loadLastStatus(): LastStatus | null {
   const path = join(STATE_DIR, 'last-status.json')
@@ -1183,7 +1194,7 @@ function ensureContextBridgeInstalled(): InstallResult {
   if (!PROJECT_DIR) {
     return {
       kind: 'error',
-      message: 'CLAUDE_PROJECT_DIR is not set; /status needs a project context. Run Claude Code from your project root.'
+      message: 'CLAUDE_PROJECT_DIR is not set; /context needs a project context. Run Claude Code from your project root.'
     }
   }
   const channelsDir = join(PROJECT_DIR, '.claude', 'channels')

@@ -86,9 +86,9 @@ describe('formatResetRemain', () => {
   const nowMs = 1_000_000_000
   const nowSec = nowMs / 1000
 
-  test('past or zero → "reset just now"', () => {
-    expect(formatResetRemain(nowSec, nowMs)).toBe('reset just now')
-    expect(formatResetRemain(nowSec - 10, nowMs)).toBe('reset just now')
+  test('past or zero → "just now" (caller prefixes "reset ", so no "reset" here)', () => {
+    expect(formatResetRemain(nowSec, nowMs)).toBe('just now')
+    expect(formatResetRemain(nowSec - 10, nowMs)).toBe('just now')
   })
   test('minutes only', () => {
     expect(formatResetRemain(nowSec + 5 * 60, nowMs)).toBe('5m')
@@ -298,7 +298,7 @@ describe('renderContextReply (new layout)', () => {
   })
 })
 
-describe('renderContextReply — session name and plugin version', () => {
+describe('renderContextReply — session name and version-free layout', () => {
   const baseStatus: LastStatus = {
     captured_at_ms: Date.UTC(2026, 4, 17, 10, 0, 0),
     payload: {
@@ -320,16 +320,25 @@ describe('renderContextReply — session name and plugin version', () => {
     expect(out).not.toContain('Session: utama')
   })
 
-  test('appends plugin version line as its own section when provided', () => {
-    const out = renderContextReply(baseStatus, Date.UTC(2026, 4, 17, 10, 0, 0), {
-      pluginVersion: 'Plugin: telegram v1.0.0 (abc1234)',
-    })
-    expect(out).toContain('Plugin: telegram v1.0.0 (abc1234)')
-  })
-
-  test('omits plugin version line when not provided', () => {
+  test('never renders a plugin-version section (moved to /version)', () => {
     const out = renderContextReply(baseStatus, Date.UTC(2026, 4, 17, 10, 0, 0))
     expect(out).not.toContain('Plugin:')
+    expect(out).not.toContain('Wrapper:')
+  })
+
+  test('expired rate-limit reset renders "reset just now" exactly once', () => {
+    const s: LastStatus = {
+      ...baseStatus,
+      payload: {
+        ...baseStatus.payload,
+        rate_limits: {
+          five_hour: { used_percentage: 10, resets_at: Math.floor(Date.UTC(2026, 4, 17, 9, 59, 0) / 1000) },
+        },
+      },
+    }
+    const out = renderContextReply(s, Date.UTC(2026, 4, 17, 10, 0, 0))
+    expect(out).toContain('reset just now')
+    expect(out).not.toContain('reset reset')
   })
 })
 

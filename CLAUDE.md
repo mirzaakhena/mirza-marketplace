@@ -47,7 +47,7 @@ Treat this like the version-bump rule above: a plugin change without its README 
 
 ## Plugin layout
 
-- `plugins/telegram/` — Telegram bridge for Claude Code. Per-project state isolation, registry-driven slash menu (`commands-registry.ts`), `/status` shows context-window + session info + plugin version.
+- `plugins/telegram/` — Telegram bridge for Claude Code. Per-project state isolation, registry-driven slash menu (`commands-registry.ts`), `/context` shows context-window + session info; `/version` shows plugin/wrapper versions (all resolved dynamically).
 - `plugins/pty-controller/` — Wraps Claude Code in `node-pty` so the AI can inject slash commands into its own session (powers `/new`, `/switch`, `/delete`, `/rename`).
 - `plugins/immediate-reply/`, `plugins/interactive-prompts/`, `plugins/teach-me/`, `plugins/daily-report/`, `plugins/handoff/` — Behavioral skills, no MCP server.
 
