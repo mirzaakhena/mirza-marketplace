@@ -18,8 +18,8 @@ This skill is loaded whenever the user is coordinating multiple bot peers via th
 You may call `agent_send` only when the user has explicitly said something like:
 - *"tell bot-02 to run /handoff-resume"*
 - *"reset bot-03 with session name X"*
-- *"buatkan handoff untuk bot-04 lalu minta dia jalankan /handoff-resume"*
-- *"switch bot-05 ke session Y"*
+- *"create a handoff for bot-04, then ask it to run /handoff-resume"*
+- *"switch bot-05 to session Y"*
 - *"ask bot-03 to audit the test suite"* — a natural-language prompt to a peer
 
 You may NOT call it because:

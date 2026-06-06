@@ -4,7 +4,7 @@ A **skill-only** plugin that tells Claude to send a short acknowledgement to the
 
 ## Why this plugin exists
 
-Telegram users read from their phones. A 5-second delay with no sign of life feels like the bot is ghosting. An instant acknowledgement ("bentar cek dulu...") before the work starts reassures the user that their message landed and Claude is working, even though the final answer only shows up 30 seconds later.
+Telegram users read from their phones. A 5-second delay with no sign of life feels like the bot is ghosting. An instant acknowledgement ("hang on, checking...") before the work starts reassures the user that their message landed and Claude is working, even though the final answer only shows up 30 seconds later. The ack mirrors the language the user writes in — casual and in their register.
 
 ## Core rule — mechanical pre-flight check
 
@@ -24,14 +24,14 @@ This check is deliberately mechanical, not judgement-based — the old version (
 1. **Instant ack** — a sign of life within ~1 second of the message arriving.
 2. **Continuous progress** — for tasks > 15 seconds, narrate the transitions between stages. Going silent after the ack is almost as bad as not acking at all.
 
-The full skill lives in [`skills/immediate-reply/SKILL.md`](skills/immediate-reply/SKILL.md). That's the source of truth — it has the flow diagram, example ack phrasing per situation (research/file read/thinking/writing), and an anti-pattern list.
+The full skill lives in [`skills/immediate-reply/SKILL.md`](skills/immediate-reply/SKILL.md). That's the source of truth — it has the flow diagram, example ack phrasing per situation (research/file read/thinking/writing), the rule to mirror the user's language, and an anti-pattern list.
 
 ## Update strategies
 
 Once the ack is sent, pick ONE strategy per task (don't switch mid-way):
 
 - **A — Edit-to-final.** Good for 5–15 second tasks. Ack → work → `edit_message` into the final answer. One clean message in the chat.
-- **B — Multi-edit progress + new final reply.** Good for 15–60 second tasks with clear stages. The ack gets edited a few times as progress ("✅ research done, lagi nyusun..."), and the final answer is sent as a **new reply** so the phone's push notification fires.
+- **B — Multi-edit progress + new final reply.** Good for 15–60 second tasks with clear stages. The ack gets edited a few times as progress ("✅ research done, drafting the answer..."), and the final answer is sent as a **new reply** so the phone's push notification fires.
 - **C — Progressive new messages.** Good for a "thinking out loud" feel. A short ack, then the process narration sent as successive new messages.
 - **D — Mix.** Start with edits, switch to new messages if it turns out to take longer than expected. That's fine, as long as the final answer is always a new message when the total is > ~15 seconds.
 

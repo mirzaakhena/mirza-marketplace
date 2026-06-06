@@ -68,8 +68,8 @@ describe('resolveCurrentSessionName', () => {
   test('returns the name when registered', () => {
     writeFileSync(
       join(stateDir, 'session-names.json'),
-      JSON.stringify({ 'sid-x': { name: 'utama', updatedAt: 100 } }),
+      JSON.stringify({ 'sid-x': { name: 'main', updatedAt: 100 } }),
     )
-    expect(resolveCurrentSessionName('sid-x', stateDir)).toBe('utama')
+    expect(resolveCurrentSessionName('sid-x', stateDir)).toBe('main')
   })
 })

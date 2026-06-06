@@ -95,7 +95,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
 
   test('consumes /new but warns when CLAUDE_PROJECT_DIR is missing', async () => {
     const { handler, replies } = makeHandler()
-    const consumed = await tryRouteMetaCommandT('/new bahas MCP', {}, handler)
+    const consumed = await tryRouteMetaCommandT('/new discuss MCP', {}, handler)
     expect(consumed).toBe(true)
     expect(replies.length).toBe(1)
     expect(replies[0].text).toMatch(/CLAUDE_PROJECT_DIR/)
@@ -103,26 +103,26 @@ describe('meta-commands: tryRouteMetaCommand', () => {
 
   test('consumes /new but warns when wrapper heartbeat is missing', async () => {
     const { handler, replies } = makeHandler()
-    const consumed = await tryRouteMetaCommandT('/new bahas MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/new discuss MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(replies.length).toBe(1)
-    expect(replies[0].text).toMatch(/wrapper tidak terdeteksi/)
+    expect(replies[0].text).toMatch(/wrapper not detected/)
     expect(listPending(stateDir).length).toBe(0)
   })
 
   test('consumes /new but warns when heartbeat is stale', async () => {
     const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date(Date.now() - 5 * 60_000).toISOString())
-    const consumed = await tryRouteMetaCommandT('/new bahas MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/new discuss MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
-    expect(replies[0].text).toMatch(/wrapper tidak terdeteksi/)
+    expect(replies[0].text).toMatch(/wrapper not detected/)
     expect(listPending(stateDir).length).toBe(0)
   })
 
   test('writes /clear command file with sessionName and no intermediate ack when wrapper is fresh', async () => {
     const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
-    const consumed = await tryRouteMetaCommandT('/new bahas MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/new discuss MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     // No ack on the happy path — the transition message arrives later via
     // the system-outbox event the wrapper writes after the fresh session
@@ -132,7 +132,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     expect(pending.length).toBe(1)
     const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
     expect(payload.command).toBe('/clear')
-    expect(payload.sessionName).toBe('bahas MCP')
+    expect(payload.sessionName).toBe('discuss MCP')
     expect(typeof payload.id).toBe('string')
     expect(typeof payload.ts).toBe('string')
   })
@@ -140,31 +140,31 @@ describe('meta-commands: tryRouteMetaCommand', () => {
   test('uppercase /NEW also matches (case-insensitive); name preserves case', async () => {
     const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
-    const consumed = await tryRouteMetaCommandT('/NEW Bahas MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/NEW Discuss MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(replies.length).toBe(0)
     const pending = listPending(stateDir)
     expect(pending.length).toBe(1)
     const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
-    expect(payload.sessionName).toBe('Bahas MCP')
+    expect(payload.sessionName).toBe('Discuss MCP')
   })
 
   test('whitespace around /new <name> is tolerated', async () => {
     const { handler } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
-    const consumed = await tryRouteMetaCommandT('  /new bahas MCP  ', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('  /new discuss MCP  ', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     const pending = listPending(stateDir)
     expect(pending.length).toBe(1)
     const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
-    expect(payload.sessionName).toBe('bahas MCP')
+    expect(payload.sessionName).toBe('discuss MCP')
   })
 
   test('honors PTY_CONTROLLER_STATE_DIR override over CLAUDE_PROJECT_DIR', async () => {
     const { handler } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
     const consumed = await tryRouteMetaCommandT(
-      '/new bahas MCP',
+      '/new discuss MCP',
       { PTY_CONTROLLER_STATE_DIR: stateDir, CLAUDE_PROJECT_DIR: '/nowhere/that/exists' },
       handler,
     )
@@ -178,7 +178,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     const consumed = await tryRouteMetaCommandT('/new', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(replies.length).toBe(1)
-    expect(replies[0].text).toMatch(/nama session/i)
+    expect(replies[0].text).toMatch(/session name/i)
     expect(listPending(stateDir).length).toBe(0)
   })
 
@@ -187,19 +187,19 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     setHeartbeat(stateDir, new Date().toISOString())
     const consumed = await tryRouteMetaCommandT('/new      ', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
-    expect(replies[0].text).toMatch(/nama session/i)
+    expect(replies[0].text).toMatch(/session name/i)
     expect(listPending(stateDir).length).toBe(0)
   })
 
   test('strips newlines from /new name (PTY injection safety)', async () => {
     const { handler } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
-    const consumed = await tryRouteMetaCommandT('/new bahas\nMCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/new discuss\nMCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     const pending = listPending(stateDir)
     const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
     // Newlines are replaced with single spaces — never embedded in the name.
-    expect(payload.sessionName).toBe('bahas MCP')
+    expect(payload.sessionName).toBe('discuss MCP')
   })
 
   test('truncates /new name longer than 64 chars', async () => {
@@ -220,7 +220,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     const consumed = await tryRouteMetaCommandT('/rename', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(replies.length).toBe(1)
-    expect(replies[0].text).toMatch(/nama baru/i)
+    expect(replies[0].text).toMatch(/new name/i)
     expect(listPending(stateDir).length).toBe(0)
   })
 
@@ -229,30 +229,30 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     setHeartbeat(stateDir, new Date().toISOString())
     const consumed = await tryRouteMetaCommandT('/rename     ', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
-    expect(replies[0].text).toMatch(/nama baru/i)
+    expect(replies[0].text).toMatch(/new name/i)
     expect(listPending(stateDir).length).toBe(0)
   })
 
   test('writes /rename <name> command to wrapper when fresh', async () => {
     const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
-    const consumed = await tryRouteMetaCommandT('/rename bahas MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/rename discuss MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(replies[0].text).toMatch(/Renaming/i)
     const pending = listPending(stateDir)
     expect(pending.length).toBe(1)
     const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
-    expect(payload.command).toBe('/rename bahas MCP')
+    expect(payload.command).toBe('/rename discuss MCP')
   })
 
   test('strips newlines from /rename name (PTY injection safety)', async () => {
     const { handler } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
-    const consumed = await tryRouteMetaCommandT('/rename bahas\nMCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/rename discuss\nMCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     const pending = listPending(stateDir)
     const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
-    expect(payload.command).toBe('/rename bahas MCP')
+    expect(payload.command).toBe('/rename discuss MCP')
   })
 
   test('truncates /rename name longer than 64 chars', async () => {
@@ -269,9 +269,9 @@ describe('meta-commands: tryRouteMetaCommand', () => {
   test('/rename warns when wrapper heartbeat is stale', async () => {
     const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date(Date.now() - 5 * 60_000).toISOString())
-    const consumed = await tryRouteMetaCommandT('/rename bahas MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/rename discuss MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
-    expect(replies[0].text).toMatch(/wrapper tidak terdeteksi/)
+    expect(replies[0].text).toMatch(/wrapper not detected/)
     expect(listPending(stateDir).length).toBe(0)
   })
 
@@ -282,16 +282,16 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     // <CLAUDE_PROJECT_DIR>/.claude/channels/telegram
     const telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
     mkdirSync(telegramStateDir, { recursive: true })
-    registrySetName(telegramStateDir, 'existing-session-id', 'bahas MCP')
+    registrySetName(telegramStateDir, 'existing-session-id', 'discuss MCP')
 
     const consumed = await tryRouteMetaCommandT(
-      '/new bahas MCP',
+      '/new discuss MCP',
       { CLAUDE_PROJECT_DIR: projectDir },
       handler,
     )
     expect(consumed).toBe(true)
     expect(replies.length).toBe(1)
-    expect(replies[0].text).toMatch(/sudah dipakai/)
+    expect(replies[0].text).toMatch(/already used/)
     expect(listPending(stateDir).length).toBe(0)
   })
 
@@ -311,7 +311,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     )
     expect(consumed).toBe(true)
     expect(replies.length).toBe(1)
-    expect(replies[0].text).toMatch(/sudah dipakai/)
+    expect(replies[0].text).toMatch(/already used/)
     expect(listPending(stateDir).length).toBe(0)
   })
 
@@ -366,7 +366,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     registrySetName(telegramStateDir, 'other-session', 'some other name')
 
     const consumed = await tryRouteMetaCommandT(
-      '/new bahas MCP',
+      '/new discuss MCP',
       { CLAUDE_PROJECT_DIR: projectDir },
       handler,
     )
@@ -376,7 +376,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     expect(pending.length).toBe(1)
     const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
     expect(payload.command).toBe('/clear')
-    expect(payload.sessionName).toBe('bahas MCP')
+    expect(payload.sessionName).toBe('discuss MCP')
   })
 })
 
@@ -446,7 +446,7 @@ describe('meta-commands: /delete picker', () => {
     const consumed = await tryRouteMetaCommandT('/delete', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(replies.length).toBe(1)
-    expect(replies[0].text).toMatch(/Tidak ada session lain/)
+    expect(replies[0].text).toMatch(/No other sessions/)
     expect(replies[0].buttons).toBeUndefined()
   })
 
@@ -479,7 +479,7 @@ describe('meta-commands: /delete picker', () => {
     const { handler, replies } = makeHandler()
     const consumed = await tryRouteMetaCommandT('/delete', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
-    expect(replies[0].text).toMatch(/wrapper tidak terdeteksi/)
+    expect(replies[0].text).toMatch(/wrapper not detected/)
   })
 
   test('/delete proceeds without current-session exclusion when state file is missing', async () => {
@@ -569,8 +569,8 @@ describe('meta-commands: tryHandleMetaCallback for delete', () => {
     expect(cb.acks.length).toBe(1)
     expect(cb.edits.length).toBe(1)
     expect(cb.replies.length).toBe(1)
-    expect(cb.replies[0].text).toMatch(/Hapus session/i)
-    expect(cb.replies[0].text).toMatch(/PERMANEN/i)
+    expect(cb.replies[0].text).toMatch(/Delete session/i)
+    expect(cb.replies[0].text).toMatch(/PERMANENT/i)
     const buttons = cb.replies[0].buttons!.flat()
     expect(buttons.some(b => b.callbackData === `meta:delete_confirm_${shortId}`)).toBe(true)
     expect(buttons.some(b => b.callbackData === 'meta:delete_cancel')).toBe(true)
@@ -605,7 +605,7 @@ describe('meta-commands: tryHandleMetaCallback for delete', () => {
     )
     expect(consumed).toBe(true)
     expect(existsSync(jsonlPath)).toBe(false)
-    expect(cb.edits[0]).toMatch(/dihapus/)
+    expect(cb.edits[0]).toMatch(/deleted/)
   })
 
   test('delete confirm also removes the session name from the registry', async () => {
@@ -645,7 +645,7 @@ describe('meta-commands: tryHandleMetaCallback for delete', () => {
     )
     // File NOT deleted.
     expect(existsSync(jsonlPath)).toBe(true)
-    expect(cb.acks[0]).toMatch(/aktif/i)
+    expect(cb.acks[0]).toMatch(/active/i)
   })
 
   test('delete confirm tolerates already-deleted jsonl', async () => {
@@ -665,7 +665,7 @@ describe('meta-commands: tryHandleMetaCallback for delete', () => {
       cb.handler,
     )
     // Treated as success — the desired outcome is "session gone".
-    expect(cb.edits[0]).toMatch(/dihapus/)
+    expect(cb.edits[0]).toMatch(/deleted/)
   })
 
   test('delete cancel edits message to delete-cancelled', async () => {
@@ -714,7 +714,7 @@ describe('meta-commands: tryHandleMetaCallback for switch', () => {
     // resolution as production (<CLAUDE_PROJECT_DIR>/.claude/channels/telegram).
     const telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
     mkdirSync(telegramStateDir, { recursive: true })
-    registrySetName(telegramStateDir, sidB, 'utama')
+    registrySetName(telegramStateDir, sidB, 'main')
 
     setHeartbeat(stateDir, new Date().toISOString())
 
@@ -740,7 +740,7 @@ describe('meta-commands: tryHandleMetaCallback for switch', () => {
     const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
     expect(payload.type).toBe('switch')
     expect(payload.sessionId).toBe(sidB)
-    expect(payload.sessionName).toBe('utama')
+    expect(payload.sessionName).toBe('main')
   })
 })
 
@@ -1005,7 +1005,7 @@ describe('meta-commands: /delete (soft / default)', () => {
     const { handler, replies } = makeHandler()
     await tryRouteMetaCommand('/delete', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(replies).toHaveLength(1)
-    expect(replies[0]!.text).toContain('Tidak ada session lain')
+    expect(replies[0]!.text).toContain('No other sessions')
   })
 
   test('soft /delete tap session → confirmation prompt mentions manual unarchive', async () => {
@@ -1018,7 +1018,7 @@ describe('meta-commands: /delete (soft / default)', () => {
     await tryHandleMetaCallback(`meta:archive_${targetShort}`, env, cb.handler)
     expect(cb.replies.length).toBe(1)
     expect(cb.replies[0]!.text).toContain('Archive')
-    expect(cb.replies[0]!.text).toContain('untuk unarchive, edit file manual')
+    expect(cb.replies[0]!.text).toContain('to unarchive, edit the file manually')
     expect(cb.replies[0]!.buttons![0]!.map(b => b.callbackData)).toEqual([
       `meta:archive_confirm_${targetShort}`,
       'meta:archive_cancel',
@@ -1184,7 +1184,7 @@ describe('meta-commands: /delete hard (explicit permanent variant)', () => {
     cleanup()
   })
 
-  test('/delete hard shows hard-delete picker with 🗑️ icon and PERMANEN copy on confirm', async () => {
+  test('/delete hard shows hard-delete picker with 🗑️ icon and PERMANENT copy on confirm', async () => {
     const sid = 'aabbccdd-1111-2222-3333-444444444444'
     writeProjectJsonl(homeOverride, projectDir, sid)
     const env = { CLAUDE_PROJECT_DIR: projectDir }
@@ -1195,7 +1195,7 @@ describe('meta-commands: /delete hard (explicit permanent variant)', () => {
     const shortId = sid.replace(/-/g, '').slice(0, 8).toLowerCase()
     const cb = makeCallbackHandler()
     await tryHandleMetaCallback(`meta:delete_${shortId}`, env, cb.handler)
-    expect(cb.replies[0]!.text).toMatch(/PERMANEN/i)
+    expect(cb.replies[0]!.text).toMatch(/PERMANENT/i)
   })
 
   test('/delete hard with extra args still routes to hard path', async () => {
@@ -1442,12 +1442,12 @@ describe('meta-commands: tryHandleMetaCallback effort_*', () => {
     expect(cb.edits.some(t => t.includes('low'))).toBe(true)
   })
 
-  test('meta:effort_cancel does NOT write to wrapper; picker edited to "tidak diubah"', async () => {
+  test('meta:effort_cancel does NOT write to wrapper; picker edited to "unchanged"', async () => {
     const cb = makeCallbackHandler()
     const consumed = await tryHandleMetaCallback('meta:effort_cancel', { CLAUDE_PROJECT_DIR: projectDir }, cb.handler)
     expect(consumed).toBe(true)
     expect(listPending(stateDir).length).toBe(0)
-    expect(cb.edits.some(t => /tidak diubah/i.test(t))).toBe(true)
+    expect(cb.edits.some(t => /unchanged/i.test(t))).toBe(true)
   })
 
   test('meta:effort_<each-of-6-levels> all write the correct command', async () => {
@@ -1527,7 +1527,7 @@ describe('meta-commands: /delete all & /delete hard all', () => {
     expect(buttons.some(b => b.label.includes('2'))).toBe(true)
   })
 
-  test('/delete hard all routes to hard-all confirm with PERMANEN copy, not the picker', async () => {
+  test('/delete hard all routes to hard-all confirm with PERMANENT copy, not the picker', async () => {
     const sids = seedN(2, 'b')
     writeCurrentSessionId(stateDir, sids[0]!)
     const { handler, replies } = makeHandler()
@@ -1535,7 +1535,7 @@ describe('meta-commands: /delete all & /delete hard all', () => {
     const buttons = replies[0]!.buttons!.flat()
     expect(buttons.some(b => b.callbackData === 'meta:delete_all_confirm')).toBe(true)
     expect(buttons.some(b => b.callbackData === 'meta:delete_all_cancel')).toBe(true)
-    expect(replies[0]!.text).toMatch(/PERMANEN/i)
+    expect(replies[0]!.text).toMatch(/PERMANENT/i)
   })
 
   test('/delete all with only the current session replies no-other-sessions, no buttons', async () => {
@@ -1543,7 +1543,7 @@ describe('meta-commands: /delete all & /delete hard all', () => {
     writeCurrentSessionId(stateDir, sids[0]!)
     const { handler, replies } = makeHandler()
     await tryRouteMetaCommand('/delete all', { CLAUDE_PROJECT_DIR: projectDir }, handler)
-    expect(replies[0]!.text).toMatch(/Tidak ada session lain/)
+    expect(replies[0]!.text).toMatch(/No other sessions/)
     expect(replies[0]!.buttons).toBeUndefined()
   })
 
@@ -1565,7 +1565,7 @@ describe('meta-commands: /delete all & /delete hard all', () => {
     expect(registry.get(sids[1]!)!.name).toBe(`session-01__${short1}`)
     expect(registry.get(sids[2]!)!.name).toBe(`session-02__${short2}`)
     expect(findSessionIdByName(registry, 'session-01')).toBeNull()
-    expect(cb.edits[0]).toMatch(/2 session diarchive/)
+    expect(cb.edits[0]).toMatch(/2 sessions archived/)
   })
 
   test('delete_all_confirm rmSyncs every non-current jsonl and frees each name', async () => {
@@ -1584,7 +1584,7 @@ describe('meta-commands: /delete all & /delete hard all', () => {
     expect(existsSync(jsonl(sids[2]!))).toBe(false)
     expect(existsSync(jsonl(sids[0]!))).toBe(true) // current untouched
     expect(loadRegistry(telegramStateDir).has(sids[1]!)).toBe(false)
-    expect(cb.edits[0]).toMatch(/2 session dihapus permanen/)
+    expect(cb.edits[0]).toMatch(/2 sessions permanently deleted/)
   })
 
   test('confirm skips a session that became active between command and tap', async () => {
@@ -1598,8 +1598,8 @@ describe('meta-commands: /delete all & /delete hard all', () => {
     await tryHandleMetaCallback('meta:archive_all_confirm', env, cb.handler)
 
     expect(loadArchived(telegramStateDir)).toEqual(new Set([sids[2]!]))
-    expect(cb.edits[0]).toMatch(/1 session diarchive/)
-    expect(cb.edits[0]).toMatch(/1 dilewati/)
+    expect(cb.edits[0]).toMatch(/1 sessions archived/)
+    expect(cb.edits[0]).toMatch(/1 skipped/)
   })
 
   test('archive_all_confirm with empty snapshot reports expired and changes nothing', async () => {

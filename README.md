@@ -12,19 +12,19 @@ The official catalog lives in [`.claude-plugin/marketplace.json`](.claude-plugin
 
 | Plugin | Version | What it is |
 |---|---|---|
-| [`telegram`](plugins/telegram/) | 0.0.28-mirza.0 | **Telegram ↔ Claude Code bridge** (upstream fork, heavily modified). Per-project state, 5 MCP tools (`reply` + buttons, `react`, `edit_message`, `download_attachment`, `get_message_by_id`), registry-driven bot commands (`/context`, `/version`, `/new`, `/switch`, `/delete` soft/hard/all, `/rename`, `/effort`, `/help`, `/start`), album batching, quoted-message context, conversation logging to SQLite, permission relay, system-outbox for sibling plugins. |
-| [`pty-controller`](plugins/pty-controller/) | 0.0.23 | **Claude Code controls itself.** The `mirza-cc` wrapper runs CC inside node-pty; the plugin writes requests to a filesystem inbox, the wrapper injects keystrokes (`/clear`, `/resume`, prompt text from agent-bus). MCP tools: `pty_send_slash`, `pty_status`, `pty_list_agents`. The wrapper also registers the bot in the global agent registry. |
-| [`agent-bus`](plugins/agent-bus/) | 0.0.6 | **Bot-to-bot communication** between Claude Code instances on the same machine. MCP tools: `agent_list`, `agent_status`, `agent_send` (natural-language prompt or slash command, can broadcast). One-way with an anti-bounce rule + hop limit. Depends on pty-controller. |
+| [`telegram`](plugins/telegram/) | 0.0.31-mirza.0 | **Telegram ↔ Claude Code bridge** (upstream fork, heavily modified). Per-project state, 5 MCP tools (`reply` + buttons, `react`, `edit_message`, `download_attachment`, `get_message_by_id`), registry-driven bot commands (`/context`, `/version`, `/new`, `/switch`, `/delete` soft/hard/all, `/rename`, `/effort`, `/help`, `/start`), album batching, quoted-message context, conversation logging to SQLite, permission relay, system-outbox for sibling plugins. |
+| [`pty-controller`](plugins/pty-controller/) | 0.0.24 | **Claude Code controls itself.** The `mirza-cc` wrapper runs CC inside node-pty; the plugin writes requests to a filesystem inbox, the wrapper injects keystrokes (`/clear`, `/resume`, prompt text from agent-bus). MCP tools: `pty_send_slash`, `pty_status`, `pty_list_agents`. The wrapper also registers the bot in the global agent registry. |
+| [`agent-bus`](plugins/agent-bus/) | 0.0.8 | **Bot-to-bot communication** between Claude Code instances on the same machine. MCP tools: `agent_list`, `agent_status`, `agent_send` (natural-language prompt or slash command, can broadcast). One-way with an anti-bounce rule + hop limit. Depends on pty-controller. |
 
 ### Behavioral skills (no MCP server)
 
 | Plugin | Version | What it is |
 |---|---|---|
-| [`immediate-reply`](plugins/immediate-reply/) | 0.0.5 | Instant ack (~1 second) before the first tool call on every Telegram inbound — a mechanical 4-question pre-flight check, plus progress narration for long tasks. |
-| [`inline-buttons`](plugins/inline-buttons/) | 0.0.6 | Self-audit on every Telegram reply: QUESTION or ANSWER? A question MUST use inline-keyboard buttons — minimum Yes/No + an escape button `✏️ Jelaskan manual`, short labels (options narrated as a numbered list in the body, buttons just hold the numbers). Requires telegram ≥ 0.0.9-mirza.0. |
-| [`teach-me`](plugins/teach-me/) | 0.0.1 | Teaching mode: build a mental model step by step when the user wants to understand a concept — 10 style elements + an anti-pattern list. |
-| [`handoff`](plugins/handoff/) | 0.0.8 | `/handoff` captures the session into a 10-section markdown file in `<repo>/.handoff/` (with a clarity check + brainstorm); `/handoff-resume [yes]` reloads it in a new session with a human gate. |
-| [`daily-report`](plugins/daily-report/) | 0.0.3 | `/daily-report` assembles a paste-ready plain-text daily work report for any chat app from git activity, with a locked Yesterday/Today template and anti-fabrication rules. |
+| [`immediate-reply`](plugins/immediate-reply/) | 0.0.6 | Instant ack (~1 second) before the first tool call on every Telegram inbound — a mechanical 4-question pre-flight check, plus progress narration for long tasks. |
+| [`inline-buttons`](plugins/inline-buttons/) | 0.0.8 | Self-audit on every Telegram reply: QUESTION or ANSWER? A question MUST use inline-keyboard buttons — minimum Yes/No + an escape button `✏️ Explain manually`, short labels (options narrated as a numbered list in the body, buttons just hold the numbers). Requires telegram ≥ 0.0.9-mirza.0. |
+| [`teach-me`](plugins/teach-me/) | 0.0.2 | Teaching mode: build a mental model step by step when the user wants to understand a concept — 10 style elements + an anti-pattern list. |
+| [`handoff`](plugins/handoff/) | 0.0.10 | `/handoff` captures the session into a 10-section markdown file in `<repo>/.handoff/` (with a clarity check + brainstorm); `/handoff-resume [yes]` reloads it in a new session with a human gate. |
+| [`daily-report`](plugins/daily-report/) | 0.0.4 | `/daily-report` assembles a paste-ready plain-text daily work report for any chat app from git activity, with a locked Yesterday/Today template and anti-fabrication rules. |
 | [`bot-conduct`](plugins/bot-conduct/) | 0.0.2 | Working rules for agent bots: git worktree (not branch-switching), commits with an `Agent: <bot-name>` trailer, subagent-first so the main loop stays responsive, channel discipline (answer in the channel the question came from), and a cross-bot playbook at `~/.claude/agent-playbook/PLAYBOOK.md`. |
 
 ### How it all fits together

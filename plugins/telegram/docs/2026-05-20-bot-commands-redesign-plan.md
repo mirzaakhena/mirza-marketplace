@@ -139,7 +139,7 @@ export const COMMANDS: CommandSpec[] = [
     menuHint: 'Start a fresh named session',
     helpSummary: 'Start a fresh named Claude session',
     helpDetail:
-      'Clears the current session and creates a fresh one with the given name. Usage: /new <name>. Example: /new bahas MCP. The wrapper (mirza-cc) must be running; otherwise the command replies with an error.',
+      'Clears the current session and creates a fresh one with the given name. Usage: /new <name>. Example: /new discuss MCP. The wrapper (mirza-cc) must be running; otherwise the command replies with an error.',
   },
   {
     name: 'switch',
@@ -160,7 +160,7 @@ export const COMMANDS: CommandSpec[] = [
     menuHint: 'Rename the current session',
     helpSummary: 'Rename the active session',
     helpDetail:
-      'Renames the currently active session. Usage: /rename <name>. Example: /rename utama. Names must be unique within the project; the command rejects duplicates.',
+      'Renames the currently active session. Usage: /rename <name>. Example: /rename main. Names must be unique within the project; the command rejects duplicates.',
   },
 ]
 ```
@@ -686,9 +686,9 @@ describe('resolveCurrentSessionName', () => {
   test('returns the name when registered', () => {
     writeFileSync(
       join(stateDir, 'session-names.json'),
-      JSON.stringify({ 'sid-x': { name: 'utama', updatedAt: 100 } }),
+      JSON.stringify({ 'sid-x': { name: 'main', updatedAt: 100 } }),
     )
-    expect(resolveCurrentSessionName('sid-x', stateDir)).toBe('utama')
+    expect(resolveCurrentSessionName('sid-x', stateDir)).toBe('main')
   })
 })
 ```
@@ -801,15 +801,15 @@ describe('renderContextReply — session name and plugin version', () => {
 
   test('shows "Session: <name> (<shortId>)" when sessionName is provided', () => {
     const out = renderContextReply(baseStatus, Date.UTC(2026, 4, 17, 10, 0, 0), {
-      sessionName: 'utama',
+      sessionName: 'main',
     })
-    expect(out).toContain('Session: utama (76b5c187)')
+    expect(out).toContain('Session: main (76b5c187)')
   })
 
   test('falls back to "Session: <shortId>" when no sessionName', () => {
     const out = renderContextReply(baseStatus, Date.UTC(2026, 4, 17, 10, 0, 0))
     expect(out).toContain('Session: 76b5c187')
-    expect(out).not.toContain('Session: utama')
+    expect(out).not.toContain('Session: main')
   })
 
   test('appends plugin version line as its own section when provided', () => {
@@ -946,7 +946,7 @@ git commit -m "feat(telegram): extend renderContextReply with sessionName and pl
 - Modify: `context-renderer.ts`
 - Modify: `context-renderer.test.ts`
 
-Per spec lock §8, touched UI strings move to English. The strings: `'baru'`, `'Xs lalu'`, `'Xm lalu'`, `'Xh lalu'`, `'Xh Ym lalu'`, `'tidak tersedia'`, `'reset baru saja'`.
+Per spec lock §8, touched UI strings move to English. The relative-time strings become: `'just now'`, `'Xs ago'`, `'Xm ago'`, `'Xh ago'`, `'Xh Ym ago'`, the unavailable placeholder becomes `'unavailable'`, and the reset-now branch becomes `'reset just now'`.
 
 - [ ] **Step 9.1: Update existing tests to expect English**
 
@@ -972,12 +972,12 @@ describe('formatRelativeMs', () => {
 })
 ```
 
-Also, in the `renderContextReply` tests further down (search for `'(tidak tersedia)'` and `'reset baru saja'` in the file), update any assertions to the English equivalents — `'(unavailable)'` and `'reset just now'`. Use Grep on the test file before editing to find exact lines.
+Also, in the `renderContextReply` tests further down (search for the old unavailable placeholder and reset-now strings in the file), update any assertions to the English equivalents — `'(unavailable)'` and `'reset just now'`. Use Grep on the test file before editing to find exact lines.
 
 - [ ] **Step 9.2: Run tests, expect failures on the touched assertions**
 
 Run: `bun test context-renderer.test.ts`
-Expected: The 5 `formatRelativeMs` tests and any `tidak tersedia` / `reset baru saja` assertions FAIL.
+Expected: The 5 `formatRelativeMs` tests and any unavailable-placeholder / reset-now assertions FAIL.
 
 - [ ] **Step 9.3: Translate the renderer strings**
 
@@ -998,13 +998,13 @@ export function formatRelativeMs(ageMs: number): string {
 }
 ```
 
-Replace `formatResetRemain` "reset baru saja" branch (around line 58) with:
+Replace the `formatResetRemain` reset-now branch (around line 58) with:
 
 ```ts
   if (remainSec <= 0) return 'reset just now'
 ```
 
-The `'(tidak tersedia)'` placeholder (already replaced in Task 8.3 to `'(unavailable)'`). If still present, change it now.
+The old unavailable placeholder (already replaced in Task 8.3 with `'(unavailable)'`). If still present, change it now.
 
 - [ ] **Step 9.4: Run tests, expect pass**
 
@@ -1336,10 +1336,10 @@ git commit -m "feat(telegram): /status takes over /context body, adds session na
 In `server.ts`, in `ensureContextBridgeInstalled` (around lines 947-1014):
 
 - Replace `'CLAUDE_PROJECT_DIR is not set; /context needs a project context. Run Claude Code from your project root.'` with `'CLAUDE_PROJECT_DIR is not set; /status needs a project context. Run Claude Code from your project root.'`
-- Replace `\`${settingsPath} bukan JSON valid (mungkin ada komentar?). Perbaiki manual lalu coba lagi. (${(err as Error).message})\`` with `\`${settingsPath} is not valid JSON (comments?). Fix manually and try again. (${(err as Error).message})\``
-- Replace `\`gagal menyiapkan channels dir: ${giResult.reason ?? 'unknown error'}\`` with `\`failed to prepare channels dir: ${giResult.reason ?? 'unknown error'}\``
-- Replace `\`gagal menulis ${STATE_DIR}: ${(err as Error).message}\`` with `\`failed to write ${STATE_DIR}: ${(err as Error).message}\``
-- Replace `\`gagal menulis ${settingsPath}: ${(err as Error).message}\`` with `\`failed to write ${settingsPath}: ${(err as Error).message}\``
+- Replace the old "invalid JSON" error with `\`${settingsPath} is not valid JSON (comments?). Fix manually and try again. (${(err as Error).message})\``
+- Replace the old "prepare channels dir failed" error with `\`failed to prepare channels dir: ${giResult.reason ?? 'unknown error'}\``
+- Replace the old "write STATE_DIR failed" error with `\`failed to write ${STATE_DIR}: ${(err as Error).message}\``
+- Replace the old "write settingsPath failed" error with `\`failed to write ${settingsPath}: ${(err as Error).message}\``
 
 - [ ] **Step 15.2: Delete the /context handler block**
 
@@ -1426,7 +1426,7 @@ Send `/status`. Confirm:
 - Context bar, rate-limit bars, model line.
 - `Session: <name> (<shortId>)` if the active session has a registered name; `Session: <shortId>` otherwise.
 - `Plugin: telegram v<version> (<sha?>)` line.
-- `Last update:` with English relative time (e.g. `(3m ago)`, not `(3m lalu)`).
+- `Last update:` with English relative time (e.g. `(3m ago)`).
 
 If this is the first `/status` since the new build, the "⏳ Installing bridge..." ack should appear briefly, then edit into the data.
 
@@ -1453,6 +1453,6 @@ After the last commit, do a single pass to verify:
 3. **Type consistency.** `renderContextReply` is called from `/status` with `{ sessionName, pluginVersion }` — matches the `RenderOptions` interface from Task 8.3. `toSetMyCommandsPayload()` returns `{command, description}[]` — matches grammy's `setMyCommands` signature.
 4. **String-language scan.** Run `bun test` once more and grep new + modified files for remaining Indonesian:
 
-   Run: `Grep -nE '\b(tidak|gagal|baru|lalu|sudah|saja|bukan|coba|sebentar)\b' plugins/telegram/{server,context-renderer,commands-registry,plugin-version,current-session-info}.ts`
+   Run a Grep over `plugins/telegram/{server,context-renderer,commands-registry,plugin-version,current-session-info}.ts` for common Indonesian stop-words (e.g. negation, "failed", relative-time markers).
 
    Expected: no matches in lines this plan modified. Pre-existing Indonesian strings in *untouched* code (e.g. `meta-commands.ts` user-facing replies) stay per spec lock §8 — out of scope this round.

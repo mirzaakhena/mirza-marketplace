@@ -16,7 +16,7 @@ Steps to follow exactly, in order:
 
 2. If the wrapper is alive: call `mcp__pty-controller__pty_send_slash` with `command: "/clear"`. The tool returns immediately, but the actual `/clear` keystroke fires only after this turn completes (CC consumes its stdin between turns). That is intentional.
 
-3. If the request originated from Telegram (you can tell from the inbound `<channel>` block), send a brief confirmation reply now via the Telegram reply tool — for example "Sip, clearing now. Akan kasih tahu kalau sudah fresh." — so the user has acknowledgement before the clear takes effect.
+3. If the request originated from Telegram (you can tell from the inbound `<channel>` block), send a brief confirmation reply now via the Telegram reply tool — for example "Got it, clearing now. I'll let you know once the session is fresh." — so the user has acknowledgement before the clear takes effect.
 
 4. End your response. Do NOT continue with other work after this. The next thing CC processes will be your `/clear`, after which a fresh session begins.
 

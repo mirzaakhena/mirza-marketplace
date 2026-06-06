@@ -19,9 +19,9 @@ $ARGUMENTS is a **brief**, not the literal text of the message. Treat it as a on
 
 Examples:
 
-- `/notify-user reminder meeting jam 3 sore` → you might send: *"⏰ Heads-up, meeting jam 3 sore — sudah siap?"*
-- `/notify-user deployment selesai, cek log di /tmp/deploy.log` → *"✅ Deployment beres. Log-nya di `/tmp/deploy.log` kalau mau review."*
-- `/notify-user fresh session siap, tanya user mau lanjutin apa` → *"🆕 Session fresh sudah ready. Lanjut yang mana?"*
+- `/notify-user reminder meeting at 3pm` → you might send: *"⏰ Heads-up, meeting at 3pm — all set?"*
+- `/notify-user deployment done, check the log at /tmp/deploy.log` → *"✅ Deployment finished. Log is at `/tmp/deploy.log` if you want to review."*
+- `/notify-user fresh session ready, ask the user what to work on next` → *"🆕 Fresh session is ready. What should we tackle next?"*
 
 If `$ARGUMENTS` is empty or whitespace-only, this was a hand-fired test with no payload — end without sending anything.
 
@@ -34,7 +34,7 @@ If `$ARGUMENTS` is empty or whitespace-only, this was a hand-fired test with no 
    - If the file does not exist, `allowFrom` is missing, or `allowFrom[]` is empty: **there is no one to notify**. End without sending. Do not error noisily — this is an expected state on a fresh, unpaired install.
 
 2. **Construct the message text from the brief.**
-   - Language: Indonesian, casual (this project's user prefers it). Stay short — one or two short paragraphs at most; Telegram is glanced at on a phone.
+   - Language: match the user's preferred language; keep the tone casual. Stay short — one or two short paragraphs at most; Telegram is glanced at on a phone.
    - Interpret the brief, don't translate it. Add a light tone-marker emoji if it fits; skip if it doesn't.
    - **Do not invent facts** that aren't in the brief. If the brief is vague ("notify user"), keep the message vague too — don't fabricate context to make it look richer.
    - Do not append your own commentary, sign-off, or follow-up question unless the brief asks for one.

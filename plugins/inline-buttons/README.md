@@ -15,13 +15,13 @@ Before sending **every** Telegram reply, Claude classifies the text as one of tw
 1. **ANSWER** — informs, reports, confirms done. Doesn't ask anything → send as-is, no buttons.
 2. **QUESTION** — ends by asking or offering. Signals (any single one is enough): text ends with `?`, phrases like "want X or Y" / "continue?" / "pick" / "confirm" / "OK / Cancel" / "yes / no" / "agree?", or there's a menu of choices → the **`buttons` parameter MUST be attached. No exceptions.**
 
-**Minimum button set for any question: `✅ Ya / ❌ Tidak` + a manual fallback.** If the answer can't be enumerated, you can at least always offer a yes/no framing plus a manual button — a plain-text question is never the right choice.
+**Minimum button set for any question: `✅ Yes / ❌ No` + a manual fallback.** If the answer can't be enumerated, you can at least always offer a yes/no framing plus a manual button — a plain-text question is never the right choice.
 
 This check is deliberately mechanical (classify QUESTION vs ANSWER), not judgement-based ("would buttons be nicer?") — the old version that relied on mid-compose awareness proved to forget exactly at the end of long replies.
 
 ## Mandatory: manual fallback button
 
-**EVERY prompt that shows buttons — yes/no, single-select, or open-ended — MUST have a final button labeled `✏️ Jelaskan manual` ("explain manually") with `callback_id: "manual"`. No exceptions.**
+**EVERY prompt that shows buttons — yes/no, single-select, or open-ended — MUST have a final button labeled `✏️ Explain manually` with `callback_id: "manual"`. No exceptions.**
 
 The reasons:
 
@@ -40,7 +40,7 @@ Phone screens truncate long button labels — the user sees "Execute all (def...
 
 - **Button labels must be short.** For a menu of choices: options are narrated as a numbered list in the message BODY, and the buttons are just numbers (`[1][2][3][4]`) on a **single row** (9+ options spill onto the next number row).
 - Detail/context lives only in the numbered list in the body — never in the label.
-- Yes/no confirmations may keep short word labels (`✅ Ya` / `❌ Tidak`); a label > ~15 characters → move it to the numbered narration.
+- Yes/no confirmations may keep short word labels (`✅ Yes` / `❌ No`); a label > ~15 characters → move it to the numbered narration.
 - No two long-labeled buttons side by side on one row.
 - The manual button stays on its own last row.
 
@@ -56,12 +56,12 @@ Options:
 4. option four
 
 [1] [2] [3] [4]
-[✏️ Jelaskan manual]
+[✏️ Explain manually]
 ```
 
 ## Patterns
 
-**Confirmation** (default for "should I do X?") — two short action buttons + manual on the bottom row. Short action verbs (`Lanjutkan / Batalkan`) are fine as long as they're ≤ ~15 characters.
+**Confirmation** (default for "should I do X?") — two short action buttons + manual on the bottom row. Short action verbs (`Continue / Cancel`) are fine as long as they're ≤ ~15 characters.
 
 **Single-Select** — numbered narration in the body + a single row of number buttons + manual on the last row (see mandatory layout above).
 
@@ -80,7 +80,7 @@ A tap arrives as a new `<channel>` message containing `[button tapped: <label>]`
 ## Forbidden anti-patterns
 
 - Ending a reply with a plain question and no buttons (violation #1)
-- Forgetting the `✏️ Jelaskan manual` button on the last row (violation #2)
+- Forgetting the `✏️ Explain manually` button on the last row (violation #2)
 - Listing options as text "Pick A / B / C / D" when they could be buttons
 - Asking "continue?" for a trivial step whose answer is obviously yes (the rule: don't ask, just proceed — not ask without buttons)
 - Destructive operations with no context in the message body (a button label alone is too short — write the action in the body)

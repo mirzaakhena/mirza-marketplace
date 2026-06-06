@@ -309,15 +309,15 @@ describe('renderContextReply — session name and version-free layout', () => {
 
   test('shows "Session: <name> (<shortId>)" when sessionName is provided', () => {
     const out = renderContextReply(baseStatus, Date.UTC(2026, 4, 17, 10, 0, 0), {
-      sessionName: 'utama',
+      sessionName: 'main',
     })
-    expect(out).toContain('Session: utama (76b5c187)')
+    expect(out).toContain('Session: main (76b5c187)')
   })
 
   test('falls back to "Session: <shortId>" when no sessionName', () => {
     const out = renderContextReply(baseStatus, Date.UTC(2026, 4, 17, 10, 0, 0))
     expect(out).toContain('Session: 76b5c187')
-    expect(out).not.toContain('Session: utama')
+    expect(out).not.toContain('Session: main')
   })
 
   test('never renders a plugin-version section (moved to /version)', () => {

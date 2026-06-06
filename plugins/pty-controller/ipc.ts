@@ -27,7 +27,7 @@ export interface PtyCommand {
  * Resolve the IPC state dir.
  *
  * Default: <CLAUDE_PROJECT_DIR>/.claude/channels/pty-controller. Keeps state
- * per-project (consistent with telegram plugin's filosofi). Escape hatch:
+ * per-project (consistent with the telegram plugin's philosophy). Escape hatch:
  * PTY_CONTROLLER_STATE_DIR env var lets a custom wrapper point elsewhere
  * (e.g., a global location if a user runs one wrapper for all projects).
  */

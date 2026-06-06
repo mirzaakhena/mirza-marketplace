@@ -82,7 +82,7 @@ describe('messages-store: logInbound full payload', () => {
       message_id: '100',
       user_id: '777',
       user_name: 'mirza',
-      text: 'lihat ini',
+      text: 'look at this',
       attachments: [
         { type: 'photo', path: '/inbox/abc.jpg', file_id: 'AgAC' },
       ],
@@ -334,9 +334,9 @@ describe('messages-store: logInbound quote_text', () => {
       message_id: '301',
       user_id: 'U_Q',
       user_name: 'mirza',
-      text: 'Ini..',
+      text: 'This..',
       reply_to: '300',
-      quote_text: 'bagian yang dipilih user',
+      quote_text: 'the part the user selected',
       quote_is_manual: true,
     })
 
@@ -344,7 +344,7 @@ describe('messages-store: logInbound quote_text', () => {
       .query('SELECT metadata FROM messages WHERE message_id = ?')
       .get('301') as any
     expect(JSON.parse(row.metadata)).toEqual({
-      quote_text: 'bagian yang dipilih user',
+      quote_text: 'the part the user selected',
       quote_is_manual: true,
     })
     store.close()
@@ -359,7 +359,7 @@ describe('messages-store: logInbound quote_text', () => {
       chat_id: 'CHAT_Q',
       message_id: '302',
       text: 'reply to album',
-      quote_text: 'caption album asal',
+      quote_text: 'original album caption',
       quote_is_manual: false,
       metadata: {
         media_group_id: 'MG_X',
@@ -373,7 +373,7 @@ describe('messages-store: logInbound quote_text', () => {
     expect(JSON.parse(row.metadata)).toEqual({
       media_group_id: 'MG_X',
       message_ids: ['302', '303'],
-      quote_text: 'caption album asal',
+      quote_text: 'original album caption',
       quote_is_manual: false,
     })
     store.close()
@@ -410,10 +410,10 @@ describe('messages-store: getMessage', () => {
       message_id: '500',
       user_id: 'U500',
       user_name: 'mirza',
-      text: 'pesan dengan foto',
+      text: 'message with photo',
       attachments: [{ type: 'photo', path: '/inbox/x.jpg' }],
       reply_to: '499',
-      quote_text: 'sebelumnya',
+      quote_text: 'previous one',
       quote_is_manual: true,
     })
 
@@ -424,13 +424,13 @@ describe('messages-store: getMessage', () => {
       message_id: '500',
       source: 'user',
       ts: 1700000010000,
-      text: 'pesan dengan foto',
+      text: 'message with photo',
       reply_to: '499',
       user_id: 'U500',
       user_name: 'mirza',
     })
     expect(row!.attachments).toEqual([{ type: 'photo', path: '/inbox/x.jpg' }])
-    expect(row!.metadata).toEqual({ quote_text: 'sebelumnya', quote_is_manual: true })
+    expect(row!.metadata).toEqual({ quote_text: 'previous one', quote_is_manual: true })
     store.close()
   })
 
@@ -443,7 +443,7 @@ describe('messages-store: getMessage', () => {
       chat_id: 'CHAT_G',
       message_id: '501',
       source: 'assistant',
-      text: 'jawaban dari bot',
+      text: 'reply from the bot',
     })
 
     const row = store.getMessage('CHAT_G', '501')
@@ -451,7 +451,7 @@ describe('messages-store: getMessage', () => {
     expect(row).toMatchObject({
       message_id: '501',
       source: 'assistant',
-      text: 'jawaban dari bot',
+      text: 'reply from the bot',
       user_id: null,
       user_name: null,
     })
@@ -528,7 +528,7 @@ describe('messages-store: getMessage', () => {
       ts: 1700000014000,
       chat_id: 'CHAT_A',
       message_id: '800',
-      text: 'pesan di chat A',
+      text: 'message in chat A',
     })
 
     expect(store.getMessage('CHAT_B', '800')).toBeNull()

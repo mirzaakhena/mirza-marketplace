@@ -84,48 +84,53 @@ Done.        ▼
 
 ## Ack Phrasing — Mix and Surprise
 
-Vary the wording. Boring repetition kills the gimmick. Lean casual
-Indonesian. Occasional emoji fine, don't overdo.
+Vary the wording. Boring repetition kills the gimmick. Ack in the language
+the user writes in — mirror the user's language and register, and keep it
+casual. Occasional emoji fine, don't overdo.
 
 Research / browsing:
-- "🔍 Bentar, cek dulu yaa..."
-- "🕵️ Investigasi mode on..."
+- "🔍 Hang on, checking..."
+- "🕵️ Investigation mode on..."
 
 Reading files / code:
-- "📖 Lagi baca file dulu..."
-- "👀 Bentar lihat kodenya..."
+- "📖 Reading the file first..."
+- "👀 Let me look at the code..."
 
 Thinking / planning:
-- "🤔 Bentar mikir..."
-- "🧠 Lagi nyusun strategi..."
+- "🤔 Thinking..."
+- "🧠 Working out a plan..."
 
 Writing / drafting:
-- "📝 Lagi nulis, bentar..."
-- "🎨 Nyusun jawaban..."
+- "📝 Writing it up..."
+- "🎨 Drafting the answer..."
 
 When you don't know how long:
-- "👌 Sip, kerjain dulu ya..."
-- "🚀 On it, sebentar..."
+- "👌 On it..."
+- "🚀 On it, one sec..."
 
-Surprise occasionally ("kopi dulu ☕ bentar..."). Never more than once per
-task.
+Surprise occasionally ("coffee first ☕ one sec..."). Never more than once
+per task.
+
+**Adapt these to the user's language.** The examples above are English; if
+the user writes in another language, mirror it — e.g. an Indonesian user
+gets a casual Indonesian ack like "🔍 Bentar, cek dulu yaa...".
 
 ## Update Strategies (pick ONE per task)
 
 ### Strategy A — Edit-to-final (best for 5-15s tasks)
-1. Ack: "🔍 Bentar cek dulu..."
+1. Ack: "🔍 Hang on, checking..."
 2. Do the work.
 3. `edit_message` with final answer.
 
 ### Strategy B — Multi-edit progress (best for 15-60s tasks with clear stages)
-1. Ack: "🔍 Lagi cek dulu..."
-2. After stage 1: edit to "✅ Cek selesai, sekarang research..."
-3. After stage 2: edit to "✅ Research done, nyusun jawaban..."
+1. Ack: "🔍 Checking..."
+2. After stage 1: edit to "✅ Check done, now researching..."
+3. After stage 2: edit to "✅ Research done, drafting the answer..."
 4. Final answer: NEW reply (not edit) — push notification fires.
 
 ### Strategy C — Progressive new messages
-1. Ack: "👌 Sip bentar..."
-2. As work progresses, NEW messages narrating: "hmm baca dulu...", "oh ternyata X..."
+1. Ack: "👌 On it..."
+2. As work progresses, NEW messages narrating: "hmm let me read first...", "oh turns out X..."
 3. Final answer also NEW message.
 
 Use when narration is itself useful or user wants thinking visible.

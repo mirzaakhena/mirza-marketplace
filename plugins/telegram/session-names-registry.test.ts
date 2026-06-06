@@ -48,23 +48,23 @@ describe('session-names-registry', () => {
 
   test('saveRegistry then loadRegistry round-trips', () => {
     const reg = new Map([
-      ['sid-a', { name: 'utama', updatedAt: 100 }],
-      ['sid-b', { name: 'bahas MCP', updatedAt: 200 }],
+      ['sid-a', { name: 'main', updatedAt: 100 }],
+      ['sid-b', { name: 'discuss MCP', updatedAt: 200 }],
     ])
     saveRegistry(stateDir, reg)
     const loaded = loadRegistry(stateDir)
     expect(loaded.size).toBe(2)
-    expect(loaded.get('sid-a')).toEqual({ name: 'utama', updatedAt: 100 })
-    expect(loaded.get('sid-b')).toEqual({ name: 'bahas MCP', updatedAt: 200 })
+    expect(loaded.get('sid-a')).toEqual({ name: 'main', updatedAt: 100 })
+    expect(loaded.get('sid-b')).toEqual({ name: 'discuss MCP', updatedAt: 200 })
   })
 
   test('setName upserts entry with current timestamp', () => {
     const before = Date.now()
-    setName(stateDir, 'sid-a', 'utama')
+    setName(stateDir, 'sid-a', 'main')
     const after = Date.now()
     const loaded = loadRegistry(stateDir)
     const entry = loaded.get('sid-a')!
-    expect(entry.name).toBe('utama')
+    expect(entry.name).toBe('main')
     expect(entry.updatedAt).toBeGreaterThanOrEqual(before)
     expect(entry.updatedAt).toBeLessThanOrEqual(after)
   })
@@ -82,20 +82,20 @@ describe('session-names-registry', () => {
   })
 
   test('removeName deletes an existing entry and persists', () => {
-    setName(stateDir, 'sid-a', 'utama')
-    setName(stateDir, 'sid-b', 'bahas')
+    setName(stateDir, 'sid-a', 'main')
+    setName(stateDir, 'sid-b', 'discuss')
     removeName(stateDir, 'sid-a')
     const loaded = loadRegistry(stateDir)
     expect(loaded.has('sid-a')).toBe(false)
-    expect(loaded.get('sid-b')!.name).toBe('bahas')
+    expect(loaded.get('sid-b')!.name).toBe('discuss')
   })
 
   test('removeName is a no-op when the sessionId is absent', () => {
-    setName(stateDir, 'sid-a', 'utama')
+    setName(stateDir, 'sid-a', 'main')
     expect(() => removeName(stateDir, 'sid-nonexistent')).not.toThrow()
     const loaded = loadRegistry(stateDir)
     expect(loaded.size).toBe(1)
-    expect(loaded.get('sid-a')!.name).toBe('utama')
+    expect(loaded.get('sid-a')!.name).toBe('main')
   })
 
   test('loadRegistry ignores malformed entries', () => {
@@ -122,13 +122,13 @@ describe('session-names-registry', () => {
     const pidPath = join(sessionsDir, '12345.json')
     writeFileSync(
       pidPath,
-      JSON.stringify({ pid: 12345, sessionId: sid, cwd: projectDir, name: 'utama' }),
+      JSON.stringify({ pid: 12345, sessionId: sid, cwd: projectDir, name: 'main' }),
     )
 
     const registry = new Map<string, { name: string; updatedAt: number }>()
     refreshFromPidFiles(registry, projectDir)
     expect(registry.size).toBe(1)
-    expect(registry.get(sid)!.name).toBe('utama')
+    expect(registry.get(sid)!.name).toBe('main')
   })
 
   test('refreshFromPidFiles skips files with mismatched cwd', () => {
@@ -137,7 +137,7 @@ describe('session-names-registry', () => {
     const sid = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
     writeFileSync(
       join(sessionsDir, '12345.json'),
-      JSON.stringify({ pid: 12345, sessionId: sid, cwd: '/other/project', name: 'utama' }),
+      JSON.stringify({ pid: 12345, sessionId: sid, cwd: '/other/project', name: 'main' }),
     )
 
     const registry = new Map<string, { name: string; updatedAt: number }>()
@@ -199,15 +199,15 @@ describe('session-names-registry', () => {
   })
 
   test('findSessionIdByName returns sessionId when name matches', () => {
-    setName(stateDir, 'sid-a', 'utama')
-    setName(stateDir, 'sid-b', 'bahas')
+    setName(stateDir, 'sid-a', 'main')
+    setName(stateDir, 'sid-b', 'discuss')
     const registry = loadRegistry(stateDir)
-    expect(findSessionIdByName(registry, 'utama')).toBe('sid-a')
-    expect(findSessionIdByName(registry, 'bahas')).toBe('sid-b')
+    expect(findSessionIdByName(registry, 'main')).toBe('sid-a')
+    expect(findSessionIdByName(registry, 'discuss')).toBe('sid-b')
   })
 
   test('findSessionIdByName returns null when name is free', () => {
-    setName(stateDir, 'sid-a', 'utama')
+    setName(stateDir, 'sid-a', 'main')
     const registry = loadRegistry(stateDir)
     expect(findSessionIdByName(registry, 'nonexistent')).toBeNull()
   })

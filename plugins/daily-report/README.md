@@ -45,7 +45,7 @@ The result is saved to `.daily-reports/<YYYY-MM-DD>.md` relative to the repo roo
 - **Previous archive:** the last report in `.daily-reports/` is read too for continuity (yesterday's unfinished `Today` items get carried over again).
 - **Extra files:** file paths mentioned in the free-form prompt are passed as script arguments and included in the context.
 
-The `Today` section is filled by priority order: free-form prompt hint → the "Akan" (next-up) section from a handoff created this session → leftover `Today` items from the previous archive → TODO entries → a reasonable continuation of `Yesterday`. If everything is empty, the skill **asks the user** instead of making things up.
+The `Today` section is filled by priority order: free-form prompt hint → the "Next" section from a handoff created this session (legacy handoffs name it "Akan") → leftover `Today` items from the previous archive → TODO entries → a reasonable continuation of `Yesterday`. If everything is empty, the skill **asks the user** instead of making things up.
 
 An annotated example report lives in `skills/writing-daily-report/examples.md`.
 

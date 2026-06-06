@@ -148,10 +148,10 @@ describe('sessions-list: listProjectSessions (integration with tmp project)', ()
     writeSession(sid)
     const stateDir = mkdtempSync(join(tmpdir(), 'sess-list-state-'))
     try {
-      setName(stateDir, sid, 'utama')
+      setName(stateDir, sid, 'main')
       const result = listProjectSessions(projectDir, stateDir)
       expect(result.length).toBe(1)
-      expect(result[0].label).toBe('utama')
+      expect(result[0].label).toBe('main')
     } finally {
       try { rmSync(stateDir, { recursive: true, force: true }) } catch { /* ignore */ }
     }
@@ -188,28 +188,28 @@ describe('sessions-list: listProjectSessions (integration with tmp project)', ()
 describe('formatRelative', () => {
   const NOW = 1_700_000_000_000
 
-  test('returns "baru saja" for under 1 minute', () => {
-    expect(formatRelative(NOW - 30_000, NOW)).toBe('baru saja')
+  test('returns "just now" for under 1 minute', () => {
+    expect(formatRelative(NOW - 30_000, NOW)).toBe('just now')
   })
 
   test('minutes for under 1 hour', () => {
-    expect(formatRelative(NOW - 5 * 60_000, NOW)).toBe('5 mnt')
-    expect(formatRelative(NOW - 59 * 60_000, NOW)).toBe('59 mnt')
+    expect(formatRelative(NOW - 5 * 60_000, NOW)).toBe('5m')
+    expect(formatRelative(NOW - 59 * 60_000, NOW)).toBe('59m')
   })
 
   test('hours for under 1 day', () => {
-    expect(formatRelative(NOW - 2 * 3_600_000, NOW)).toBe('2 jam')
-    expect(formatRelative(NOW - 23 * 3_600_000, NOW)).toBe('23 jam')
+    expect(formatRelative(NOW - 2 * 3_600_000, NOW)).toBe('2h')
+    expect(formatRelative(NOW - 23 * 3_600_000, NOW)).toBe('23h')
   })
 
   test('days for under 14 days', () => {
-    expect(formatRelative(NOW - 3 * 86_400_000, NOW)).toBe('3 hari')
-    expect(formatRelative(NOW - 13 * 86_400_000, NOW)).toBe('13 hari')
+    expect(formatRelative(NOW - 3 * 86_400_000, NOW)).toBe('3d')
+    expect(formatRelative(NOW - 13 * 86_400_000, NOW)).toBe('13d')
   })
 
   test('weeks for under 12 weeks', () => {
-    expect(formatRelative(NOW - 14 * 86_400_000, NOW)).toBe('2 mgg')
-    expect(formatRelative(NOW - 83 * 86_400_000, NOW)).toBe('11 mgg')
+    expect(formatRelative(NOW - 14 * 86_400_000, NOW)).toBe('2w')
+    expect(formatRelative(NOW - 83 * 86_400_000, NOW)).toBe('11w')
   })
 
   test('absolute dd/mm for older than 12 weeks', () => {

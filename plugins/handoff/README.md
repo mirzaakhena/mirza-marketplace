@@ -10,7 +10,7 @@ Toolkit for **session handoff** in Claude Code. This plugin captures a running s
 | `/handoff-resume` | In a new session: read the latest handoff, show a brief summary, wait for confirmation before continuing execution. |
 | `/handoff-resume yes` | Pre-confirmed: the summary is still shown (so you can interrupt if something looks off), but execution continues immediately without waiting for an answer. |
 
-`/handoff-resume` confirmation is Telegram-aware: if the `inline-buttons` skill is available in the session, the question "resume this handoff?" is rendered as inline buttons (`✅ Lanjutkan / ❌ Mulai segar / ✏️ Jelaskan manual`); otherwise it falls back to a plain text confirmation.
+`/handoff-resume` confirmation is Telegram-aware: if the `inline-buttons` skill is available in the session, the question "resume this handoff?" is rendered as inline buttons (`✅ Continue / ❌ Start fresh / ✏️ Explain manually`); otherwise it falls back to a plain text confirmation.
 
 ## Skills
 
@@ -31,10 +31,10 @@ Toolkit for **session handoff** in Claude Code. This plugin captures a running s
 - If filenames collide within the same minute, append `-2`, `-3`, etc.
 - Lexical sort of filenames = chronological sort, so `/handoff-resume` just grabs the last entry.
 
-The file content uses a **10-section template** with the spine **Sudah → Sedang → Blocker → Akan** (Done → In Progress → Blocker → Next): Konteks Proyek (Project Context), Yang Sudah Selesai (What's Done), Yang Sedang Dikerjakan/Belum Selesai (In Progress/Unfinished), Blocker, Next Session Plan, Brainstorming Choices, Artefak (Artifacts), Anti-Patterns, Catatan User (User Notes), Hal Penting Lain (Other Important Things). The header also carries two pointers:
+The file content uses a **10-section template** with the spine **Done → In Progress → Blockers → Next**: Project Context, Completed, In Progress / Unfinished, Blockers, Next Session Plan, Brainstorming Choices, Artifacts, Anti-Patterns, User Notes, Other Notes. The header also carries two pointers:
 
-- **Lanjutan dari** (Continued from) — path of the previous handoff if this session is a continuation (append-only chain; each file is immutable, never re-edited).
-- **Plan terkait** (Related plan) — path of a multi-phase plan file (e.g. from `superpowers:writing-plans`) + position `phase N/total`. That plan is the **source of truth** for the roadmap; the handoff just points to a position, it doesn't duplicate the checklist. Cross-session progress is read from the plan, not reconstructed from the handoff chain.
+- **Continued from** — path of the previous handoff if this session is a continuation (append-only chain; each file is immutable, never re-edited).
+- **Related plan** — path of a multi-phase plan file (e.g. from `superpowers:writing-plans`) + position `phase N/total`. That plan is the **source of truth** for the roadmap; the handoff just points to a position, it doesn't duplicate the checklist. Cross-session progress is read from the plan, not reconstructed from the handoff chain.
 
 Artifacts also record the **HEAD SHA** (anchor), the session's **commit range**, and **per-phase** SHAs if the plan is multi-phase — so "what was done" can be verified via `git diff`, not just from prose. Full details are in `skills/handoff/SKILL.md` — the header fields + section structure are a contract between the two skills, don't change them unilaterally.
 
@@ -43,7 +43,7 @@ Artifacts also record the **HEAD SHA** (anchor), the session's **commit range**,
 1. **End of session:** run `/handoff`. Optionally add a note: `/handoff focus on the login bug tomorrow`.
    - If the next-step direction isn't clear yet (e.g. the session was just exploration, or got left mid-debug), the skill **brainstorms first** — it won't write the file until the user picks an explicit direction. This is intentional — a vague handoff is worse than no handoff.
 2. **New session in the same repo:** run `/handoff-resume`.
-   - The skill loads the latest handoff, reads the linked plan file (if any), shows a summary (including the "in progress" state & blockers), then **waits for confirmation** ("yes"/"continue") before executing Section 5. The user can redirect ("change course, today I want X") — the handoff still serves as background context. The `Lanjutan dari` chain is only traversed if context is actually lacking — by default the latest handoff + plan is enough.
+   - The skill loads the latest handoff, reads the linked plan file (if any), shows a summary (including the "in progress" state & blockers), then **waits for confirmation** ("yes"/"continue") before executing Section 5. The user can redirect ("change course, today I want X") — the handoff still serves as background context. The `Continued from` chain is only traversed if context is actually lacking — by default the latest handoff + plan is enough.
 
 ## Note on `.gitignore`
 

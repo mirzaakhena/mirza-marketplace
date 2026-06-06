@@ -88,7 +88,7 @@ Rate Limit 7d
 reset 1d 21h
 
 Opus 4.7
-Session: utama (76b5c187)
+Session: main (76b5c187)
 CWD: …/workspace/bot-01
 Cost: $1.18
 Thinking: on
@@ -217,8 +217,8 @@ hints which waste room).
 
 **With command name** (`/help status`, `/help rename`, etc.):
 - Full prose for that one command.
-- Concrete example if helpful (`/rename utama` → renames current session
-  to "utama").
+- Concrete example if helpful (`/rename main` → renames current session
+  to "main").
 - Troubleshooting **scoped to that command** (e.g. /status: "if the
   ⏳ Installing bridge... message persists past 15 seconds, make sure
   Claude Code is running in the project dir").
@@ -259,7 +259,7 @@ formatter on top of the registry.
       unknown-command behavior.
 - [x] **UI language: English** for all new and migrated bot strings
       (acks, errors, troubleshooting, /help text, /status labels). Existing
-      Indonesian strings touched by this change (e.g. "Gagal pasang
-      bridge", "Statusline Claude Code belum trigger") get translated as
+      Indonesian strings touched by this change (e.g. "Failed to install
+      bridge", "Claude Code statusline hasn't triggered yet") get translated as
       part of the migration. Existing strings *not* touched stay as-is for
       this round.

@@ -26,11 +26,11 @@ import {
 import { loadArchived } from './archive-store'
 
 /**
- * Indonesian-short relative time formatter for picker labels. Intentionally
- * compact ("5 mnt", "2 jam") because Telegram button labels are narrow on
- * mobile. Falls back to absolute dd/mm for ages > 12 weeks (the year
- * disambiguator is omitted to save width; the dd/mm is enough hint for the
- * picker user to decide whether to tap).
+ * Compact relative time formatter for picker labels. Intentionally short
+ * ("5m", "2h") because Telegram button labels are narrow on mobile. Falls
+ * back to absolute dd/mm for ages > 12 weeks (the year disambiguator is
+ * omitted to save width; the dd/mm is enough hint for the picker user to
+ * decide whether to tap).
  *
  * `now` is injectable for tests; production calls use Date.now(). The dd/mm
  * branch reads UTC fields so test expectations stay TZ-independent.
@@ -41,11 +41,11 @@ export function formatRelative(ts: number, now: number = Date.now()): string {
   const hour = 60 * minute
   const day = 24 * hour
   const week = 7 * day
-  if (delta < minute) return 'baru saja'
-  if (delta < hour) return `${Math.floor(delta / minute)} mnt`
-  if (delta < day) return `${Math.floor(delta / hour)} jam`
-  if (delta < 14 * day) return `${Math.floor(delta / day)} hari`
-  if (delta < 12 * week) return `${Math.floor(delta / week)} mgg`
+  if (delta < minute) return 'just now'
+  if (delta < hour) return `${Math.floor(delta / minute)}m`
+  if (delta < day) return `${Math.floor(delta / hour)}h`
+  if (delta < 14 * day) return `${Math.floor(delta / day)}d`
+  if (delta < 12 * week) return `${Math.floor(delta / week)}w`
   const d = new Date(ts)
   const dd = String(d.getUTCDate()).padStart(2, '0')
   const mm = String(d.getUTCMonth() + 1).padStart(2, '0')

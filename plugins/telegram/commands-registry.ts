@@ -59,7 +59,7 @@ export const COMMANDS: CommandSpec[] = [
     menuHint: 'Start a fresh named session',
     helpSummary: 'Start a fresh named Claude session',
     helpDetail:
-      'Clears the current session and creates a fresh one with the given name. Usage: /new <name>. Example: /new bahas MCP. The wrapper (mirza-cc) must be running; otherwise the command replies with an error.',
+      'Clears the current session and creates a fresh one with the given name. Usage: /new <name>. Example: /new discuss MCP. The wrapper (mirza-cc) must be running; otherwise the command replies with an error.',
   },
   {
     name: 'rename',
@@ -67,7 +67,7 @@ export const COMMANDS: CommandSpec[] = [
     menuHint: 'Rename the current session',
     helpSummary: 'Rename the active session',
     helpDetail:
-      'Renames the currently active session. Usage: /rename <name>. Example: /rename utama. Names must be unique within the project; the command rejects duplicates.',
+      'Renames the currently active session. Usage: /rename <name>. Example: /rename main. Names must be unique within the project; the command rejects duplicates.',
   },
   {
     name: 'delete',

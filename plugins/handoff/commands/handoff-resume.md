@@ -7,4 +7,4 @@ You are resuming work from a previous Claude Code session. Invoke the `handoff-r
 
 Argument: `$ARGUMENTS`
 
-If the argument is exactly `yes` (case-insensitive), the user has pre-confirmed — skip the confirmation prompt and proceed directly to executing Section 5's plan ("Apa yang Akan Dikerjakan di Sesi Berikutnya") after showing a brief summary. Any other argument (or empty) means use the default behaviour with the human gate.
+If the argument is exactly `yes` (case-insensitive), the user has pre-confirmed — skip the confirmation prompt and proceed directly to executing Section 5's plan ("Next Session Plan") after showing a brief summary. Any other argument (or empty) means use the default behaviour with the human gate.

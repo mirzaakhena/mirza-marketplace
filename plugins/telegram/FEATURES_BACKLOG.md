@@ -1,284 +1,284 @@
 # Features Backlog — Telegram Plugin
 
-Backlog fitur yang dipertimbangkan untuk diadopsi dari project `personal-ai-assistant` (`C:\Users\Mirza\workspace\personal-ai-assistant`) ke plugin telegram di marketplace ini.
+Backlog of features being considered for adoption from the `personal-ai-assistant` project (`C:\Users\Mirza\workspace\personal-ai-assistant`) into the telegram plugin in this marketplace.
 
-> **Prinsip desain**: Setiap fitur harus **modular & standalone** — bisa diaktifkan/dimatikan tanpa merusak fitur lain. Plugin tetap berperan sebagai *channel adapter* (jembatan Telegram ↔ Claude Code), bukan AI engine. Logika AI/keputusan tetap di sisi Claude Code session.
+> **Design principle**: Every feature must be **modular & standalone** — it can be turned on/off without breaking the others. The plugin stays a *channel adapter* (the bridge between Telegram and Claude Code), not an AI engine. AI/decision logic stays on the Claude Code session side.
 
 ## Status Legend
 
-| Tag | Arti |
+| Tag | Meaning |
 |-----|------|
-| `[ ]` | Belum dikerjakan |
-| `[~]` | Sedang dikerjakan |
-| `[x]` | Selesai diimplementasi |
-| `[-]` | Diputuskan untuk di-drop (lihat alasan) |
+| `[ ]` | Not started |
+| `[~]` | In progress |
+| `[x]` | Implemented |
+| `[-]` | Decided to drop (see reason) |
 
 ## Quick Summary
 
-- **Tier 1 — Direct adoption (cocok untuk plugin)**: 11 fitur
-- **Tier 2 — Adaptasi diperlukan**: 5 fitur
-- **Tier 3 — Out of scope (better elsewhere)**: 6 fitur (sudah ditandai `[-]`)
-- **Future ideas**: 5 ide tambahan
+- **Tier 1 — Direct adoption (fits the plugin)**: 11 features
+- **Tier 2 — Adaptation required**: 5 features
+- **Tier 3 — Out of scope (better elsewhere)**: 6 features (already marked `[-]`)
+- **Future ideas**: 5 extra ideas
 
 ---
 
 ## Recommended Development Order (by Impact)
 
-Berbeda dari tier (yang dasarnya kecocokan teknis), urutan ini berdasarkan **dampak ke pengalaman user**. Mode kerja: satu fitur per session, selesaikan utuh, jeda untuk review, baru lanjut.
+Unlike the tiers (which are basically about technical fit), this order is based on **impact to the user experience**. Working mode: one feature per session, finish it fully, pause for review, then move on.
 
 ### Worthwhile to develop (high impact)
 
-| # | Fitur | Why this order |
+| # | Feature | Why this order |
 |---|-------|----------------|
-| 1 | **T1.11 — Raw conversation logging** | Foundation utama. Tanpa ini, recall lintas sesi mustahil. User eksplisit sebut sebagai kebutuhan inti. |
-| 2 | **T1.10 — Album / media group batching** | User eksplisit sebut sebagai pain point. Tanpa ini multi-image diproses sequential, boros token & response berantakan. |
-| 3 | **T1.7 — Multi-message array delivery** | Reply lebih natural (jeda antar bubble) — langsung terasa di chat UX. |
-| 4 | **T1.3 — Quoted message extraction** | Tanpa ini, user reply ke pesan lama bikin Claude kehilangan konteks — friksi nyata setiap kali quote-reply. |
-| 5 | **T1.5 — Realistic typing indicator** | "Feels alive". Kecil tapi langsung noticeable di chat experience. |
-| 6 | **T1.2 — Document/PDF inbound** | Perluas modality (selain text+image). Pola implementasi sudah ada di photo handler. |
-| 7 | **T1.1 — Voice transcription** | High value kalau user sering voice. Worth setelah ada beberapa preprocessing step (sinkronisasi dengan T2.3). |
+| 1 | **T1.11 — Raw conversation logging** | The core foundation. Without it, cross-session recall is impossible. The user explicitly called this out as a core need. |
+| 2 | **T1.10 — Album / media group batching** | The user explicitly called this a pain point. Without it, multi-image is processed sequentially — token-heavy and messy responses. |
+| 3 | **T1.7 — Multi-message array delivery** | More natural replies (pauses between bubbles) — immediately felt in the chat UX. |
+| 4 | **T1.3 — Quoted message extraction** | Without it, replying to an old message makes Claude lose context — real friction every time you quote-reply. |
+| 5 | **T1.5 — Realistic typing indicator** | "Feels alive". Small but immediately noticeable in the chat experience. |
+| 6 | **T1.2 — Document/PDF inbound** | Expands modality (beyond text+image). The implementation pattern already exists in the photo handler. |
+| 7 | **T1.1 — Voice transcription** | High value if the user voices often. Worth doing after a few preprocessing steps exist (synced with T2.3). |
 
-### Nice to have (medium impact, kerjakan setelah core)
+### Nice to have (medium impact, do after the core)
 
-- **T1.6 — Per-user FIFO queue**: reliability silent — penting saat T1.7 sudah jalan (multi-message rentan race).
-- **T1.9 — Reaction event inbound**: feedback loop non-verbal, situational.
+- **T1.6 — Per-user FIFO queue**: silent reliability — important once T1.7 is running (multi-message is race-prone).
+- **T1.9 — Reaction event inbound**: non-verbal feedback loop, situational.
 
 ### Defensive / polish (low priority)
 
-- **T1.4 — Dedup cache**, **T1.8 — Pause-before-typing**, **T2.4 — MarkdownV2 escape**: kerjakan saat sempat atau saat ada bug konkret.
+- **T1.4 — Dedup cache**, **T1.8 — Pause-before-typing**, **T2.4 — MarkdownV2 escape**: do them when there's time or when a concrete bug appears.
 
 ### Defer
 
-- **Semua Tier 2** kecuali bagian preprocessing pipeline (T2.3) yang baru bermakna setelah 4-5 fitur Tier 1 jadi.
-- Tier 3 sudah eksplisit di-drop.
+- **All of Tier 2** except the preprocessing pipeline part (T2.3), which only becomes meaningful after 4-5 Tier 1 features are done.
+- Tier 3 is already explicitly dropped.
 
-### Saran titik mulai
+### Suggested starting point
 
-**Mulai dari T1.11** — sekaligus paksa menyelesaikan dua decision pending (per-chat DB vs single DB, SQLite vs JSONL) yang akan jadi foundation untuk fitur observability/recall ke depan. Setelah T1.11 jadi, T1.10 logical next karena berdiri sendiri dan dampaknya langsung terasa.
+**Start with T1.11** — it also forces resolving two pending decisions (per-chat DB vs single DB, SQLite vs JSONL) that will become the foundation for future observability/recall features. Once T1.11 is done, T1.10 is the logical next step because it stands alone and its impact is immediately felt.
 
 ---
 
 ## Tier 1 — Direct Adoption Candidates
 
-Fitur-fitur yang langsung relevan untuk plugin channel adapter dan tidak duplikat dengan kapabilitas Claude Code.
+Features that are directly relevant to a channel-adapter plugin and don't duplicate Claude Code capabilities.
 
 ### Inbound Message Processing
 
-- [ ] **T1.1 — Voice transcription** untuk pesan suara/audio
-- [ ] **T1.2 — Document/PDF inbound handling** (saat ini hanya text + photo)
-- [ ] **T1.3 — Quoted message context extraction** (kalau user reply ke pesan lain, sertakan konteksnya)
-- [ ] **T1.4 — Inbound message dedup cache** (LRU 1000-entry, hindari double-process saat polling overlap)
-- [x] **T1.10 — Album / media group batching** (user kirim multiple image sekaligus → diproses sebagai 1 batch, bukan satu-satu) — implemented. Spec: `docs/superpowers/specs/2026-05-16-t110-album-batching-design.md`. Plan: `docs/superpowers/plans/2026-05-16-t110-album-batching.md`.
+- [ ] **T1.1 — Voice transcription** for voice/audio messages
+- [ ] **T1.2 — Document/PDF inbound handling** (currently text + photo only)
+- [ ] **T1.3 — Quoted message context extraction** (when the user replies to another message, include its context)
+- [ ] **T1.4 — Inbound message dedup cache** (LRU 1000-entry, avoid double-processing when polling overlaps)
+- [x] **T1.10 — Album / media group batching** (user sends multiple images at once → processed as 1 batch, not one by one) — implemented. Spec: `docs/superpowers/specs/2026-05-16-t110-album-batching-design.md`. Plan: `docs/superpowers/plans/2026-05-16-t110-album-batching.md`.
 
 ### Outbound Message Quality
 
-- [ ] **T1.5 — Realistic typing indicator** (durasi typing dihitung dari panjang pesan, 30ms/char range 1-8s)
-- [ ] **T1.6 — Per-user FIFO message queue** (cegah race condition saat dua pesan datang berdekatan)
-- [ ] **T1.7 — Multi-message array delivery** (Claude bisa kirim 2-3 pesan terpisah dengan jeda alami, bukan satu wall of text)
-- [ ] **T1.8 — Pause-before-typing** (delay diam sebelum typing indicator muncul, untuk pesan reflektif/thoughtful)
-- [ ] **T1.12 — Outbound media group / album** (Claude balas dengan multiple file → kirim sebagai 1 album visual via `sendMediaGroup`, bukan N pesan terpisah)
+- [ ] **T1.5 — Realistic typing indicator** (typing duration computed from message length, 30ms/char, range 1-8s)
+- [ ] **T1.6 — Per-user FIFO message queue** (prevent race conditions when two messages arrive close together)
+- [ ] **T1.7 — Multi-message array delivery** (Claude can send 2-3 separate messages with natural pauses, instead of one wall of text)
+- [ ] **T1.8 — Pause-before-typing** (a silent delay before the typing indicator appears, for reflective/thoughtful messages)
+- [ ] **T1.12 — Outbound media group / album** (Claude replies with multiple files → send as 1 visual album via `sendMediaGroup`, not N separate messages)
 
 ### Reactions
 
-- [ ] **T1.9 — Reaction event inbound** (notify Claude saat user kasih reaksi ke pesan bot, untuk feedback loop)
+- [ ] **T1.9 — Reaction event inbound** (notify Claude when the user reacts to a bot message, for a feedback loop)
 
 ### Persistence & State
 
-- [x] **T1.11 — Raw conversation logging** (catat semua percakapan user/assistant/system ke storage lokal — fondasi untuk recall lintas sesi)
+- [x] **T1.11 — Raw conversation logging** (record all user/assistant/system conversation to local storage — the foundation for cross-session recall)
 
 ---
 
-## Tier 2 — Adaptasi Diperlukan
+## Tier 2 — Adaptation Required
 
-Fitur yang konsepnya bagus, tapi perlu dipikir ulang scope-nya agar tidak menyalahi arsitektur plugin.
+Features whose concept is good, but whose scope needs to be rethought so it doesn't violate the plugin architecture.
 
-- [ ] **T2.1 — Per-channel lightweight state** (persona, bahasa, timezone, nickname) sebagai opsi di `access.json` atau file terpisah. Bukan full memory store, hanya hint kontekstual yang dikirim ke Claude tiap inbound message.
-- [ ] **T2.2 — Read-only monitoring dashboard** (HTTP server kecil untuk lihat status: pending pairing, recent inbounds, errors). Scope: state plugin saja, bukan user data.
-- [ ] **T2.3 — Inbound preprocessing pipeline** (hook system: text → transcribe → translate → enrich, sebelum dikirim ke MCP). Foundation untuk fitur-fitur lain.
-- [ ] **T2.4 — MarkdownV2 safety helper** (escape otomatis karakter spesial Telegram, hindari error format)
+- [ ] **T2.1 — Per-channel lightweight state** (persona, language, timezone, nickname) as an option in `access.json` or a separate file. Not a full memory store, only a contextual hint sent to Claude on each inbound message.
+- [ ] **T2.2 — Read-only monitoring dashboard** (a small HTTP server to view status: pending pairings, recent inbounds, errors). Scope: plugin state only, not user data.
+- [ ] **T2.3 — Inbound preprocessing pipeline** (hook system: text → transcribe → translate → enrich, before sending to MCP). Foundation for other features.
+- [ ] **T2.4 — MarkdownV2 safety helper** (auto-escape Telegram special characters, avoid formatting errors)
 - [ ] **T2.5 — Group chat enhancements** (handle quoted-self, reply chain awareness, thread-aware mentions)
 
 ---
 
-## Tier 3 — Out of Scope (Drop atau ke Tempat Lain)
+## Tier 3 — Out of Scope (Drop or Move Elsewhere)
 
-Fitur yang ada di `personal-ai-assistant` tapi **tidak tepat** dimasukkan ke plugin telegram. Daftar ini eksplisit di-drop dengan alasannya, agar tidak revisit nanti.
+Features that exist in `personal-ai-assistant` but are **not appropriate** to fold into the telegram plugin. This list is explicitly dropped with reasons, so we don't revisit later.
 
-- [-] **T3.1 — Persistent memory system** (profile, knowledge, journal, preferences, tasks, ledger). **Alasan**: Bukan tugas channel adapter. Idealnya jadi **plugin/MCP server terpisah** (mis. `personal-memory` plugin) yang bisa dipakai dari channel manapun. Mencampurnya akan bikin plugin telegram membengkak dan tidak reusable.
-- [-] **T3.2 — Cronjob scheduling tools**. **Alasan**: Sudah tersedia via `/schedule` skill di superpowers + native Claude Code scheduling. Duplikat akan membingungkan user.
-- [-] **T3.3 — AI engine / wake-up briefing / system prompt assembly**. **Alasan**: Itu tugas Claude Code session, bukan plugin. Plugin hanya forward message + context tag.
-- [-] **T3.4 — Token & cost tracking, status bar**. **Alasan**: Sudah ada di Claude Code level (`/status`).
-- [-] **T3.5 — Multi-gateway abstraction (Console/Telegram/Slack switcher)**. **Alasan**: Over-engineering untuk plugin single-channel. Kalau mau Slack, buat plugin `slack` terpisah dengan pola yang sama.
-- [-] **T3.6 — Skill writing/archiving tools (`write_skill`, `archive_skill`)**. **Alasan**: Sudah built-in di Claude Code via Read/Write tools dan `superpowers:writing-skills`.
+- [-] **T3.1 — Persistent memory system** (profile, knowledge, journal, preferences, tasks, ledger). **Reason**: Not a channel adapter's job. Ideally a **separate plugin/MCP server** (e.g. a `personal-memory` plugin) usable from any channel. Mixing it in would bloat the telegram plugin and make it non-reusable.
+- [-] **T3.2 — Cronjob scheduling tools**. **Reason**: Already available via the `/schedule` skill in superpowers + native Claude Code scheduling. A duplicate would confuse users.
+- [-] **T3.3 — AI engine / wake-up briefing / system prompt assembly**. **Reason**: That's the Claude Code session's job, not the plugin's. The plugin only forwards the message + context tag.
+- [-] **T3.4 — Token & cost tracking, status bar**. **Reason**: Already exists at the Claude Code level (`/status`).
+- [-] **T3.5 — Multi-gateway abstraction (Console/Telegram/Slack switcher)**. **Reason**: Over-engineering for a single-channel plugin. If you want Slack, build a separate `slack` plugin with the same pattern.
+- [-] **T3.6 — Skill writing/archiving tools (`write_skill`, `archive_skill`)**. **Reason**: Already built into Claude Code via Read/Write tools and `superpowers:writing-skills`.
 
-> **Catatan**: Item lama "T3.7 — Search messages history" dipindah keluar dari Tier 3. Premise drop-nya keliru (saya asumsikan source = Telegram API, padahal yang dibutuhkan user adalah storage **lokal**). Storage layer-nya kini ada di [T1.11 — Raw conversation logging](#t111--raw-conversation-logging). Mekanisme search akan dibahas terpisah saat T1.11 sudah jalan.
+> **Note**: The old item "T3.7 — Search messages history" was moved out of Tier 3. Its drop premise was wrong (I assumed source = Telegram API, when what the user actually needs is **local** storage). Its storage layer now lives in [T1.11 — Raw conversation logging](#t111--raw-conversation-logging). The search mechanism will be discussed separately once T1.11 is running.
 
 ---
 
-## Future Ideas (di luar personal-ai-assistant)
+## Future Ideas (beyond personal-ai-assistant)
 
-Ide-ide tambahan yang muncul saat eksplorasi, bukan dari project lama tapi worth dipertimbangkan.
+Extra ideas that came up during exploration — not from the old project, but worth considering.
 
-- [ ] **F1 — Edit-tracking inbound** (notify Claude kalau user mengedit pesan yang sudah dikirim)
+- [ ] **F1 — Edit-tracking inbound** (notify Claude when the user edits an already-sent message)
 - [ ] **F2 — Forwarded message handling** (preserve original sender info)
-- [ ] **F3 — Sticker support** (sticker → emoji name + image untuk Claude)
-- [ ] **F4 — Location/contact handling** (user share location → forward sebagai metadata)
-- [ ] **F5 — Long-running task progress updates** (Claude trigger interim "still working..." via `edit_message`, dengan rate-limit otomatis)
+- [ ] **F3 — Sticker support** (sticker → emoji name + image for Claude)
+- [ ] **F4 — Location/contact handling** (user shares a location → forward as metadata)
+- [ ] **F5 — Long-running task progress updates** (Claude triggers interim "still working..." via `edit_message`, with automatic rate-limiting)
 
 ---
 
-## Detail per Fitur (Tier 1 & Tier 2)
+## Per-Feature Detail (Tier 1 & Tier 2)
 
-Section ini berisi referensi ke implementasi lama + opsi implementasi untuk plugin ini. Tidak harus dibaca semua sekaligus — buka section yang relevan saat akan implement.
+This section holds references to the old implementation + implementation options for this plugin. You don't have to read it all at once — open the section relevant when you're about to implement.
 
 ### T1.1 — Voice transcription
 
-- **Referensi old project**: Tidak ada di personal-ai-assistant (juga belum punya). Tapi pola hook di `bot.on('message:voice')` mudah ditambahkan.
-- **Konteks plugin**: Saat ini `bot.on()` hanya handle `message:text` dan `message:photo` (server.ts). Voice message di-skip silently.
-- **Opsi implementasi**:
-  - **A**: Pakai OpenAI Whisper API (perlu API key tambahan, kualitas tinggi).
-  - **B**: Pakai Claude's audio capability langsung (kirim audio sebagai attachment, biar Claude transcribe sendiri).
-  - **C**: Local whisper.cpp (offline, tanpa API key, tapi setup berat).
-- **Rekomendasi**: Opsi B paling sejalan dengan filosofi plugin (Claude yang handle).
+- **Old project reference**: Not in personal-ai-assistant (it doesn't have it yet either). But the hook pattern in `bot.on('message:voice')` is easy to add.
+- **Plugin context**: Currently `bot.on()` only handles `message:text` and `message:photo` (server.ts). Voice messages are silently skipped.
+- **Implementation options**:
+  - **A**: Use the OpenAI Whisper API (needs an extra API key, high quality).
+  - **B**: Use Claude's audio capability directly (send audio as an attachment, let Claude transcribe it itself).
+  - **C**: Local whisper.cpp (offline, no API key, but heavy setup).
+- **Recommendation**: Option B fits the plugin philosophy best (Claude handles it).
 
 ### T1.2 — Document/PDF inbound handling
 
-- **Referensi old project**: `src/utils/media.ts` — validasi MIME type, base64 encoding, max 30MB untuk PDF.
-- **Konteks plugin**: `download_attachment` MCP tool sudah ada. Tinggal extend `bot.on()` untuk `message:document` dan auto-include dalam channel notification.
-- **Catatan**: Photo flow (`image_path` attribute) sudah jadi template — tinggal duplikat untuk document.
+- **Old project reference**: `src/utils/media.ts` — MIME type validation, base64 encoding, 30MB max for PDF.
+- **Plugin context**: The `download_attachment` MCP tool already exists. Just extend `bot.on()` for `message:document` and auto-include it in the channel notification.
+- **Note**: The photo flow (`image_path` attribute) is already a template — just duplicate it for documents.
 
 ### T1.3 — Quoted message context extraction
 
-- **Referensi old project**: `src/utils/prompt.ts` — extract `reply_to_message` dan format jadi konteks XML.
-- **Konteks plugin**: Saat ini quoted reply tidak diteruskan. Bisa tambahkan `reply_to_text="..."` attribute di `<channel>` tag.
+- **Old project reference**: `src/utils/prompt.ts` — extracts `reply_to_message` and formats it into XML context.
+- **Plugin context**: Currently the quoted reply is not forwarded. We can add a `reply_to_text="..."` attribute to the `<channel>` tag.
 
 ### T1.4 — Inbound message dedup cache
 
-- **Referensi old project**: `src/gateway/telegram.ts` — LRU cache 1000-entry, key = `${chatId}:${messageId}`.
-- **Konteks plugin**: Bot polling bisa kadang overlap (terutama setelah restart 409 conflict). Dedup cache mencegah double-trigger MCP notification.
+- **Old project reference**: `src/gateway/telegram.ts` — LRU cache, 1000-entry, key = `${chatId}:${messageId}`.
+- **Plugin context**: Bot polling can sometimes overlap (especially after a 409-conflict restart). A dedup cache prevents double-triggering the MCP notification.
 
 ### T1.5 — Realistic typing indicator
 
-- **Referensi old project**: `src/gateway/telegram.ts` — `simulateTyping(text)`: 30ms/char, clamp 1-8s.
-- **Konteks plugin**: `reply` tool saat ini langsung kirim. Bisa tambah parameter optional `typing_duration_ms` atau auto-calculate dari panjang text.
+- **Old project reference**: `src/gateway/telegram.ts` — `simulateTyping(text)`: 30ms/char, clamp 1-8s.
+- **Plugin context**: The `reply` tool currently sends immediately. We can add an optional `typing_duration_ms` parameter or auto-calculate from text length.
 
 ### T1.6 — Per-user FIFO message queue
 
-- **Referensi old project**: `src/utils/queue.ts` — Promise-chained per-user lock.
-- **Konteks plugin**: Plugin saat ini handle async paralel. Kalau Claude kirim 3 reply cepat, bisa swap urutan. Queue per chat_id menjamin order.
+- **Old project reference**: `src/utils/queue.ts` — a Promise-chained per-user lock.
+- **Plugin context**: The plugin currently handles async in parallel. If Claude sends 3 replies quickly, the order can swap. A per-chat_id queue guarantees order.
 
 ### T1.7 — Multi-message array delivery
 
-- **Referensi old project**: `src/tools/message.ts` — `send_message({messages: [text1, text2, ...]})` dengan jeda antar pesan.
-- **Konteks plugin**: Update `reply` tool untuk accept `text: string | string[]`. Lebih natural untuk percakapan.
+- **Old project reference**: `src/tools/message.ts` — `send_message({messages: [text1, text2, ...]})` with pauses between messages.
+- **Plugin context**: Update the `reply` tool to accept `text: string | string[]`. More natural for conversation.
 
 ### T1.8 — Pause-before-typing
 
-- **Referensi old project**: `src/tools/message.ts` — parameter `pauseBeforeTyping` (silence sebelum typing indicator).
-- **Konteks plugin**: Useful untuk pesan reflektif. Bisa jadi opsional di `reply` tool.
+- **Old project reference**: `src/tools/message.ts` — a `pauseBeforeTyping` parameter (silence before the typing indicator).
+- **Plugin context**: Useful for reflective messages. Could be optional in the `reply` tool.
 
 ### T1.9 — Reaction event inbound
 
-- **Referensi old project**: `src/db/reactions.ts` + `bot.on('message_reaction')` di telegram gateway.
-- **Konteks plugin**: Plugin saat ini cuma bisa **kirim** reaction (`react` tool). Belum forward reaction event yang user kasih ke bot. Berguna untuk konfirmasi non-verbal.
+- **Old project reference**: `src/db/reactions.ts` + `bot.on('message_reaction')` in the telegram gateway.
+- **Plugin context**: The plugin can currently only **send** reactions (the `react` tool). It doesn't yet forward the reaction events the user gives to the bot. Useful for non-verbal confirmation.
 
 ### T1.10 — Album / media group batching
 
-- **Referensi old project**: Sudah didukung di `personal-ai-assistant` — multiple image dalam satu album diproses sekaligus, bukan sequential.
-- **Konteks plugin**: Telegram mengirim album sebagai **multiple update terpisah** dengan `media_group_id` yang sama, datang dalam window beberapa ratus ms. Plugin saat ini akan trigger MCP notification per image → Claude akan membaca & merespon satu-satu (boros + tidak natural).
-- **Opsi implementasi**:
-  - **A**: Buffer per `media_group_id` dengan debounce 500-800ms. Setelah window habis, kirim satu notification dengan array `image_paths`.
-  - **B**: Kirim incremental tapi tag `media_group_id` di channel attribute, biar Claude sendiri yang group. Lebih kompleks di sisi Claude, lebih simple di plugin.
-- **Rekomendasi**: Opsi A — semantic batching idealnya transparan untuk Claude.
-- **Catatan**: Format `<channel>` tag perlu support `image_paths` (plural). Backward compat: tetap kirim `image_path` (singular) untuk single image.
+- **Old project reference**: Already supported in `personal-ai-assistant` — multiple images in one album are processed all at once, not sequentially.
+- **Plugin context**: Telegram sends an album as **multiple separate updates** with the same `media_group_id`, arriving within a window of a few hundred ms. The plugin currently triggers an MCP notification per image → Claude reads and responds one by one (wasteful + unnatural).
+- **Implementation options**:
+  - **A**: Buffer per `media_group_id` with a 500-800ms debounce. Once the window closes, send a single notification with an `image_paths` array.
+  - **B**: Send incrementally but tag `media_group_id` in the channel attribute, letting Claude group them itself. More complex on the Claude side, simpler in the plugin.
+- **Recommendation**: Option A — semantic batching should ideally be transparent to Claude.
+- **Note**: The `<channel>` tag format needs to support `image_paths` (plural). Backward compat: still send `image_path` (singular) for a single image.
 
 ### T1.12 — Outbound media group / album
 
-- **Konteks plugin**: `reply` tool saat ini menerima `files: string[]` dan mengirim **per file** lewat `sendPhoto`/`sendDocument` di `server.ts:582-595`. Akibatnya, kalau Claude balas dengan 3 gambar, user lihat 3 pesan terpisah di Telegram (bukan 1 album visual).
-- **Tujuan**: gabungkan multiple file outbound jadi 1 album via `bot.api.sendMediaGroup()` dengan `InputMediaPhoto[]` / `InputMediaDocument[]`.
-- **Konstrain Telegram**:
-  - Album cap = 10 item.
-  - Mixed photo + document **tidak diizinkan** dalam 1 `sendMediaGroup` — harus dipecah per tipe.
-  - Caption hanya bisa attached di **item pertama** dari group; sisanya caption diabaikan oleh client.
-  - Reply threading (`reply_parameters`) berlaku untuk seluruh album, bukan per item.
-- **Trade-off**:
-  - 1 file → tetap pakai `sendPhoto`/`sendDocument` (sendMediaGroup overkill).
-  - 2+ photo → sendMediaGroup.
-  - 2+ document → sendMediaGroup.
-  - Photo + document mixed → 2 panggilan terpisah (1 album photo + 1 album document), atau fall-back ke per-file delivery existing.
-- **Logging impact** (interaksi T1.11): `sendMediaGroup` return array message_id. Logging 1 row per album (mirror inbound T1.10) atau N row per file? Sebaiknya 1 row per album, attachments[] sesuai isi, message_id = pertama, metadata.message_ids[].
-- **Out of plan T1.10**: dipisah ke T1.12 supaya inbound bisa di-ship tanpa menunggu desain outbound.
+- **Plugin context**: The `reply` tool currently accepts `files: string[]` and sends **per file** via `sendPhoto`/`sendDocument` in `server.ts:582-595`. As a result, if Claude replies with 3 images, the user sees 3 separate messages in Telegram (not 1 visual album).
+- **Goal**: combine multiple outbound files into 1 album via `bot.api.sendMediaGroup()` with `InputMediaPhoto[]` / `InputMediaDocument[]`.
+- **Telegram constraints**:
+  - Album cap = 10 items.
+  - Mixed photo + document is **not allowed** in 1 `sendMediaGroup` — must be split per type.
+  - A caption can only be attached to the **first item** of the group; the rest are ignored by the client.
+  - Reply threading (`reply_parameters`) applies to the whole album, not per item.
+- **Trade-offs**:
+  - 1 file → keep using `sendPhoto`/`sendDocument` (sendMediaGroup is overkill).
+  - 2+ photos → sendMediaGroup.
+  - 2+ documents → sendMediaGroup.
+  - Mixed photo + document → 2 separate calls (1 photo album + 1 document album), or fall back to the existing per-file delivery.
+- **Logging impact** (interacts with T1.11): `sendMediaGroup` returns an array of message_id. Log 1 row per album (mirror inbound T1.10) or N rows per file? Prefer 1 row per album, attachments[] matching the contents, message_id = first, metadata.message_ids[].
+- **Out of plan T1.10**: split into T1.12 so inbound can ship without waiting on the outbound design.
 
 ### T1.11 — Raw conversation logging
 
-- **Referensi old project**: `src/db/message.ts` (better-sqlite3 + FTS5). Skema: timestamp, sender (user/assistant/system), gateway, chat_id, message_id, text, media flag, raw payload.
-- **Konteks plugin**: Plugin punya akses natural ke semua flow:
-  - **Inbound**: di `handleInbound()` sebelum gate decision.
-  - **Outbound (assistant)**: di `reply` MCP tool.
-  - **Outbound (system)**: reply yang dipicu cronjob/API trigger juga lewat `reply` tool yang sama → otomatis tercatat. Source dibedakan dengan flag (mis. param `triggered_by: 'cron' | 'user'` atau heuristik via context).
-- **Tujuan utama**: User bisa recall percakapan lama dari sesi baru ("kemarin kita bahas X, lanjut yuk"). Saat ini setelah session baru, context hilang total.
-- **Skema minimal yang diusulkan**:
+- **Old project reference**: `src/db/message.ts` (better-sqlite3 + FTS5). Schema: timestamp, sender (user/assistant/system), gateway, chat_id, message_id, text, media flag, raw payload.
+- **Plugin context**: The plugin has natural access to every flow:
+  - **Inbound**: in `handleInbound()` before the gate decision.
+  - **Outbound (assistant)**: in the `reply` MCP tool.
+  - **Outbound (system)**: a reply triggered by cronjob/API trigger also goes through the same `reply` tool → automatically recorded. Source is distinguished by a flag (e.g. a `triggered_by: 'cron' | 'user'` param or a heuristic via context).
+- **Main goal**: The user can recall old conversations from a new session ("yesterday we discussed X, let's continue"). Currently, after a new session, context is lost entirely.
+- **Proposed minimal schema**:
   ```sql
   CREATE TABLE messages (
     id INTEGER PRIMARY KEY,
     ts INTEGER NOT NULL,           -- unix ms
     chat_id TEXT NOT NULL,
-    message_id TEXT,                -- Telegram message_id (null untuk system event)
+    message_id TEXT,                -- Telegram message_id (null for system events)
     source TEXT NOT NULL,           -- 'user' | 'assistant' | 'system'
     text TEXT,
     attachments TEXT,               -- JSON array of file paths/types
-    metadata TEXT                   -- JSON: triggered_by, reply_to, edited_at, dll
+    metadata TEXT                   -- JSON: triggered_by, reply_to, edited_at, etc
   );
   ```
-- **Opsi storage**:
-  - **A**: SQLite (better-sqlite3 atau Bun's built-in `bun:sqlite`). Future-proof untuk FTS5.
-  - **B**: JSONL append-only di `<project>/.claude/channels/telegram/messages.jsonl`. Simpel, tapi search nanti perlu load all.
-- **Rekomendasi**: SQLite via `bun:sqlite` (nol dependency, native di Bun). Schema-less mode dulu (text + JSON metadata), tambah index/FTS belakangan.
-- **Lokasi file**: `<project>/.claude/channels/telegram/messages.db` (atau per-chat: `messages/<chatId>.db` kalau ingin per-chat isolation).
-- **Scope eksplisit yang DI-DEFER**: search/recall mechanism (MCP tool `search_messages`, dashboard query, dll). Item ini **storage saja dulu** sesuai instruksi user.
-- **Decision pending**: per-chat DB vs single DB. Per-chat lebih clean (mudah delete per user, no cross-leak), single DB lebih mudah cross-chat search nanti.
+- **Storage options**:
+  - **A**: SQLite (better-sqlite3 or Bun's built-in `bun:sqlite`). Future-proof for FTS5.
+  - **B**: JSONL append-only at `<project>/.claude/channels/telegram/messages.jsonl`. Simple, but search later requires loading everything.
+- **Recommendation**: SQLite via `bun:sqlite` (zero dependency, native in Bun). Schema-less mode at first (text + JSON metadata), add index/FTS later.
+- **File location**: `<project>/.claude/channels/telegram/messages.db` (or per-chat: `messages/<chatId>.db` if you want per-chat isolation).
+- **Explicitly DEFERRED scope**: the search/recall mechanism (an MCP `search_messages` tool, dashboard query, etc). This item is **storage only for now**, per the user's instruction.
+- **Pending decision**: per-chat DB vs single DB. Per-chat is cleaner (easy per-user delete, no cross-leak), single DB makes cross-chat search easier later.
 
 ### T2.1 — Per-channel lightweight state
 
-- **Referensi old project**: `src/db/profile.ts` (7 attributes), `src/core/wake-up.ts` (auto-inject).
-- **Konteks plugin**: Bisa simpan di `<project>/.claude/channels/telegram/state/<userId>.json` (timezone, nickname, language hint). Auto-attach sebagai attribute di `<channel>` tag, biar Claude punya konteks tanpa harus tanya tiap kali.
-- **Trade-off**: Mulai overlap dengan "memory system" (T3.1). Batasi ketat: hanya hint kontekstual, bukan history/knowledge.
+- **Old project reference**: `src/db/profile.ts` (7 attributes), `src/core/wake-up.ts` (auto-inject).
+- **Plugin context**: Can be stored at `<project>/.claude/channels/telegram/state/<userId>.json` (timezone, nickname, language hint). Auto-attach as an attribute on the `<channel>` tag so Claude has context without having to ask each time.
+- **Trade-off**: Starts to overlap with the "memory system" (T3.1). Keep it strictly bounded: contextual hints only, not history/knowledge.
 
 ### T2.2 — Read-only monitoring dashboard
 
-- **Referensi old project**: `src/dashboard/` — Express HTTP server, bearer token auth, optional TLS.
-- **Konteks plugin**: Scope dipersempit: hanya status plugin (pending pairings, recent inbound count, error log, polling state). Tidak expose user content.
-- **Pertimbangan**: Bisa di-skip total — `tail -f` log mungkin sudah cukup. Tunda sampai ada kebutuhan jelas.
+- **Old project reference**: `src/dashboard/` — Express HTTP server, bearer token auth, optional TLS.
+- **Plugin context**: Scope narrowed: plugin status only (pending pairings, recent inbound count, error log, polling state). Does not expose user content.
+- **Consideration**: Could be skipped entirely — `tail -f` on the log may already be enough. Postpone until there's a clear need.
 
 ### T2.3 — Inbound preprocessing pipeline
 
-- **Referensi old project**: Tidak eksplisit, tapi pola async di gateway memungkinkan.
-- **Konteks plugin**: Hook chain seperti `inbound → [transcribe?, translate?, enrich?] → notify`. Foundation untuk fitur lain (T1.1 voice, F3 sticker dll). Worth dikerjakan **sebelum** banyak fitur preprocessing.
+- **Old project reference**: Not explicit, but the async pattern in the gateway makes it possible.
+- **Plugin context**: A hook chain like `inbound → [transcribe?, translate?, enrich?] → notify`. Foundation for other features (T1.1 voice, F3 sticker, etc). Worth doing **before** many preprocessing features.
 
 ### T2.4 — MarkdownV2 safety helper
 
-- **Referensi old project**: Tidak ada (project lama pakai plain text).
-- **Konteks plugin**: Saat ini `format: 'markdown'` di `reply` tool gampang error kalau text mengandung `_`, `*`, `[`, dll yang tidak di-escape. Helper `escapeMarkdownV2(text)` mencegah crash.
+- **Old project reference**: None (the old project used plain text).
+- **Plugin context**: Currently `format: 'markdown'` in the `reply` tool easily errors if the text contains `_`, `*`, `[`, etc that aren't escaped. An `escapeMarkdownV2(text)` helper prevents the crash.
 
 ### T2.5 — Group chat enhancements
 
-- **Referensi old project**: Tidak ada (gateway personal-ai-assistant DM-focused).
-- **Konteks plugin**: Group support sudah ada (mention detection di `access.json.groups`). Yang bisa ditambahkan: detect kalau bot di-quote vs di-mention, distinguish reply-to-bot vs new-topic.
+- **Old project reference**: None (the personal-ai-assistant gateway was DM-focused).
+- **Plugin context**: Group support already exists (mention detection in `access.json.groups`). What could be added: detect whether the bot was quoted vs mentioned, distinguish reply-to-bot vs new-topic.
 
 ---
 
-## Catatan Implementasi
+## Implementation Notes
 
-- **Setiap fitur sebaiknya satu PR/commit terpisah** untuk memudahkan revert.
-- **Test plan harus include**: behavior dengan fitur ON dan OFF (modularitas).
-- **Backward compat**: existing user dengan `access.json` lama tidak boleh broken.
-- **Settings**: opsi baru ditambahkan ke `access.json` schema (atau file config baru `behaviors.json` kalau makin banyak).
+- **Each feature should ideally be a separate PR/commit** to make reverting easier.
+- **The test plan must include**: behavior with the feature ON and OFF (modularity).
+- **Backward compat**: existing users with an old `access.json` must not break.
+- **Settings**: new options are added to the `access.json` schema (or a new `behaviors.json` config file if they grow numerous).
 
 ## Update Log
 
-- **2026-05-15** — Initial backlog dari hasil eksplorasi `personal-ai-assistant`. Belum ada item yang dimulai.
-- **2026-05-15** — Tambah T1.10 (album/media group batching) dan T1.11 (raw conversation logging) berdasarkan input user. T3.7 (search messages) di-revise: storage layer dipindah ke T1.11, mekanisme search di-defer ke pembahasan terpisah.
-- **2026-05-15** — Tambah section "Recommended Development Order (by Impact)". Mode kerja disepakati: 1 fitur per session, focus deep. Saran titik mulai: T1.11.
-- **2026-05-15** — T1.11 selesai. Module `plugins/telegram/messages-store.ts` + integrasi di `server.ts` (handleInbound, reply tool, edit_message tool). `reply` tool gain optional `source` param. Disable via `TELEGRAM_DISABLE_MESSAGES_STORE=1`. Spec: `docs/superpowers/specs/2026-05-15-t111-conversation-logging-design.md`.
-- **2026-05-16** — T1.10 design spec ready: `docs/superpowers/specs/2026-05-16-t110-album-batching-design.md`. Keputusan: Opsi A (plugin buffer), 400ms debounce / 3000ms hard cap / 10 max items, photo + document only, 1 row per album. Tambah T1.12 (outbound media group via `sendMediaGroup`) sebagai item baru — out of plan T1.10.
-- **2026-05-16** — T1.10 selesai. Module `plugins/telegram/album-buffer.ts` (generic, 8 unit tests) + integration di `server.ts` (photo & document handler routing, handleInboundAlbum, shutdown drain). Album = 1 row di messages.db dengan `metadata.media_group_id` + `metadata.message_ids[]`. MCP meta tambahan: `image_paths[]`, `attachments[]`, `media_group_id`. Manual smoke pending user verification.
+- **2026-05-15** — Initial backlog from exploring `personal-ai-assistant`. No items started yet.
+- **2026-05-15** — Added T1.10 (album/media group batching) and T1.11 (raw conversation logging) based on user input. T3.7 (search messages) revised: storage layer moved to T1.11, the search mechanism deferred to a separate discussion.
+- **2026-05-15** — Added the "Recommended Development Order (by Impact)" section. Working mode agreed: 1 feature per session, deep focus. Suggested starting point: T1.11.
+- **2026-05-15** — T1.11 done. Module `plugins/telegram/messages-store.ts` + integration in `server.ts` (handleInbound, reply tool, edit_message tool). The `reply` tool gained an optional `source` param. Disable via `TELEGRAM_DISABLE_MESSAGES_STORE=1`. Spec: `docs/superpowers/specs/2026-05-15-t111-conversation-logging-design.md`.
+- **2026-05-16** — T1.10 design spec ready: `docs/superpowers/specs/2026-05-16-t110-album-batching-design.md`. Decision: Option A (plugin buffer), 400ms debounce / 3000ms hard cap / 10 max items, photo + document only, 1 row per album. Added T1.12 (outbound media group via `sendMediaGroup`) as a new item — out of plan T1.10.
+- **2026-05-16** — T1.10 done. Module `plugins/telegram/album-buffer.ts` (generic, 8 unit tests) + integration in `server.ts` (photo & document handler routing, handleInboundAlbum, shutdown drain). An album = 1 row in messages.db with `metadata.media_group_id` + `metadata.message_ids[]`. Extra MCP meta: `image_paths[]`, `attachments[]`, `media_group_id`. Manual smoke pending user verification.

@@ -27,7 +27,7 @@ Hello, this is my daily report:
 
 No sub-project headers. Flat bullets within each section.
 
-Counts are defaults. If the user's free prompt asks for a different count (e.g. "buat 7 yesterday, 4 today"), follow the user. Never pad to hit the default — anti-fabrication wins.
+Counts are defaults. If the user's free prompt asks for a different count (e.g. "make it 7 yesterday, 4 today"), follow the user. Never pad to hit the default — anti-fabrication wins.
 
 ## What "Yesterday" and "Today" actually mean
 
@@ -74,7 +74,7 @@ If the user explicitly says they will post the report at a different time (e.g.,
      - Merge request / PR / issue numbers (`MR #3`, `PR #142`, `JIRA-1234`)
      - File paths and function names with internal shape (`app/services/swe_bench_agent.py:152`, `_resolve_env`, `_load_benchmarks`, `_lib/swe_bench_react.py`)
      - Internal endpoint URLs, IPs, container names (`a100gemma.acciox.dev`, `192.168.1.73`, `alif-benchmach-orchestrator`)
-   - ❌ Internal process jargon: `opsi A`, `approach B`, `path 1`, `spike branch`, `the v2 plan`, `TASK-1234`.
+   - ❌ Internal process jargon: `option A`, `approach B`, `path 1`, `spike branch`, `the v2 plan`, `TASK-1234`.
    - ❌ Phrasing that assumes shared standup context: `as discussed`, `the thing from yesterday`, `like we talked about`.
    - ✅ Keep meaningful concept names that describe *what* a feature is, even if internal: `the SWE-bench wrapper`, `the embedding fallback`, `the dead-letter queue consumer`. Names of agents, services, benchmarks (`Hermes`, `Django 11087`, `claw-code`, `sonnet`) usually belong — they're identifiers, not jargon.
    - ✅ Each bullet must stand alone — a reader who has never seen the repo still understands *what was done* (even if not the line-by-line *how*).
@@ -85,8 +85,8 @@ If the user explicitly says they will post the report at a different time (e.g.,
    - ✅ Keep: hedges and texture words that carry meaning — `for now`, `first time`, `got set aside`, `still`, `for two days`, `parked for the next session`, `or two`. These signal time, status, or uncertainty a real person would name.
 
 9. **`Today` is forward-looking and must be grounded.** Remember `Today` describes the next session, not what was just finished (see "What 'Yesterday' and 'Today' actually mean"). Populate it, in priority order, from:
-   - Free-prompt hints ("besok mau X", "today X", "next X").
-   - The latest handoff's `Section 5` ("Apa yang Akan Dikerjakan di Sesi Berikutnya"), if a `.handoff/` file was generated this session.
+   - Free-prompt hints ("tomorrow I want X", "today X", "next X").
+   - The latest handoff's "Next" section (legacy handoffs: "Akan"), which lists what will be worked on in the next session, if a `.handoff/` file was generated this session.
    - Unfinished items carried from the previous archive's `Today`.
    - TODO file entries.
    - Reasonable continuations of `Yesterday` — e.g., if `Yesterday` has `Add schema` and there is a visible integration task, `Today` may list `Wire schema into endpoint X`.
@@ -129,7 +129,7 @@ Follow this procedure step by step:
    - Cap each bullet at 10–15 words (hard cap 15). If a sub-bullet wants to be 16+ words, split into two bullets or trim. No multi-sentence bullets.
    - Do NOT include work the writer is "about to finish" but hasn't completed yet. If it isn't done, it belongs in `Today`.
 
-4. **Draft `Today`** — remaining work that will be picked up on day H+1 (items not yet completed at the writing moment). Apply the priority ladder in rule 9. If a `.handoff/` markdown was generated this session, its Section 5 ("Apa yang Akan Dikerjakan di Sesi Berikutnya") is the strongest source. Same 10–15 word cap per bullet.
+4. **Draft `Today`** — remaining work that will be picked up on day H+1 (items not yet completed at the writing moment). Apply the priority ladder in rule 9. If a `.handoff/` markdown was generated this session, its "Next" section (legacy handoffs: "Akan") — what will be worked on in the next session — is the strongest source. Same 10–15 word cap per bullet.
 
 5. **Self-check before emitting.**
    - Every bullet: does it trace to at least one piece of context? If not, remove it.
@@ -141,7 +141,7 @@ Follow this procedure step by step:
      - For each `Today` bullet: ask *"is this still remaining work that hasn't been done?"* If it was already completed today, move it to `Yesterday`.
      - The report is written at end-of-day H and read on morning H+1. Every `Yesterday` bullet must be factually true ("I did X") at the reading moment, and every `Today` bullet must be a genuine forecast ("I will do Y") — not pre-credited work.
    - Boss-readable strip: any commit hash, branch name, MR/PR number, internal file path, function/variable name with underscores, or internal endpoint URL inside a bullet? Strip and rephrase as the activity that name represents.
-   - External-reader check: would a reader outside your team understand each bullet without opening the repo? Replace internal process jargon (`opsi A`, `path 1`, `spike`) with the concrete activity.
+   - External-reader check: would a reader outside your team understand each bullet without opening the repo? Replace internal process jargon (`option A`, `path 1`, `spike`) with the concrete activity.
    - Verbs: any `continue`? Replace with a specific verb.
    - Fillers vs texture: any `just`, `simply`, `some`, `various`, `kind of`? Remove. Hedges that carry meaning (`for now`, `first time`, `got set aside`, `still`) stay.
    - Voice check: read the report aloud. Each bullet should land cleanly in one breath. If a bullet feels like a paragraph, you're past the cap — trim or split.

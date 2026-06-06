@@ -8,9 +8,9 @@ The goal: the AI doesn't dump information like an encyclopedia. Instead, the AI 
 
 The skill triggers when these signals show up:
 
-- Explicit phrases: `"apa itu X"`, `"jelaskan"`, `"ajari saya"`, `"saya tidak paham"`, `"bisakah kamu menerangkan"`, `"what is X"`, `"explain X"`, `"teach me X"`
+- Explicit phrases: `"what is X"`, `"explain"`, `"teach me"`, `"I don't get it"`, `"can you walk me through"` — and their equivalents in any language the user speaks (e.g. the Indonesian `"apa itu X"`, `"jelaskan"`)
 - The user asks follow-ups that probe the same concept from a new angle (a sign they're testing their own understanding)
-- The user offers their own synthesis (`"ini intinya X, benar?"` — "so the gist is X, right?") — asking for confirmation or sharpening
+- The user offers their own synthesis (`"so the gist is X, right?"`) — asking for confirmation or sharpening
 - The user pushes back on the AI's earlier framing — not to debate, but to seek refinement
 - An explicit invocation like `/teach-me` or similar
 
@@ -34,7 +34,7 @@ This skill isn't about **what** gets explained, but **how** it's explained. Ten 
 5. **Multi-dimensional when a single answer would mislead** — split the answer by dimension
 6. **Visual structure** — `##` headings, **bold** for key terms, lists for parallel items (no `|` tables on Telegram)
 7. **Increment, don't dump** — answer what was asked, don't get ahead of the next 5 questions
-8. **Close with an open question** — `"Mau dalami bagian mana?"` ("Which part do you want to dig into?") — not a recap
+8. **Close with an open question** — `"Which part do you want to dig into?"` — not a recap
 9. **Mirror the user's language & register** — if they're casual + English technical terms, follow suit
 10. **Resist the pull toward action** until the user gives an explicit signal they're ready to switch to do-mode
 

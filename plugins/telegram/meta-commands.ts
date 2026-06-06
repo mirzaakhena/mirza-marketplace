@@ -349,7 +349,7 @@ export async function tryRouteMetaCommand(
     }
     if (parsed.kind === 'invalid') {
       await handlers.reply(
-        `⚠️ /effort butuh salah satu: ${EFFORT_LEVELS.join(', ')}`,
+        `⚠️ /effort needs one of: ${EFFORT_LEVELS.join(', ')}`,
       )
       return true
     }
@@ -367,7 +367,7 @@ async function handleNew(
   const sanitised = rawName.replace(/[\r\n]+/g, ' ').trim()
   if (sanitised.length === 0) {
     await handlers.reply(
-      '⚠️ /new butuh nama session. Contoh: /new bahas MCP',
+      '⚠️ /new needs a session name. Example: /new discuss MCP',
     )
     return true
   }
@@ -376,15 +376,15 @@ async function handleNew(
   const stateDir = resolvePtyStateDir(env)
   if (!stateDir) {
     await handlers.reply(
-      '⚠️ /new tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset. ' +
-        'Pastikan Claude Code dijalankan dari folder project, atau set PTY_CONTROLLER_STATE_DIR.',
+      '⚠️ /new cannot run: CLAUDE_PROJECT_DIR is not set. ' +
+        'Make sure Claude Code is launched from the project folder, or set PTY_CONTROLLER_STATE_DIR.',
     )
     return true
   }
   if (!wrapperHeartbeatFresh(stateDir)) {
     await handlers.reply(
-      '⚠️ /new tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi (heartbeat stale). ' +
-        'Pastikan CC dijalankan via `mirza-cc` wrapper, bukan `claude` langsung.',
+      '⚠️ /new cannot run: mirza-cc wrapper not detected (heartbeat stale). ' +
+        'Make sure CC is launched via the `mirza-cc` wrapper, not `claude` directly.',
     )
     return true
   }
@@ -394,7 +394,7 @@ async function handleNew(
     const taken = findSessionIdByName(registry, sessionName)
     if (taken) {
       await handlers.reply(
-        `⚠️ Nama "${sessionName}" sudah dipakai session lain di project ini. Pilih nama lain atau /switch ke session itu.`,
+        `⚠️ The name "${sessionName}" is already used by another session in this project. Pick another name or /switch to it.`,
       )
       return true
     }
@@ -403,7 +403,7 @@ async function handleNew(
     writeWrapperCommand(stateDir, { command: '/clear', sessionName })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    await handlers.reply(`⚠️ /new gagal menulis command ke wrapper: ${msg}`)
+    await handlers.reply(`⚠️ /new failed to write command to wrapper: ${msg}`)
     return true
   }
   // No "Clearing session..." ack here — the wrapper writes a system-outbox
@@ -423,7 +423,7 @@ async function handleRename(
   const sanitised = rawName.replace(/[\r\n]+/g, ' ').trim()
   if (sanitised.length === 0) {
     await handlers.reply(
-      '⚠️ /rename butuh nama baru. Contoh: /rename bahas MCP',
+      '⚠️ /rename needs a new name. Example: /rename discuss MCP',
     )
     return true
   }
@@ -432,13 +432,13 @@ async function handleRename(
   const stateDir = resolvePtyStateDir(env)
   if (!stateDir) {
     await handlers.reply(
-      '⚠️ /rename tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.',
+      '⚠️ /rename cannot run: CLAUDE_PROJECT_DIR is not set.',
     )
     return true
   }
   if (!wrapperHeartbeatFresh(stateDir)) {
     await handlers.reply(
-      '⚠️ /rename tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.',
+      '⚠️ /rename cannot run: mirza-cc wrapper not detected.',
     )
     return true
   }
@@ -452,7 +452,7 @@ async function handleRename(
     const taken = findSessionIdByName(registry, newName)
     if (taken && taken !== currentSid) {
       await handlers.reply(
-        `⚠️ Nama "${newName}" sudah dipakai session lain. /switch ke session itu atau pilih nama lain.`,
+        `⚠️ The name "${newName}" is already used by another session. /switch to it or pick another name.`,
       )
       return true
     }
@@ -461,7 +461,7 @@ async function handleRename(
     writeWrapperCommand(stateDir, { command: `/rename ${newName}` })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    await handlers.reply(`⚠️ /rename gagal menulis command ke wrapper: ${msg}`)
+    await handlers.reply(`⚠️ /rename failed to write command to wrapper: ${msg}`)
     return true
   }
   // Mirror the rename into the plugin-side registry so the new name shows
@@ -471,7 +471,7 @@ async function handleRename(
   if (currentSid && telegramStateDir) {
     registrySetName(telegramStateDir, currentSid, newName)
   }
-  await handlers.reply(`✏️ Renaming session ke "${newName}".`)
+  await handlers.reply(`✏️ Renaming session to "${newName}".`)
   return true
 }
 
@@ -483,13 +483,13 @@ async function handleEffortDirect(
   const stateDir = resolvePtyStateDir(env)
   if (!stateDir) {
     await handlers.reply(
-      '⚠️ /effort tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.',
+      '⚠️ /effort cannot run: CLAUDE_PROJECT_DIR is not set.',
     )
     return true
   }
   if (!wrapperHeartbeatFresh(stateDir)) {
     await handlers.reply(
-      '⚠️ /effort tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.',
+      '⚠️ /effort cannot run: mirza-cc wrapper not detected.',
     )
     return true
   }
@@ -499,7 +499,7 @@ async function handleEffortDirect(
     writeWrapperCommand(stateDir, { command: `/effort ${level}`, confirmAfterMs: 500 })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    await handlers.reply(`⚠️ /effort gagal menulis command ke wrapper: ${msg}`)
+    await handlers.reply(`⚠️ /effort failed to write command to wrapper: ${msg}`)
     return true
   }
   await handlers.reply(`🎯 Effort: ${level}`)
@@ -527,10 +527,10 @@ async function handleEffortPicker(
       { label: labelFor('auto'), callbackData: 'meta:effort_auto' },
     ],
     [
-      { label: '❌ Batal', callbackData: 'meta:effort_cancel' },
+      { label: '❌ Cancel', callbackData: 'meta:effort_cancel' },
     ],
   ]
-  await handlers.replyWithButtons('🎯 Pilih effort level untuk session ini', rows)
+  await handlers.replyWithButtons('🎯 Pick an effort level for this session', rows)
   return true
 }
 
@@ -541,8 +541,8 @@ function switchHeadline(
 ): string {
   const pageNote = totalPages > 1 ? ` (page ${page}/${totalPages})` : ''
   return currentLabel
-    ? `🔀 Pilih session untuk diswitch (sekarang di "${currentLabel}")${pageNote}:`
-    : `🔀 Pilih session untuk diswitch${pageNote}:`
+    ? `🔀 Pick a session to switch to (currently on "${currentLabel}")${pageNote}:`
+    : `🔀 Pick a session to switch to${pageNote}:`
 }
 
 async function handleSwitch(
@@ -552,14 +552,14 @@ async function handleSwitch(
   const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
   if (!projectDir) {
     await handlers.reply(
-      '⚠️ /switch tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.',
+      '⚠️ /switch cannot run: CLAUDE_PROJECT_DIR is not set.',
     )
     return true
   }
   const stateDir = resolvePtyStateDir(env)
   if (!stateDir || !wrapperHeartbeatFresh(stateDir)) {
     await handlers.reply(
-      '⚠️ /switch tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.',
+      '⚠️ /switch cannot run: mirza-cc wrapper not detected.',
     )
     return true
   }
@@ -573,8 +573,8 @@ async function handleSwitch(
   if (sessions.length === 0) {
     await handlers.reply(
       currentLabel
-        ? `Hanya ada satu session di project ini ("${currentLabel}"). Tidak ada session lain untuk diswitch.`
-        : 'Tidak ada session di project ini.',
+        ? `Only one session in this project ("${currentLabel}"). No other session to switch to.`
+        : 'No sessions in this project.',
     )
     return true
   }
@@ -603,12 +603,12 @@ async function handleSwitch(
 
 function deleteHeadline(page: number, totalPages: number): string {
   const pageNote = totalPages > 1 ? ` (page ${page}/${totalPages})` : ''
-  return `🗑️ Pilih session untuk dihapus${pageNote}:`
+  return `🗑️ Pick a session to delete${pageNote}:`
 }
 
 function archiveHeadline(page: number, totalPages: number): string {
   const pageNote = totalPages > 1 ? ` (page ${page}/${totalPages})` : ''
-  return `📦 Pilih session untuk diarchive${pageNote}:`
+  return `📦 Pick a session to archive${pageNote}:`
 }
 
 async function handleArchive(
@@ -617,12 +617,12 @@ async function handleArchive(
 ): Promise<boolean> {
   const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
   if (!projectDir) {
-    await handlers.reply('⚠️ /archive tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.')
+    await handlers.reply('⚠️ /archive cannot run: CLAUDE_PROJECT_DIR is not set.')
     return true
   }
   const stateDir = resolvePtyStateDir(env)
   if (!stateDir || !wrapperHeartbeatFresh(stateDir)) {
-    await handlers.reply('⚠️ /archive tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.')
+    await handlers.reply('⚠️ /archive cannot run: mirza-cc wrapper not detected.')
     return true
   }
 
@@ -632,7 +632,7 @@ async function handleArchive(
   const sessions = currentSid ? all.filter(s => s.sessionId !== currentSid) : all
 
   if (sessions.length === 0) {
-    await handlers.reply('Tidak ada session lain yang bisa diarchive.')
+    await handlers.reply('No other sessions available to archive.')
     return true
   }
 
@@ -664,12 +664,12 @@ async function handleDelete(
 ): Promise<boolean> {
   const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
   if (!projectDir) {
-    await handlers.reply('⚠️ /delete tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.')
+    await handlers.reply('⚠️ /delete cannot run: CLAUDE_PROJECT_DIR is not set.')
     return true
   }
   const stateDir = resolvePtyStateDir(env)
   if (!stateDir || !wrapperHeartbeatFresh(stateDir)) {
-    await handlers.reply('⚠️ /delete tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.')
+    await handlers.reply('⚠️ /delete cannot run: mirza-cc wrapper not detected.')
     return true
   }
 
@@ -679,7 +679,7 @@ async function handleDelete(
   const sessions = currentSid ? all.filter(s => s.sessionId !== currentSid) : all
 
   if (sessions.length === 0) {
-    await handlers.reply('Tidak ada session lain yang bisa dihapus.')
+    await handlers.reply('No other sessions available to delete.')
     return true
   }
 
@@ -711,12 +711,12 @@ async function handleArchiveAll(
 ): Promise<boolean> {
   const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
   if (!projectDir) {
-    await handlers.reply('⚠️ /delete all tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.')
+    await handlers.reply('⚠️ /delete all cannot run: CLAUDE_PROJECT_DIR is not set.')
     return true
   }
   const stateDir = resolvePtyStateDir(env)
   if (!stateDir || !wrapperHeartbeatFresh(stateDir)) {
-    await handlers.reply('⚠️ /delete all tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.')
+    await handlers.reply('⚠️ /delete all cannot run: mirza-cc wrapper not detected.')
     return true
   }
   const currentSid = readCurrentSessionId(stateDir)
@@ -724,15 +724,15 @@ async function handleArchiveAll(
   const all = listProjectSessions(projectDir, telegramStateDir ?? undefined)
   const sessions = currentSid ? all.filter(s => s.sessionId !== currentSid) : all
   if (sessions.length === 0) {
-    await handlers.reply('Tidak ada session lain untuk diarchive.')
+    await handlers.reply('No other sessions to archive.')
     return true
   }
   archiveAllSessions = sessions.map(s => ({ sessionId: s.sessionId, label: s.label, shortId: s.shortId }))
   await handlers.replyWithButtons(
-    `📦 Archive semua ${sessions.length} session (kecuali yang aktif)?`,
+    `📦 Archive all ${sessions.length} sessions (except the active one)?`,
     [[
-      { label: `✅ Archive ${sessions.length} session`, callbackData: 'meta:archive_all_confirm' },
-      { label: '❌ Batal', callbackData: 'meta:archive_all_cancel' },
+      { label: `✅ Archive ${sessions.length} sessions`, callbackData: 'meta:archive_all_confirm' },
+      { label: '❌ Cancel', callbackData: 'meta:archive_all_cancel' },
     ]],
   )
   return true
@@ -744,12 +744,12 @@ async function handleDeleteAll(
 ): Promise<boolean> {
   const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
   if (!projectDir) {
-    await handlers.reply('⚠️ /delete hard all tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.')
+    await handlers.reply('⚠️ /delete hard all cannot run: CLAUDE_PROJECT_DIR is not set.')
     return true
   }
   const stateDir = resolvePtyStateDir(env)
   if (!stateDir || !wrapperHeartbeatFresh(stateDir)) {
-    await handlers.reply('⚠️ /delete hard all tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.')
+    await handlers.reply('⚠️ /delete hard all cannot run: mirza-cc wrapper not detected.')
     return true
   }
   const currentSid = readCurrentSessionId(stateDir)
@@ -757,15 +757,15 @@ async function handleDeleteAll(
   const all = listProjectSessions(projectDir, telegramStateDir ?? undefined)
   const sessions = currentSid ? all.filter(s => s.sessionId !== currentSid) : all
   if (sessions.length === 0) {
-    await handlers.reply('Tidak ada session lain untuk dihapus.')
+    await handlers.reply('No other sessions to delete.')
     return true
   }
   deleteAllSessions = sessions.map(s => ({ sessionId: s.sessionId, label: s.label, shortId: s.shortId }))
   await handlers.replyWithButtons(
-    `🗑️ Hapus PERMANEN semua ${sessions.length} session (kecuali yang aktif)? Ini tidak bisa di-undo.`,
+    `🗑️ PERMANENTLY delete all ${sessions.length} sessions (except the active one)? This cannot be undone.`,
     [[
-      { label: `🗑️ Hapus PERMANEN ${sessions.length} session`, callbackData: 'meta:delete_all_confirm' },
-      { label: '❌ Batal', callbackData: 'meta:delete_all_cancel' },
+      { label: `🗑️ PERMANENTLY delete ${sessions.length} sessions`, callbackData: 'meta:delete_all_confirm' },
+      { label: '❌ Cancel', callbackData: 'meta:delete_all_cancel' },
     ]],
   )
   return true
@@ -809,7 +809,7 @@ export async function tryHandleMetaCallback(
       return true
     }
     if (switchPickerSessions.length === 0) {
-      await handlers.ackCallback('Picker expired, /switch lagi')
+      await handlers.ackCallback('Picker expired, run /switch again')
       await handlers.editMessage('(picker expired — please run /switch again)').catch(() => {})
       return true
     }
@@ -843,7 +843,7 @@ export async function tryHandleMetaCallback(
     }
     const entry = switchPicker.get(shortId)
     if (!entry) {
-      await handlers.ackCallback('Session sudah expired, /switch lagi')
+      await handlers.ackCallback('Session expired, run /switch again')
       await handlers.editMessage('(picker expired — please run /switch again)').catch(() => {})
       return true
     }
@@ -854,7 +854,7 @@ export async function tryHandleMetaCallback(
       return true
     }
     if (!wrapperHeartbeatFresh(stateDir)) {
-      await handlers.ackCallback('Wrapper tidak detected')
+      await handlers.ackCallback('Wrapper not detected')
       await handlers.editMessage('⚠️ Wrapper not running — switch aborted').catch(() => {})
       return true
     }
@@ -894,8 +894,8 @@ export async function tryHandleMetaCallback(
     }
     if (remainder === 'all_confirm') {
       if (deleteAllSessions.length === 0) {
-        await handlers.ackCallback('Expired, /delete hard all lagi')
-        await handlers.editMessage('(expired — /delete hard all lagi)').catch(() => {})
+        await handlers.ackCallback('Expired, run /delete hard all again')
+        await handlers.editMessage('(expired — run /delete hard all again)').catch(() => {})
         return true
       }
       const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
@@ -918,9 +918,9 @@ export async function tryHandleMetaCallback(
         }
       }
       deleteAllSessions = []
-      const note = skipped > 0 ? ` · ${skipped} dilewati` : ''
-      await handlers.ackCallback('Dihapus')
-      await handlers.editMessage(`🗑️ ${deleted} session dihapus permanen.${note}`).catch(() => {})
+      const note = skipped > 0 ? ` · ${skipped} skipped` : ''
+      await handlers.ackCallback('Deleted')
+      await handlers.editMessage(`🗑️ ${deleted} sessions permanently deleted.${note}`).catch(() => {})
       return true
     }
 
@@ -936,7 +936,7 @@ export async function tryHandleMetaCallback(
         return true
       }
       if (deletePickerSessions.length === 0) {
-        await handlers.ackCallback('Picker expired, /delete lagi')
+        await handlers.ackCallback('Picker expired, run /delete again')
         await handlers.editMessage('(picker expired — please run /delete again)').catch(() => {})
         return true
       }
@@ -970,7 +970,7 @@ export async function tryHandleMetaCallback(
       const entry = deletePicker.get(shortId)
       if (!entry) {
         await handlers.ackCallback('Prompt expired')
-        await handlers.editMessage('(prompt expired — /delete lagi)').catch(() => {})
+        await handlers.editMessage('(prompt expired — run /delete again)').catch(() => {})
         return true
       }
 
@@ -983,9 +983,9 @@ export async function tryHandleMetaCallback(
       if (stateDir) {
         const currentSid = readCurrentSessionId(stateDir)
         if (currentSid === entry.sessionId) {
-          await handlers.ackCallback('Session aktif tidak bisa dihapus')
+          await handlers.ackCallback('Cannot delete the active session')
           await handlers
-            .editMessage(`⚠️ Tidak bisa hapus — "${entry.label}" sekarang session aktif.`)
+            .editMessage(`⚠️ Cannot delete — "${entry.label}" is the active session.`)
             .catch(() => {})
           return true
         }
@@ -996,13 +996,13 @@ export async function tryHandleMetaCallback(
         deleteSessionJsonlAndFreeName(projectDir, telegramStateDir, entry.sessionId)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        await handlers.ackCallback(`Gagal hapus: ${msg}`)
+        await handlers.ackCallback(`Delete failed: ${msg}`)
         return true
       }
 
-      await handlers.ackCallback(`session dihapus`)
+      await handlers.ackCallback(`session deleted`)
       await handlers
-        .editMessage(`🗑️ session "${entry.label}" dihapus.`)
+        .editMessage(`🗑️ session "${entry.label}" deleted.`)
         .catch(() => {})
       deletePicker.delete(shortId)
       return true
@@ -1017,16 +1017,16 @@ export async function tryHandleMetaCallback(
     const entry = deletePicker.get(shortId)
     if (!entry) {
       await handlers.ackCallback('Picker expired')
-      await handlers.editMessage('(picker expired — /delete lagi)').catch(() => {})
+      await handlers.editMessage('(picker expired — run /delete again)').catch(() => {})
       return true
     }
 
-    await handlers.ackCallback('Konfirmasi diperlukan')
+    await handlers.ackCallback('Confirmation required')
     await handlers
-      .editMessage(`🗑️ Pilih session untuk dihapus → ${entry.label}`)
+      .editMessage(`🗑️ Pick a session to delete → ${entry.label}`)
       .catch(() => {})
     await handlers.replyWithButtons(
-      `Hapus session "${entry.label}"? Ini PERMANEN, tidak bisa di-undo.`,
+      `Delete session "${entry.label}"? This is PERMANENT and cannot be undone.`,
       [[
         { label: '✅ Confirm', callbackData: `meta:delete_confirm_${shortId}` },
         { label: '❌ Cancel', callbackData: 'meta:delete_cancel' },
@@ -1048,8 +1048,8 @@ export async function tryHandleMetaCallback(
     }
     if (remainder === 'all_confirm') {
       if (archiveAllSessions.length === 0) {
-        await handlers.ackCallback('Expired, /delete all lagi')
-        await handlers.editMessage('(expired — /delete all lagi)').catch(() => {})
+        await handlers.ackCallback('Expired, run /delete all again')
+        await handlers.editMessage('(expired — run /delete all again)').catch(() => {})
         return true
       }
       const telegramStateDir = resolveTelegramStateDir(env)
@@ -1071,9 +1071,9 @@ export async function tryHandleMetaCallback(
         }
       }
       archiveAllSessions = []
-      const note = skipped > 0 ? ` · ${skipped} dilewati` : ''
-      await handlers.ackCallback('Diarchive')
-      await handlers.editMessage(`📦 ${archived} session diarchive.${note}`).catch(() => {})
+      const note = skipped > 0 ? ` · ${skipped} skipped` : ''
+      await handlers.ackCallback('Archived')
+      await handlers.editMessage(`📦 ${archived} sessions archived.${note}`).catch(() => {})
       return true
     }
 
@@ -1089,7 +1089,7 @@ export async function tryHandleMetaCallback(
         return true
       }
       if (archivePickerSessions.length === 0) {
-        await handlers.ackCallback('Picker expired, /archive lagi')
+        await handlers.ackCallback('Picker expired, run /archive again')
         await handlers.editMessage('(picker expired — please run /archive again)').catch(() => {})
         return true
       }
@@ -1123,7 +1123,7 @@ export async function tryHandleMetaCallback(
       const entry = archivePicker.get(shortId)
       if (!entry) {
         await handlers.ackCallback('Prompt expired')
-        await handlers.editMessage('(prompt expired — /archive lagi)').catch(() => {})
+        await handlers.editMessage('(prompt expired — run /archive again)').catch(() => {})
         return true
       }
       const telegramStateDir = resolveTelegramStateDir(env)
@@ -1135,11 +1135,11 @@ export async function tryHandleMetaCallback(
         archiveSessionAndFreeName(telegramStateDir, entry.sessionId)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        await handlers.ackCallback(`Gagal archive: ${msg}`)
+        await handlers.ackCallback(`Archive failed: ${msg}`)
         return true
       }
-      await handlers.ackCallback('session diarchive')
-      await handlers.editMessage(`📦 session "${entry.label}" diarchive.`).catch(() => {})
+      await handlers.ackCallback('session archived')
+      await handlers.editMessage(`📦 session "${entry.label}" archived.`).catch(() => {})
       archivePicker.delete(shortId)
       return true
     }
@@ -1153,16 +1153,16 @@ export async function tryHandleMetaCallback(
     const entry = archivePicker.get(shortId)
     if (!entry) {
       await handlers.ackCallback('Picker expired')
-      await handlers.editMessage('(picker expired — /archive lagi)').catch(() => {})
+      await handlers.editMessage('(picker expired — run /archive again)').catch(() => {})
       return true
     }
 
-    await handlers.ackCallback('Konfirmasi diperlukan')
+    await handlers.ackCallback('Confirmation required')
     await handlers
-      .editMessage(`📦 Pilih session untuk diarchive → ${entry.label}`)
+      .editMessage(`📦 Pick a session to archive → ${entry.label}`)
       .catch(() => {})
     await handlers.replyWithButtons(
-      `Archive session "${entry.label}"? (untuk unarchive, edit file manual)`,
+      `Archive session "${entry.label}"? (to unarchive, edit the file manually)`,
       [[
         { label: '✅ Confirm', callbackData: `meta:archive_confirm_${shortId}` },
         { label: '❌ Cancel', callbackData: 'meta:archive_cancel' },
@@ -1174,8 +1174,8 @@ export async function tryHandleMetaCallback(
   if (rest.startsWith('effort_')) {
     const remainder = rest.slice('effort_'.length)
     if (remainder === 'cancel') {
-      await handlers.ackCallback('Effort tidak diubah')
-      await handlers.editMessage('❌ Effort tidak diubah.').catch(() => {})
+      await handlers.ackCallback('Effort unchanged')
+      await handlers.editMessage('❌ Effort unchanged.').catch(() => {})
       return true
     }
     if (!(EFFORT_LEVELS as readonly string[]).includes(remainder)) {
@@ -1190,7 +1190,7 @@ export async function tryHandleMetaCallback(
     }
     if (!wrapperHeartbeatFresh(stateDir)) {
       await handlers.ackCallback('Wrapper not detected')
-      await handlers.editMessage('⚠️ /effort gagal: mirza-cc wrapper tidak terdeteksi.').catch(() => {})
+      await handlers.editMessage('⚠️ /effort failed: mirza-cc wrapper not detected.').catch(() => {})
       return true
     }
     try {
@@ -1199,8 +1199,8 @@ export async function tryHandleMetaCallback(
       writeWrapperCommand(stateDir, { command: `/effort ${level}`, confirmAfterMs: 500 })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      await handlers.ackCallback(`Gagal kirim: ${msg}`)
-      await handlers.editMessage(`⚠️ /effort gagal menulis ke wrapper: ${msg}`).catch(() => {})
+      await handlers.ackCallback(`Send failed: ${msg}`)
+      await handlers.editMessage(`⚠️ /effort failed to write to wrapper: ${msg}`).catch(() => {})
       return true
     }
     await handlers.ackCallback(`Effort: ${level}`)

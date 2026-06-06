@@ -39,25 +39,25 @@ describe('extractQuoteText', () => {
 
   test('quote.text wins over reply_to_message.text (most specific)', () => {
     const result = extractQuoteText({
-      quote: { text: 'ini bagian dipilih', is_manual: true },
-      reply_to_message: { message_id: 1, text: 'pesan lengkap yang lebih panjang' },
+      quote: { text: 'this is the selected part', is_manual: true },
+      reply_to_message: { message_id: 1, text: 'the full longer message' },
     })
-    expect(result).toEqual({ text: 'ini bagian dipilih', isManual: true })
+    expect(result).toEqual({ text: 'this is the selected part', isManual: true })
   })
 
   test('quote.text without is_manual flag → isManual false (only manual quotes set the flag)', () => {
     const result = extractQuoteText({
-      quote: { text: 'sebagian teks' },
-      reply_to_message: { message_id: 1, text: 'teks lengkap' },
+      quote: { text: 'partial text' },
+      reply_to_message: { message_id: 1, text: 'full text' },
     })
-    expect(result).toEqual({ text: 'sebagian teks', isManual: false })
+    expect(result).toEqual({ text: 'partial text', isManual: false })
   })
 
   test('falls back to reply_to_message.text when no quote', () => {
     const result = extractQuoteText({
-      reply_to_message: { message_id: 99, text: 'pesan asli' },
+      reply_to_message: { message_id: 99, text: 'original message' },
     })
-    expect(result).toEqual({ text: 'pesan asli', isManual: false })
+    expect(result).toEqual({ text: 'original message', isManual: false })
   })
 
   test('falls back to reply_to_message.caption when text absent (media reply)', () => {
@@ -69,9 +69,9 @@ describe('extractQuoteText', () => {
 
   test('text takes precedence over caption on the same reply_to_message', () => {
     const result = extractQuoteText({
-      reply_to_message: { message_id: 99, text: 'teks', caption: 'caption' },
+      reply_to_message: { message_id: 99, text: 'text', caption: 'caption' },
     })
-    expect(result?.text).toBe('teks')
+    expect(result?.text).toBe('text')
   })
 
   test('reply to bare media without text or caption → undefined (open question #3: stay silent)', () => {
@@ -84,9 +84,9 @@ describe('extractQuoteText', () => {
   test('reply to bot\'s own message produces quote_text (open question #2)', () => {
     // Same code path — if the reply has text, we extract it regardless of author
     const result = extractQuoteText({
-      reply_to_message: { message_id: 50, text: 'pesan dari bot', from: { is_bot: true, id: 123 } },
+      reply_to_message: { message_id: 50, text: 'message from bot', from: { is_bot: true, id: 123 } },
     })
-    expect(result).toEqual({ text: 'pesan dari bot', isManual: false })
+    expect(result).toEqual({ text: 'message from bot', isManual: false })
   })
 
   test('empty string text is treated as absent (falls through to caption then undefined)', () => {

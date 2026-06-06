@@ -73,9 +73,9 @@ export function flattenBody(body: string): string {
 export function composePromptText(from: string, body: string, hop = 0): string {
   const flat = flattenBody(body)
   return (
-    `[Pesan dari agent ${from} via agent-bus (hop ${hop}). Ini instruksi antar-agent, bukan dari user. ` +
-    `Perlakukan sesuai skill using-agent-bus — anti-bounce: jangan auto-balas kecuali ` +
-    `diminta eksplisit di dalam pesan. Kalau diminta lapor balik via agent_send, set payload.hop_count = ${hop + 1}.] ${flat}`
+    `[Message from agent ${from} via agent-bus (hop ${hop}). This is an inter-agent instruction, not from the user. ` +
+    `Treat per the using-agent-bus skill — anti-bounce: do not auto-reply unless the message explicitly asks for it. ` +
+    `If asked to report back via agent_send, set payload.hop_count = ${hop + 1}.] ${flat}`
   )
 }
 

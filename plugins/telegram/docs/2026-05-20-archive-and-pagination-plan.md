@@ -810,14 +810,14 @@ async function handleSwitch(
   const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
   if (!projectDir) {
     await handlers.reply(
-      '⚠️ /switch tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.',
+      '⚠️ /switch cannot run: CLAUDE_PROJECT_DIR is not set.',
     )
     return true
   }
   const stateDir = resolvePtyStateDir(env)
   if (!stateDir || !wrapperHeartbeatFresh(stateDir)) {
     await handlers.reply(
-      '⚠️ /switch tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.',
+      '⚠️ /switch cannot run: mirza-cc wrapper not detected.',
     )
     return true
   }
@@ -831,8 +831,8 @@ async function handleSwitch(
   if (sessions.length === 0) {
     await handlers.reply(
       currentLabel
-        ? `Hanya ada satu session di project ini ("${currentLabel}"). Tidak ada session lain untuk diswitch.`
-        : 'Tidak ada session di project ini.',
+        ? `Only one session in this project ("${currentLabel}"). No other session to switch to.`
+        : 'No sessions in this project.',
     )
     return true
   }
@@ -863,8 +863,8 @@ async function handleSwitch(
 function headlineFor(currentLabel: string | null, page: number, totalPages: number): string {
   const pageNote = totalPages > 1 ? ` (page ${page}/${totalPages})` : ''
   return currentLabel
-    ? `🔀 Pilih session untuk diswitch (sekarang di "${currentLabel}")${pageNote}:`
-    : `🔀 Pilih session untuk diswitch${pageNote}:`
+    ? `🔀 Pick a session to switch to (currently on "${currentLabel}")${pageNote}:`
+    : `🔀 Pick a session to switch to${pageNote}:`
 }
 ```
 
@@ -886,7 +886,7 @@ if (rest.startsWith('switch_page_')) {
     return true
   }
   if (switchPickerSessions.length === 0) {
-    await handlers.ackCallback('Picker expired, /switch lagi')
+    await handlers.ackCallback('Picker expired, run /switch again')
     await handlers.editMessage('(picker expired — please run /switch again)').catch(() => {})
     return true
   }
@@ -996,12 +996,12 @@ async function handleDelete(
 ): Promise<boolean> {
   const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
   if (!projectDir) {
-    await handlers.reply('⚠️ /delete tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.')
+    await handlers.reply('⚠️ /delete cannot run: CLAUDE_PROJECT_DIR is not set.')
     return true
   }
   const stateDir = resolvePtyStateDir(env)
   if (!stateDir || !wrapperHeartbeatFresh(stateDir)) {
-    await handlers.reply('⚠️ /delete tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.')
+    await handlers.reply('⚠️ /delete cannot run: mirza-cc wrapper not detected.')
     return true
   }
 
@@ -1010,7 +1010,7 @@ async function handleDelete(
   const all = listProjectSessions(projectDir, telegramStateDir ?? undefined)
   const sessions = currentSid ? all.filter(s => s.sessionId !== currentSid) : all
   if (sessions.length === 0) {
-    await handlers.reply('Tidak ada session lain yang bisa dihapus.')
+    await handlers.reply('No other sessions available to delete.')
     return true
   }
 
@@ -1033,7 +1033,7 @@ async function handleDelete(
     sessionCallbackOf: s => `meta:delete_${s.shortId}`,
   })
   const pageNote = totalPages > 1 ? ` (page ${currentPage}/${totalPages})` : ''
-  await handlers.replyWithButtons(`🗑️ Pilih session untuk dihapus${pageNote}:`, rows)
+  await handlers.replyWithButtons(`🗑️ Pick a session to delete${pageNote}:`, rows)
   return true
 }
 ```
@@ -1053,7 +1053,7 @@ if (remainder.startsWith('page_')) {
     return true
   }
   if (deletePickerSessions.length === 0) {
-    await handlers.ackCallback('Picker expired, /delete lagi')
+    await handlers.ackCallback('Picker expired, run /delete again')
     await handlers.editMessage('(picker expired — please run /delete again)').catch(() => {})
     return true
   }
@@ -1068,7 +1068,7 @@ if (remainder.startsWith('page_')) {
   const pageNote = totalPages > 1 ? ` (page ${currentPage}/${totalPages})` : ''
   await handlers.ackCallback()
   await handlers
-    .editMessageWithButtons(`🗑️ Pilih session untuk dihapus${pageNote}:`, rows)
+    .editMessageWithButtons(`🗑️ Pick a session to delete${pageNote}:`, rows)
     .catch(() => {})
   return true
 }
@@ -1106,7 +1106,7 @@ git commit -m "feat(telegram): paginate /delete picker via shared helper"
 
 `/archive` is a near-twin of `/delete`. Differences:
 - On confirm, append session ID to `archived-sessions.json` instead of `rmSync` the jsonl.
-- Confirmation message: `Archive '<name>'? (untuk unarchive, edit file manual)` — no "PERMANEN" warning because it's reversible by file edit.
+- Confirmation message: `Archive '<name>'? (to unarchive, edit the file manually)` — no "PERMANENT" warning because it's reversible by file edit.
 - Callback prefix: `meta:archive`. Cancel: `meta:archive_cancel`. Confirm: `meta:archive_confirm_<shortId>`.
 
 - [ ] **Step 6.1: Write the failing tests**
@@ -1167,7 +1167,7 @@ describe('/archive', () => {
     await tryHandleMetaCallback(`meta:archive_${targetShort}`, env, cbHandler as any)
     expect(replies).toHaveLength(1)
     expect(replies[0].text).toContain('Archive')
-    expect(replies[0].text).toContain('untuk unarchive, edit file manual')
+    expect(replies[0].text).toContain('to unarchive, edit the file manually')
     expect(replies[0].rows[0].map((b: any) => b.callbackData)).toEqual([
       `meta:archive_confirm_${targetShort}`,
       'meta:archive_cancel',
@@ -1270,12 +1270,12 @@ async function handleArchive(
 ): Promise<boolean> {
   const projectDir = env.CLAUDE_PROJECT_DIR?.trim()
   if (!projectDir) {
-    await handlers.reply('⚠️ /archive tidak bisa dijalankan: CLAUDE_PROJECT_DIR tidak terset.')
+    await handlers.reply('⚠️ /archive cannot run: CLAUDE_PROJECT_DIR is not set.')
     return true
   }
   const stateDir = resolvePtyStateDir(env)
   if (!stateDir || !wrapperHeartbeatFresh(stateDir)) {
-    await handlers.reply('⚠️ /archive tidak bisa dijalankan: mirza-cc wrapper tidak terdeteksi.')
+    await handlers.reply('⚠️ /archive cannot run: mirza-cc wrapper not detected.')
     return true
   }
 
@@ -1284,7 +1284,7 @@ async function handleArchive(
   const all = listProjectSessions(projectDir, telegramStateDir ?? undefined)
   const sessions = currentSid ? all.filter(s => s.sessionId !== currentSid) : all
   if (sessions.length === 0) {
-    await handlers.reply('Tidak ada session lain yang bisa diarchive.')
+    await handlers.reply('No other sessions available to archive.')
     return true
   }
 
@@ -1307,7 +1307,7 @@ async function handleArchive(
     sessionCallbackOf: s => `meta:archive_${s.shortId}`,
   })
   const pageNote = totalPages > 1 ? ` (page ${currentPage}/${totalPages})` : ''
-  await handlers.replyWithButtons(`📦 Pilih session untuk diarchive${pageNote}:`, rows)
+  await handlers.replyWithButtons(`📦 Pick a session to archive${pageNote}:`, rows)
   return true
 }
 ```
@@ -1329,7 +1329,7 @@ if (rest.startsWith('archive_')) {
       return true
     }
     if (archivePickerSessions.length === 0) {
-      await handlers.ackCallback('Picker expired, /archive lagi')
+      await handlers.ackCallback('Picker expired, run /archive again')
       await handlers.editMessage('(picker expired — please run /archive again)').catch(() => {})
       return true
     }
@@ -1343,7 +1343,7 @@ if (rest.startsWith('archive_')) {
     })
     const pageNote = totalPages > 1 ? ` (page ${currentPage}/${totalPages})` : ''
     await handlers.ackCallback()
-    await handlers.editMessageWithButtons(`📦 Pilih session untuk diarchive${pageNote}:`, rows).catch(() => {})
+    await handlers.editMessageWithButtons(`📦 Pick a session to archive${pageNote}:`, rows).catch(() => {})
     return true
   }
 
@@ -1362,7 +1362,7 @@ if (rest.startsWith('archive_')) {
     const entry = archivePicker.get(shortId)
     if (!entry) {
       await handlers.ackCallback('Prompt expired')
-      await handlers.editMessage('(prompt expired — /archive lagi)').catch(() => {})
+      await handlers.editMessage('(prompt expired — run /archive again)').catch(() => {})
       return true
     }
     const telegramStateDir = resolveTelegramStateDir(env)
@@ -1374,11 +1374,11 @@ if (rest.startsWith('archive_')) {
       addArchived(telegramStateDir, entry.sessionId)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      await handlers.ackCallback(`Gagal archive: ${msg}`)
+      await handlers.ackCallback(`Archive failed: ${msg}`)
       return true
     }
-    await handlers.ackCallback('session diarchive')
-    await handlers.editMessage(`📦 session "${entry.label}" diarchive.`).catch(() => {})
+    await handlers.ackCallback('session archived')
+    await handlers.editMessage(`📦 session "${entry.label}" archived.`).catch(() => {})
     archivePicker.delete(shortId)
     return true
   }
@@ -1392,15 +1392,15 @@ if (rest.startsWith('archive_')) {
   const entry = archivePicker.get(shortId)
   if (!entry) {
     await handlers.ackCallback('Picker expired')
-    await handlers.editMessage('(picker expired — /archive lagi)').catch(() => {})
+    await handlers.editMessage('(picker expired — run /archive again)').catch(() => {})
     return true
   }
   await handlers.ackCallback('Konfirmasi diperlukan')
   await handlers
-    .editMessage(`📦 Pilih session untuk diarchive → ${entry.label}`)
+    .editMessage(`📦 Pick a session to archive → ${entry.label}`)
     .catch(() => {})
   await handlers.replyWithButtons(
-    `Archive session "${entry.label}"? (untuk unarchive, edit file manual)`,
+    `Archive session "${entry.label}"? (to unarchive, edit the file manually)`,
     [[
       { label: '✅ Confirm', callbackData: `meta:archive_confirm_${shortId}` },
       { label: '❌ Cancel', callbackData: 'meta:archive_cancel' },
@@ -1569,7 +1569,7 @@ When all tasks are complete, manually verify on the phone:
 
 - [ ] `/switch` shows pagination when there are >6 non-current sessions; Prev hidden on page 1, Next hidden on last page.
 - [ ] `/delete` same pagination behavior.
-- [ ] `/archive` works: picker → tap session → confirm prompt with "untuk unarchive, edit file manual" → confirm → success message.
+- [ ] `/archive` works: picker → tap session → confirm prompt with "to unarchive, edit the file manually" → confirm → success message.
 - [ ] After archiving a session, that session no longer appears in `/switch`, `/delete`, or `/archive`.
 - [ ] Archived session's jsonl still exists in `~/.claude/projects/<encoded>/`.
 - [ ] Editing `<project>/.claude/channels/telegram/archived-sessions.json` to remove a session ID brings it back into the pickers.

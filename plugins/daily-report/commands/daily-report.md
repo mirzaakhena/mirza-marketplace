@@ -47,7 +47,7 @@ The user's free-form prompt is in `$ARGUMENTS`. It may be empty. Extract:
 - File paths (include them when invoking `gather-context.sh`).
 - `Today` hints.
 - Any project-name override (e.g., `project=<name>`).
-- Any explicit count override (e.g., "buat 7 yesterday, 4 today" / "make it 6 and 4") — overrides the skill's default of 5 yesterday, 3 today.
+- Any explicit count override (e.g., "make it 7 yesterday, 4 today" / "make it 6 and 4") — overrides the skill's default of 5 yesterday, 3 today.
 
 ## Step 4 — Generate the report
 

@@ -21,9 +21,9 @@ Before writing any file, decide whether the **next-session direction** is clear 
 
 **Default: assume UNCLEAR.** Brainstorm with the user unless **all three** of these positive signals hold:
 
-1. **You can name the next step in one sentence without hedging.** ("Implement Opsi B for SWE-bench" passes; "continue working on X" or "address open items" does not.)
-2. **You can name the file, branch, or spec where it lives.** A concrete artefact — `docs/superpowers/specs/2026-04-27-handoff-design.md`, branch `add-swe-bench`, or "the failing test in `app/auth_test.py`" — exists and you can cite it.
-3. **The user confirmed this is the next step in this session.** Either through an explicit choice ("lanjut ke Opsi B", "saya pilih A"), an approved spec/plan committed during the session, or a direct instruction. AI-inferred "probably they want X" does NOT count.
+1. **You can name the next step in one sentence without hedging.** ("Implement Option B for SWE-bench" passes; "continue working on X" or "address open items" does not.)
+2. **You can name the file, branch, or spec where it lives.** A concrete artifact — `docs/superpowers/specs/2026-04-27-handoff-design.md`, branch `add-swe-bench`, or "the failing test in `app/auth_test.py`" — exists and you can cite it.
+3. **The user confirmed this is the next step in this session.** Either through an explicit choice ("go with Option B", "I pick A"), an approved spec/plan committed during the session, or a direct instruction. AI-inferred "probably they want X" does NOT count.
 
 If any of the three is missing, the direction is unclear.
 
@@ -38,9 +38,9 @@ If any of the three is missing, the direction is unclear.
 
 **If unclear: brainstorm before writing.** Use the same discipline as the `superpowers:brainstorming` skill: one question at a time, multiple-choice when possible, lead with a recommendation. Do NOT write the file until the user's answers leave you with a clear next step. Examples of brainstorm questions:
 
-- "Anda ingin lanjut ke Opsi B di sesi berikutnya, atau ada arah lain yang sedang dipertimbangkan?"
-- "Sesi ini banyak eksplorasi tapi belum ada keputusan eksplisit. Sebelum saya tulis handoff, mana yang paling tepat sebagai 'next step'? (a) merge dan deploy fitur X, (b) lanjut bug Y, (c) pause dan sesi berikutnya tentukan arah baru"
-- "Sesi ini ditinggalkan dengan test yang gagal. Yakin sudah cukup informasi untuk handoff, atau lebih baik kita rangkum dulu state of the bug sebelum tulis file?"
+- "Do you want to move on to Option B next session, or is there another direction you're considering?"
+- "This session was mostly exploration with no explicit decision yet. Before I write the handoff, which is the right 'next step'? (a) merge and deploy feature X, (b) continue with bug Y, (c) pause and decide a new direction next session."
+- "This session was left with a failing test. Are you confident there's enough info for a handoff, or should we first summarise the state of the bug before writing the file?"
 
 Once the user answers, proceed to Step 2.
 
@@ -56,7 +56,7 @@ Rules:
 
 Examples:
 
-- A session that finished SWE-bench browse-only and is teeing up Opsi B → `swe-bench-add-deploy-prep`
+- A session that finished SWE-bench browse-only and is teeing up Option B → `swe-bench-add-deploy-prep`
 - A session debugging a flaky test → `flaky-checkout-test-fix`
 - A session reviewing PRs without changes → `pr-review-2026-04-28` (date in title is acceptable when the session has no clear topic)
 
@@ -74,8 +74,8 @@ Validate the title before writing. If it has more than 6 words or contains illeg
 
 Two header fields connect this handoff to a wider context. Fill them **before** generating the body.
 
-- **Lanjutan dari (chain).** If this session continues work from an earlier handoff, link it. Find the lex-last existing file in `.handoff/` (the previous handoff, before the file you are about to write) and cite its filename. Only link when this session is genuinely a continuation of that thread — if the topic is unrelated new work, write `—`. **Do not guess a relationship.** This forms an append-only chain: each handoff points back one hop, never edits a prior file. To reconstruct history, a reader walks the chain backward — so the link must be accurate.
-- **Plan terkait (roadmap pointer).** If the work is driven by a multi-phase plan (e.g. one produced by `superpowers:writing-plans` under `docs/superpowers/plans/...`), cite the plan's path **and** the current position (`fase 3/7`). The plan file is the single source of truth for the phase checklist and overall roadmap — the handoff only records *where in it you are*. Do NOT duplicate the plan's checklist into the handoff. If the work is not plan-driven, write `—`.
+- **Continued from (chain).** If this session continues work from an earlier handoff, link it. Find the lex-last existing file in `.handoff/` (the previous handoff, before the file you are about to write) and cite its filename. Only link when this session is genuinely a continuation of that thread — if the topic is unrelated new work, write `—`. **Do not guess a relationship.** This forms an append-only chain: each handoff points back one hop, never edits a prior file. To reconstruct history, a reader walks the chain backward — so the link must be accurate.
+- **Related plan (roadmap pointer).** If the work is driven by a multi-phase plan (e.g. one produced by `superpowers:writing-plans` under `docs/superpowers/plans/...`), cite the plan's path **and** the current position (`phase 3/7`). The plan file is the single source of truth for the phase checklist and overall roadmap — the handoff only records *where in it you are*. Do NOT duplicate the plan's checklist into the handoff. If the work is not plan-driven, write `—`.
 
 ## Step 5 — Generate the content
 
@@ -83,7 +83,7 @@ Two header fields connect this handoff to a wider context. Fill them **before** 
 
 Use the 10-section template below. Every section is present even if its content is `—` (so `/handoff-resume` can parse predictably).
 
-The spine is **Sudah (Sec 2) → Sedang (Sec 3) → Blocker (Sec 4) → Akan (Sec 5)** — fill these so a fresh agent immediately understands what is done, what is mid-flight, what is stuck, and what comes next.
+The spine is **Done (Sec 2) → In Progress (Sec 3) → Blockers (Sec 4) → Next (Sec 5)** — fill these so a fresh agent immediately understands what is done, what is mid-flight, what is stuck, and what comes next.
 
 Use `git log`, `git status`, `git diff --stat`, the conversation, and any TodoWrite/superpowers state visible in the session to fill the sections. Be specific — cite commit SHAs, file paths, and document paths.
 
@@ -96,67 +96,67 @@ Use `git log`, `git status`, `git diff --stat`, the conversation, and any TodoWr
 **Repo:** {basename of `git rev-parse --show-toplevel`, or basename of `pwd` if not in git}
 **Branch:** {git branch} (HEAD: {short SHA})
 **Generated by:** /handoff [{verbatim user argument, or blank}]
-**Lanjutan dari:** `.handoff/{previous handoff filename}` (atau `—` kalau handoff pertama / kerjaan tidak berhubungan)
-**Plan terkait:** `path/to/plan.md` — fase {N}/{total} (atau `—` kalau bukan kerjaan multi-fase)
+**Continued from:** `.handoff/{previous handoff filename}` (or `—` if this is the first handoff / the work is unrelated)
+**Related plan:** `path/to/plan.md` — phase {N}/{total} (or `—` if not multi-phase work)
 
 ---
 
-## 1. Konteks Proyek
-2-4 kalimat tentang proyek secara umum supaya sesi baru paham domain
-tanpa perlu baca CLAUDE.md panjang lebar. Sebut: domain, stack utama,
-ada apa di repo ini.
+## 1. Project Context
+2-4 sentences about the project in general so a new session understands the
+domain without having to read a long CLAUDE.md. Mention: domain, main stack,
+what lives in this repo.
 
-## 2. Yang Sudah Selesai di Sesi Ini  (SUDAH)
-- Bullet pendek dengan action verb + objek konkret.
-- Sertakan referensi commit SHA, file path, atau spec/plan inline.
-- Tandai apakah sudah diverifikasi/merged atau baru ditulis (beda penting).
-- Lebih spesifik > lebih panjang. Hindari narasi.
+## 2. Completed in This Session  (DONE)
+- Short bullets with an action verb + concrete object.
+- Include commit SHA, file path, or spec/plan references inline.
+- Mark whether it's verified/merged or just written (an important distinction).
+- More specific > longer. Avoid narrative.
 
-## 3. Yang Sedang Dikerjakan / Belum Selesai  (SEDANG)
-> State mid-flight yang TIDAK terekam di git maupun di chain — ini yang
-> paling sering hilang. Tulis seakurat mungkin.
+## 3. In Progress / Unfinished  (IN PROGRESS)
+> Mid-flight state that is NOT captured in git or in the chain — this is what
+> most often gets lost. Write it as accurately as you can.
 
-- Pekerjaan yang sedang separuh jalan: file apa yang lagi diedit, sampai
-  mana, apa yang belum di-commit (WIP / uncommitted changes).
-- Kalau berhenti di tengah fase: fase berapa, langkah ke berapa di dalamnya.
-- Konteks mental yang perlu di-restore ("lagi nyari kenapa test X gagal,
-  hipotesis terakhir: ...").
+- Work that is half-done: which file is being edited, how far it got, what
+  hasn't been committed yet (WIP / uncommitted changes).
+- If you stopped mid-phase: which phase, which step within it.
+- Mental context that needs restoring ("was investigating why test X fails,
+  latest hypothesis: ...").
 
-(Kalau tidak ada yang menggantung — sesi berakhir di titik bersih — tulis `—`.)
+(If nothing is left hanging — the session ended at a clean point — write `—`.)
 
-## 4. Blocker
-- Apa yang menghambat lanjut, internal (butuh keputusan user / desain belum
-  final) atau eksternal (nunggu review, butuh credential/akses, API down).
-- Untuk tiap blocker: apa yang dibutuhkan untuk membukanya.
+## 4. Blockers
+- What's preventing progress, internal (needs a user decision / design not
+  finalised) or external (waiting for review, needs credentials/access, API down).
+- For each blocker: what is needed to unblock it.
 
-(Kalau tidak ada blocker, tulis `—`.)
+(If there are no blockers, write `—`.)
 
-## 5. Apa yang Akan Dikerjakan di Sesi Berikutnya  (AKAN)
+## 5. Next Session Plan  (NEXT)
 **Goal:** {one-sentence}
 
 - Step / area / decision needing follow-up
 - ...
 
-**Starting point untuk sesi baru:**
+**Starting point for the new session:**
 - Branch: {current branch, or instruction like "rebase add-foo onto main first"}
-- Existing spec/plan to read first: {path} (lihat juga "Plan terkait" di header)
+- Existing spec/plan to read first: {path} (see also "Related plan" in the header)
 
-## 6. Pilihan & Keputusan User Lewat Brainstorming
-| Pertanyaan | Pilihan User | Konsekuensi |
+## 6. Brainstorming Choices
+| Question | User's Choice | Consequence |
 |---|---|---|
-| {pertanyaan singkat} | {jawaban user} | {dampak ke kode atau next step} |
+| {short question} | {user's answer} | {impact on the code or next step} |
 
 (If no brainstorming choices were made in this session, write `—` instead of an empty table.)
 
-## 7. Artefak yang Dihasilkan
-- **Spec:** `path/to/spec.md` (atau `—`)
-- **Plan:** `path/to/plan.md` (atau `—`)
-- **HEAD saat handoff:** `{short SHA}` (anchor — sama dengan header)
-- **Commits sesi ini:** {N} commits (`{base-SHA}..{head-SHA}`) (atau `—`)
-- **Per-fase (kalau plan multi-fase):** "fase 2 selesai di `{SHA}`, fase 3 in-progress" — biar tiap fase bisa di-diff/revert. (atau `—`)
-- **Files baru:** ...
-- **Files diubah:** ...
-- **Files dihapus:** ...
+## 7. Artifacts
+- **Spec:** `path/to/spec.md` (or `—`)
+- **Plan:** `path/to/plan.md` (or `—`)
+- **HEAD at handoff:** `{short SHA}` (anchor — same as the header)
+- **Commits this session:** {N} commits (`{base-SHA}..{head-SHA}`) (or `—`)
+- **Per-phase (if multi-phase plan):** "phase 2 finished at `{SHA}`, phase 3 in-progress" — so each phase can be diffed/reverted. (or `—`)
+- **New files:** ...
+- **Changed files:** ...
+- **Deleted files:** ...
 
 To compute the commit range, use `git log --oneline <merge-base>..HEAD`
 where `<merge-base>` is the closest ancestor of HEAD and the default
@@ -164,21 +164,21 @@ branch (usually `main` or `master`). If you cannot determine a sensible
 base, list the commits made during this session by checking `git reflog`
 or by counting commits with timestamps inside the session window.
 
-> Catatan: SHA bisa jadi yatim kalau history di-rebase/squash. Branch +
-> commit message membantu melacak ulang kalau itu terjadi.
+> Note: SHAs can become orphaned if history is rebased/squashed. Branch +
+> commit message help re-locate them if that happens.
 
 ## 8. Anti-Patterns / Lessons Learned (CARRY FORWARD)
-> Aturan-aturan ini berlaku untuk pengembangan selanjutnya juga.
+> These rules apply to subsequent development too.
 
-- ❌ JANGAN ... (alasan / konteks insiden di sesi ini kalau ada)
-- ✅ LAKUKAN ... (alasan)
+- ❌ DO NOT ... (reason / context of the incident this session, if any)
+- ✅ DO ... (reason)
 
 (If no carry-forward lessons emerged, write `—`.)
 
-## 9. Catatan Tambahan dari User
+## 9. User Notes
 {verbatim from /handoff <extra info>, or `—` if argument was empty}
 
-## 10. Hal-Hal Penting Lain untuk Sesi Berikutnya
+## 10. Other Notes for the Next Session
 - Environment, tooling, host IP, credentials notes
 - Open questions you noticed but the user hasn't decided yet
 - Anything else surprising or hard to rediscover from code alone
@@ -187,30 +187,30 @@ or by counting commits with timestamps inside the session window.
 
 ## Step 6 — Write the file
 
-Use the Write tool with the absolute path computed in Step 3. Do not modify any other file (do not auto-edit `.gitignore`). In particular, **do not edit the previous handoff** that you linked in "Lanjutan dari" — the chain is append-only.
+Use the Write tool with the absolute path computed in Step 3. Do not modify any other file (do not auto-edit `.gitignore`). In particular, **do not edit the previous handoff** that you linked in "Continued from" — the chain is append-only.
 
 ## Step 7 — Confirm to the user
 
 Reply briefly:
 
-> "Handoff tersimpan di `<absolute path>`. Untuk melanjutkan di sesi baru, jalankan `/handoff-resume` dari direktori repo yang sama."
+> "Handoff saved at `<absolute path>`. To continue in a new session, run `/handoff-resume` from the same repo directory."
 
-If you linked a previous handoff or a plan, mention it in one line ("lanjutan dari handoff X, fase 3/7 plan Y"). If you fell back to `pwd` because not in a git repo, add a one-line warning before the confirmation.
+If you linked a previous handoff or a plan, mention it in one line ("continued from handoff X, phase 3/7 of plan Y"). If you fell back to `pwd` because not in a git repo, add a one-line warning before the confirmation.
 
 ## Edge cases
 
-- **Argument provided but session has no substantive content.** The clarity check covers this: the AI brainstorms first, e.g. "Sesi ini belum ada konten substantif untuk di-handoff. Yakin tetap mau buat file? Atau ada konteks yang belum saya catat?"
+- **Argument provided but session has no substantive content.** The clarity check covers this: the AI brainstorms first, e.g. "This session doesn't have substantive content to hand off yet. Are you sure you still want to create the file? Or is there context I haven't captured?"
 - **Filename collision.** Append `-2`, `-3`, ... before `.md`.
-- **`.handoff/` already exists with files.** Fine — just add a new file. Consider whether the latest one is the parent for "Lanjutan dari".
-- **User runs `/handoff` again immediately.** Clarity check will likely pass (the previous handoff is the latest "next step"); produce a new file with a slightly newer timestamp, linking the previous one as "Lanjutan dari" if it is the same thread.
+- **`.handoff/` already exists with files.** Fine — just add a new file. Consider whether the latest one is the parent for "Continued from".
+- **User runs `/handoff` again immediately.** Clarity check will likely pass (the previous handoff is the latest "next step"); produce a new file with a slightly newer timestamp, linking the previous one as "Continued from" if it is the same thread.
 - **Repo with no commits yet.** Use `pwd` as the root, warn once. Commit fields become `—`.
 
 ## Anti-patterns to avoid
 
 - ❌ Do NOT silently overwrite an existing handoff file. Always create a new file with the timestamp/title naming. If a collision occurs, suffix with `-2`, `-3`.
 - ❌ Do NOT edit a previous handoff to "update" it. Handoffs are immutable journal entries; chain forward with a new file instead.
-- ❌ Do NOT duplicate the plan's phase checklist into the handoff. Point to the plan file ("Plan terkait") and record only the current position. The plan is the source of truth.
-- ❌ Do NOT fabricate a "Lanjutan dari" link. Only link a real continuation.
+- ❌ Do NOT duplicate the plan's phase checklist into the handoff. Point to the plan file ("Related plan") and record only the current position. The plan is the source of truth.
+- ❌ Do NOT fabricate a "Continued from" link. Only link a real continuation.
 - ❌ Do NOT auto-edit `.gitignore`. The README explains the trade-off; the user owns that choice.
 - ❌ Do NOT pad the handoff with filler. Every bullet should be actionable or referential.
 - ❌ Do NOT write a handoff file when the clarity check fails. Brainstorm first.

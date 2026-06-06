@@ -1728,7 +1728,7 @@ async function handleInboundAlbum(
 
   const successCount = imagePaths.length + notifAttachments.length
   if (successCount === 0) {
-    await firstCtx.reply('⚠️ Gagal memuat foto-foto album. Coba kirim ulang.')
+    await firstCtx.reply('⚠️ Failed to load the album photos. Please send them again.')
     return
   }
 
