@@ -1,6 +1,6 @@
 # daily-report
 
-Plugin skill-only untuk Claude Code yang membantu kamu menyusun **daily work report siap-paste ke KakaoTalk** dari aktivitas git terbaru plus prompt bebas. Ada satu slash command (`/daily-report`) dan satu skill (`writing-daily-report`) yang memegang template terkunci, aturan style, dan anti-fabrication guard.
+Plugin skill-only untuk Claude Code yang membantu kamu menyusun **daily work report siap-paste ke chat app apa pun** (plain text, provider-agnostic) dari aktivitas git terbaru plus prompt bebas. Ada satu slash command (`/daily-report`) dan satu skill (`writing-daily-report`) yang memegang template terkunci, aturan style, dan anti-fabrication guard.
 
 Cocok dipakai akhir hari (H) untuk laporan yang akan diposting besok pagi (H+1).
 
@@ -16,11 +16,11 @@ Prompt bebas bisa berisi: commit hashes, file paths (akan ikut di-include ke kon
 
 | Skill | Kapan trigger | Fungsi |
 |---|---|---|
-| `writing-daily-report` | Dipanggil oleh `/daily-report` saat user butuh laporan harian KakaoTalk-ready | Memegang template terkunci `# Yesterday` / `# Today`, prosedur generasi, style rules (≤15 kata per bullet, satu kalimat, no markdown fancy), serta anti-fabrication guard. Default output: 5 bullet Yesterday + 3 bullet Today, bahasa English (auto-translate kalau prompt user bahasa lain). |
+| `writing-daily-report` | Dipanggil oleh `/daily-report` saat user butuh laporan harian siap-paste | Memegang template terkunci `# Yesterday` / `# Today`, prosedur generasi, style rules (≤15 kata per bullet, satu kalimat, no markdown fancy), serta anti-fabrication guard. Default output: 5 bullet Yesterday + 3 bullet Today, bahasa English (auto-translate kalau prompt user bahasa lain). |
 
 ## Output format
 
-Plain text, no markdown rendering, paste-ready ke KakaoTalk:
+Plain text, no markdown rendering, paste-ready ke chat app mana pun:
 
 ```
 Hello, this is my daily report:

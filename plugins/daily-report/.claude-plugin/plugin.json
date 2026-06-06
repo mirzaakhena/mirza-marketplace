@@ -1,7 +1,7 @@
 {
   "name": "daily-report",
-  "description": "Generate a KakaoTalk-ready daily work report from recent git activity and a free-form prompt. Ships a /daily-report slash command and a behavioural skill enforcing a locked Yesterday/Today template plus anti-fabrication rules.",
-  "version": "0.0.2",
+  "description": "Generate a paste-ready plain-text daily work report from recent git activity and a free-form prompt — provider-agnostic, works with any chat app. Ships a /daily-report slash command and a behavioural skill enforcing a locked Yesterday/Today template plus anti-fabrication rules.",
+  "version": "0.0.3",
   "author": {
     "name": "Mirza"
   },
@@ -10,7 +10,6 @@
     "daily",
     "standup",
     "git",
-    "kakaotalk",
     "skill",
     "command"
   ]

@@ -3,7 +3,7 @@ description: Generate a daily work report from recent git activity and free-form
 argument-hint: "[optional free-form prompt]"
 ---
 
-You are producing the user's daily work report, to be pasted into KakaoTalk.
+You are producing the user's daily work report, to be pasted into whatever chat app the user reports in.
 
 ## Step 1 — Invoke the skill
 

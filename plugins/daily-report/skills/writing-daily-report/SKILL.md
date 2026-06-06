@@ -1,6 +1,6 @@
 ---
 name: writing-daily-report
-description: Use when generating a daily work report for posting to KakaoTalk (or similar). Invoked by the /daily-report slash command. Produces a KakaoTalk-ready plain-text report with a `# Yesterday` and `# Today` section, following a locked template and strict anti-fabrication rules.
+description: Use when generating a daily work report for posting to any plain-text chat app. Invoked by the /daily-report slash command. Produces a paste-ready plain-text report with a `# Yesterday` and `# Today` section, following a locked template and strict anti-fabrication rules.
 ---
 
 # Generating a daily work report
@@ -101,7 +101,7 @@ If the user explicitly says they will post the report at a different time (e.g.,
 ## Language and tone
 
 - Default output language: **English**. If the free prompt is in another language (e.g., Indonesian), translate the output to English.
-- Voice: technically-literate human writing a quick end-of-day update, not a polished announcement. Plain text, no emoji, no markdown-fancy formatting (bold, italics, tables, code fences). KakaoTalk does not render rich markdown.
+- Voice: technically-literate human writing a quick end-of-day update, not a polished announcement. Plain text, no emoji, no markdown-fancy formatting (bold, italics, tables, code fences). Assume the destination chat app does not render rich markdown.
 - Default length: **5 bullets** for `# Yesterday`, **3 bullets** for `# Today`. Soft target — if the user's free prompt requests different counts, follow the user. If commits are few and honest breakdown can't reach the default, produce fewer bullets rather than padding (anti-fabrication wins). If commits are many, group related tiny commits into one concise bullet.
 
 ## Generation procedure
