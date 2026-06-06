@@ -12,12 +12,12 @@ describe('COMMANDS registry', () => {
   test('contains exactly the 9 commands in the spec, in display order (paired first, then help, then default-only)', () => {
     expect(COMMANDS.map(c => c.name)).toEqual([
       'context',
-      'version',
       'switch',
       'new',
       'rename',
       'delete',
       'effort',
+      'version',
       'help',
       'start',
     ])
@@ -58,12 +58,12 @@ describe('commandsFor', () => {
   test('paired excludes /start and includes the 8 paired+both commands in registry order', () => {
     expect(commandsFor('paired').map(c => c.name)).toEqual([
       'context',
-      'version',
       'switch',
       'new',
       'rename',
       'delete',
       'effort',
+      'version',
       'help',
     ])
   })
@@ -78,12 +78,12 @@ describe('toSetMyCommandsPayload', () => {
     const payload = toSetMyCommandsPayload('paired')
     expect(payload.map(p => p.command)).toEqual([
       'context',
-      'version',
       'switch',
       'new',
       'rename',
       'delete',
       'effort',
+      'version',
       'help',
     ])
     expect(payload[0]).toEqual({

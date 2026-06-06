@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, test, expect } from 'bun:test'
@@ -133,6 +133,46 @@ describe('readInstalledPluginVersion', () => {
       JSON.stringify({ plugins: { 'agent-bus@m': { version: '1.2.3' } } }),
       path => {
         expect(readInstalledPluginVersion('agent-bus', path)).toBe('1.2.3')
+      },
+    )
+  })
+
+  test('prefers plugin.json at installPath over the registry version field', () => {
+    // Regression: after some marketplace updates the registry records the
+    // git sha (e.g. "25345b784860") in `version` and names the install dir
+    // after it. The manifest inside installPath is authoritative.
+    const dir = mkdtempSync(join(tmpdir(), 'ipv-'))
+    try {
+      const installPath = join(dir, '25345b784860')
+      mkdirSync(join(installPath, '.claude-plugin'), { recursive: true })
+      writeFileSync(
+        join(installPath, '.claude-plugin', 'plugin.json'),
+        JSON.stringify({ name: 'agent-bus', version: '0.0.5' }),
+      )
+      const registryPath = join(dir, 'installed_plugins.json')
+      writeFileSync(
+        registryPath,
+        JSON.stringify({
+          plugins: {
+            'agent-bus@mirza-marketplace': [{ version: '25345b784860', installPath }],
+          },
+        }),
+      )
+      expect(readInstalledPluginVersion('agent-bus', registryPath)).toBe('0.0.5')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects a sha-like registry version when installPath is unreadable', () => {
+    withRegistry(
+      JSON.stringify({
+        plugins: {
+          'agent-bus@m': [{ version: '25345b784860', installPath: '/does/not/exist' }],
+        },
+      }),
+      path => {
+        expect(readInstalledPluginVersion('agent-bus', path)).toBeNull()
       },
     )
   })

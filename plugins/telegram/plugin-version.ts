@@ -83,17 +83,24 @@ export function readPluginVersion(pluginDir: string): PluginVersion {
   return { name, version, sha }
 }
 
+/** Looks like a semver-ish version ("0.0.5", "1.2.3-mirza.0"), not a git sha. */
+const SEMVERISH_RE = /^\d+\.\d+/
+
 /**
  * Resolve the installed version of a sibling plugin from Claude Code's
  * registry at <registryPath> (defaults to ~/.claude/plugins/installed_plugins.json).
  *
  * `pluginName` is matched against registry keys of the form
  * "<name>@<marketplace>" — the marketplace part is ignored so callers don't
- * need to know where the plugin was installed from. When multiple installs
- * exist (registry value is an array), the first entry's version wins.
+ * need to know where the plugin was installed from.
  *
- * Returns null when the registry or the plugin entry is missing, or the
- * file is malformed — callers omit the line, never crash.
+ * The registry's own `version` field is NOT trusted blindly: after some
+ * marketplace updates Claude Code records the git commit sha there (e.g.
+ * "25345b784860") instead of a semver. So per entry we resolve in order:
+ *   1. `<installPath>/.claude-plugin/plugin.json` → `version` (authoritative)
+ *   2. the entry's `version` field, only if it looks semver-ish
+ *
+ * Returns null when nothing resolves — callers omit the line, never crash.
  */
 export function readInstalledPluginVersion(
   pluginName: string,
@@ -111,8 +118,23 @@ export function readInstalledPluginVersion(
     if (key !== pluginName && !key.startsWith(`${pluginName}@`)) continue
     const entries = Array.isArray(value) ? value : [value]
     for (const entry of entries) {
-      const version = (entry as { version?: unknown } | null)?.version
-      if (typeof version === 'string' && version.length > 0) return version
+      const e = entry as { version?: unknown; installPath?: unknown } | null
+      // 1. Authoritative: plugin.json inside the install path.
+      if (typeof e?.installPath === 'string' && e.installPath.length > 0) {
+        try {
+          const raw = readFileSync(join(e.installPath, '.claude-plugin', 'plugin.json'), 'utf8')
+          const manifest = JSON.parse(raw) as { version?: unknown }
+          if (typeof manifest.version === 'string' && manifest.version.length > 0) {
+            return manifest.version
+          }
+        } catch {
+          /* fall through to the registry field */
+        }
+      }
+      // 2. Registry field, but only when it isn't a git sha.
+      if (typeof e?.version === 'string' && SEMVERISH_RE.test(e.version)) {
+        return e.version
+      }
     }
   }
   return null

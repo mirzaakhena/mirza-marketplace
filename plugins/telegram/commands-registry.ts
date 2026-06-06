@@ -46,14 +46,6 @@ export const COMMANDS: CommandSpec[] = [
       'Shows the active Claude Code session\'s context-window usage, 5-hour and 7-day rate-limit usage, model, session id and name, working directory, cost, thinking mode, fast mode, and effort level. On the very first call it installs a statusLine bridge into <project>/.claude/settings.json so Claude Code can publish these stats. Troubleshooting: if the "⏳ Installing bridge..." message persists past 15 seconds, make sure Claude Code is running in the project directory. For plugin versions, use /version.',
   },
   {
-    name: 'version',
-    audience: 'paired',
-    menuHint: 'Plugin and wrapper versions',
-    helpSummary: 'Installed plugin & wrapper versions',
-    helpDetail:
-      'Shows the installed versions of the telegram plugin (from its plugin.json), the pty-controller plugin and mirza-cc wrapper (self-reported by the running wrapper), and the agent-bus plugin (from Claude Code\'s installed-plugins registry). Entries whose source is unavailable are omitted — e.g. pty-controller/mirza-cc lines disappear when the wrapper is not running.',
-  },
-  {
     name: 'switch',
     audience: 'paired',
     menuHint: 'Pick different session to talk to',
@@ -97,6 +89,14 @@ export const COMMANDS: CommandSpec[] = [
     helpSummary: 'Change Claude\'s effort level for this session',
     helpDetail:
       'Without an argument, shows a picker with the six effort levels: low, medium, high, xhigh, max, auto. The currently-active level (read from the statusLine bridge) is marked with a "→ " prefix. Tap to apply. With an argument (e.g. /effort low), applies directly without the picker. Effort is session-scoped in Claude Code — /new resets to the CC default; this command does not persist the choice across sessions. Requires the mirza-cc wrapper to be running.',
+  },
+  {
+    name: 'version',
+    audience: 'paired',
+    menuHint: 'Plugin and wrapper versions',
+    helpSummary: 'Installed plugin & wrapper versions',
+    helpDetail:
+      'Shows the installed versions of the telegram plugin (from its plugin.json), the pty-controller plugin and mirza-cc wrapper (self-reported by the running wrapper), and the agent-bus plugin (from Claude Code\'s installed-plugins registry). Entries whose source is unavailable are omitted — e.g. pty-controller/mirza-cc lines disappear when the wrapper is not running.',
   },
   {
     name: 'help',
