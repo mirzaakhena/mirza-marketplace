@@ -14,16 +14,16 @@ Katalog resmi ada di [`.claude-plugin/marketplace.json`](.claude-plugin/marketpl
 |---|---|---|
 | [`telegram`](plugins/telegram/) | 0.0.28-mirza.0 | **Bridge Telegram ↔ Claude Code** (fork upstream, dimodifikasi berat). State per-project, 5 MCP tools (`reply` + buttons, `react`, `edit_message`, `download_attachment`, `get_message_by_id`), bot commands registry-driven (`/context`, `/version`, `/new`, `/switch`, `/delete` soft/hard/all, `/rename`, `/effort`, `/help`, `/start`), album batching, quoted-message context, conversation logging ke SQLite, permission relay, system-outbox untuk sibling plugin. |
 | [`pty-controller`](plugins/pty-controller/) | 0.0.23 | **Claude Code mengontrol dirinya sendiri.** Wrapper `mirza-cc` menjalankan CC di dalam node-pty; plugin menulis request ke inbox filesystem, wrapper menyuntikkan keystroke (`/clear`, `/resume`, prompt text dari agent-bus). MCP tools: `pty_send_slash`, `pty_status`, `pty_list_agents`. Wrapper juga mendaftarkan bot ke agent registry global. |
-| [`agent-bus`](plugins/agent-bus/) | 0.0.5 | **Komunikasi bot-to-bot** antar instance Claude Code di mesin yang sama. MCP tools: `agent_list`, `agent_status`, `agent_send` (prompt natural-language atau slash command, bisa broadcast). One-way dengan anti-bounce rule + hop limit. Bergantung pada pty-controller. |
+| [`agent-bus`](plugins/agent-bus/) | 0.0.6 | **Komunikasi bot-to-bot** antar instance Claude Code di mesin yang sama. MCP tools: `agent_list`, `agent_status`, `agent_send` (prompt natural-language atau slash command, bisa broadcast). One-way dengan anti-bounce rule + hop limit. Bergantung pada pty-controller. |
 
 ### Behavioral skills (tanpa MCP server)
 
 | Plugin | Versi | Apa itu |
 |---|---|---|
-| [`immediate-reply`](plugins/immediate-reply/) | 0.0.4 | Ack instan (~1 detik) sebelum tool call pertama di setiap inbound Telegram — pre-flight check mekanis 4 pertanyaan, plus narasi progress untuk task panjang. |
+| [`immediate-reply`](plugins/immediate-reply/) | 0.0.5 | Ack instan (~1 detik) sebelum tool call pertama di setiap inbound Telegram — pre-flight check mekanis 4 pertanyaan, plus narasi progress untuk task panjang. |
 | [`inline-buttons`](plugins/inline-buttons/) | 0.0.6 | Self-audit setiap reply Telegram: PERTANYAAN atau JAWABAN? Pertanyaan WAJIB pakai inline-keyboard buttons — minimum Ya/Tidak + tombol escape `✏️ Jelaskan manual`, label pendek (opsi dinarasikan bernomor di body, tombol cukup angkanya). Butuh telegram ≥ 0.0.9-mirza.0. |
 | [`teach-me`](plugins/teach-me/) | 0.0.1 | Mode mengajar: bangun mental model selangkah demi selangkah saat user ingin memahami konsep — 10 elemen gaya + daftar anti-pattern. |
-| [`handoff`](plugins/handoff/) | 0.0.7 | `/handoff` menangkap sesi ke file markdown 10-section di `<repo>/.handoff/` (dengan clarity check + brainstorm); `/handoff-resume [yes]` memuatnya kembali di sesi baru dengan human gate. |
+| [`handoff`](plugins/handoff/) | 0.0.8 | `/handoff` menangkap sesi ke file markdown 10-section di `<repo>/.handoff/` (dengan clarity check + brainstorm); `/handoff-resume [yes]` memuatnya kembali di sesi baru dengan human gate. |
 | [`daily-report`](plugins/daily-report/) | 0.0.3 | `/daily-report` menyusun laporan kerja harian plain-text siap-paste ke chat app mana pun dari aktivitas git, dengan template terkunci Yesterday/Today dan aturan anti-fabrication. |
 | [`bot-conduct`](plugins/bot-conduct/) | 0.0.2 | Aturan kerja agent bot: git worktree (bukan branch-switch), commit ber-trailer `Agent: <bot-name>`, subagent-first supaya main loop tetap responsif, disiplin channel (jawab di channel asal pertanyaan), dan playbook lintas-bot di `~/.claude/agent-playbook/PLAYBOOK.md`. |
 

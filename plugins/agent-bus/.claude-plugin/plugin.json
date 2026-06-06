@@ -1,7 +1,7 @@
-﻿{
+{
   "name": "agent-bus",
   "description": "Bot-to-bot messaging for Claude Code: one-way slash commands and natural-language prompts (broadcast-capable) between registered peer agents.",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "author": { "name": "Mirza" },
   "license": "MIT",
   "keywords": ["multi-agent", "inter-agent", "bot-to-bot", "claude-code", "ipc"]
