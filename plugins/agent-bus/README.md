@@ -18,7 +18,8 @@ Peer dianggap **online** kalau heartbeat terakhirnya < 30 detik.
 
 ### `kind: "prompt"` — instruksi natural-language
 
-- Body (maks **8 KB**) divalidasi, newline di-flatten jadi satu baris (Claude Code submit on Enter), lalu diberi **marker anti-bounce** yang menandai pesan sebagai instruksi antar-agent.
+- Body (maks **8 KB**) divalidasi, newline di-flatten jadi satu baris (Claude Code submit on Enter), lalu diberi **marker anti-bounce** yang menandai pesan sebagai instruksi antar-agent — termasuk hop level-nya (`(hop N)`).
+- **`hop_count`** (opsional, default 0): counter anti-loop mekanis. Saat membalas karena prompt masuk minta lapor balik, kirim `hop_count = N + 1`. Sender menolak `hop_count > 5`, dan wrapper penerima men-drop payload di atas limit yang sama — relay loop mati maksimal 5 hop walau semua AI di rantai tidak patuh.
 - Ditulis ke inbox `pending/` milik pty-controller peer; wrapper `mirza-cc` peer mengetikkannya ke PTY sebagai user turn biasa.
 - **One-way — tidak ada reply channel.** Kalau leader butuh hasil balik, harus diminta eksplisit di dalam body ("when done, send a one-line summary back to bot-01").
 

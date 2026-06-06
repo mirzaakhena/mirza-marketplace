@@ -47,6 +47,15 @@ back, the leader must say so *inside the prompt body*:
 The worker then issues ONE one-way prompt back. That is the only way a "reply"
 happens — there is no automatic pairing.
 
+### hop_count (mechanical loop guard)
+
+Every inbound agent-bus prompt names its hop in the marker (`(hop N)`). When
+you are explicitly told to report back, pass `payload.hop_count = N + 1` in
+your `agent_send` call. Fresh prompts initiated by your own user omit it
+(defaults to 0). The sender refuses `hop_count > 5` and the receiving wrapper
+drops anything above the same limit — so even if every AI in the chain
+misbehaves, a relay loop dies after 5 hops.
+
 ## Anti-bounce rule (prevents infinite loops)
 
 An incoming `<channel source="agent-bus">` message is **terminal context**, not a

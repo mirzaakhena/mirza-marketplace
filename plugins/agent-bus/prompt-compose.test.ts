@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   MAX_BODY_BYTES,
+  MAX_HOP,
   validatePromptBody,
+  validateHopCount,
   flattenBody,
   composePromptText,
   writePromptToPending,
@@ -41,6 +43,37 @@ describe('composePromptText', () => {
     const out = composePromptText('bot-01', 'line1\nline2')
     expect(out.endsWith('line1 line2')).toBe(true)
   })
+  test('marker carries the hop count and instructs hop+1 for report-back', () => {
+    const out = composePromptText('bot-01', 'x', 2)
+    expect(out).toContain('(hop 2)')
+    expect(out).toContain('hop_count = 3')
+  })
+  test('defaults to hop 0', () => {
+    const out = composePromptText('bot-01', 'x')
+    expect(out).toContain('(hop 0)')
+    expect(out).toContain('hop_count = 1')
+  })
+})
+
+describe('validateHopCount', () => {
+  test('undefined/null default to 0', () => {
+    expect(validateHopCount(undefined)).toEqual({ ok: true, value: 0 })
+    expect(validateHopCount(null)).toEqual({ ok: true, value: 0 })
+  })
+  test('accepts integers within MAX_HOP', () => {
+    expect(validateHopCount(0)).toEqual({ ok: true, value: 0 })
+    expect(validateHopCount(MAX_HOP)).toEqual({ ok: true, value: MAX_HOP })
+  })
+  test('rejects above MAX_HOP', () => {
+    const r = validateHopCount(MAX_HOP + 1)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('anti-loop')
+  })
+  test('rejects non-integer / negative', () => {
+    expect(validateHopCount(1.5).ok).toBe(false)
+    expect(validateHopCount(-1).ok).toBe(false)
+    expect(validateHopCount('2').ok).toBe(false)
+  })
 })
 
 describe('writePromptToPending', () => {
@@ -66,6 +99,16 @@ describe('writePromptToPending', () => {
     expect(body.from).toBe('bot-01')
     expect(body.text).toBe('composed text here')
     expect(typeof body.ts).toBe('string')
+    expect(body.hop_count).toBe(0)
+  })
+
+  test('writes the provided hop_count into the payload', () => {
+    const peerStateDir = join(root, 'bot-04', '.claude', 'channels', 'pty-controller')
+    writePromptToPending(peerStateDir, 'bot-01', 'x', 3)
+    const pending = join(peerStateDir, 'pending')
+    const files = readdirSync(pending).filter(f => f.endsWith('.json'))
+    const body = JSON.parse(readFileSync(join(pending, files[0]!), 'utf8'))
+    expect(body.hop_count).toBe(3)
   })
 
   test('leaves no .tmp file behind', () => {

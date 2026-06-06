@@ -19,7 +19,7 @@ import {
 import { readRegistry, resolveRegistryPath } from './registry'
 import { readPeerSessionInfo } from './peer-status'
 import { writeAgentMessage, type AgentPayload } from './inbox-writer'
-import { validatePromptBody, composePromptText, writePromptToPending } from './prompt-compose'
+import { validatePromptBody, validateHopCount, composePromptText, writePromptToPending } from './prompt-compose'
 import { normalizeTargets, isDestructiveSlash } from './send-guards'
 
 const REGISTRY_PATH = resolveRegistryPath(process.env)
@@ -41,7 +41,7 @@ function isStaleForList(lastHeartbeatIso: string): boolean {
 }
 
 const mcp = new Server(
-  { name: 'agent-bus', version: '0.0.3' },
+  { name: 'agent-bus', version: '0.0.4' },
   { capabilities: { tools: {} } },
 )
 
@@ -105,6 +105,11 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
               confirmAfterMs: {
                 type: 'number',
                 description: 'For kind="slash": optional auto-confirm pacing for picker commands (e.g. /effort).',
+              },
+              hop_count: {
+                type: 'number',
+                description:
+                  'For kind="prompt": loop-prevention counter. Omit (= 0) for a fresh, user-initiated prompt. When replying because an inbound agent-bus prompt explicitly asked you to report back, pass the hop value named in that message PLUS ONE. Sends with hop_count > 5 are refused.',
               },
             },
             required: ['kind'],
@@ -181,14 +186,16 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
           const body = payload.body
           const v = validatePromptBody(body)
           if (!v.ok) throw new Error(v.error ?? 'invalid prompt body')
-          const text = composePromptText(self, body as string)
+          const hop = validateHopCount(payload.hop_count)
+          if (!hop.ok) throw new Error(hop.error ?? 'invalid hop_count')
+          const text = composePromptText(self, body as string, hop.value)
           const results = targets.map(name => {
             const entry = reg.agents[name]
             if (!entry) {
               return { target: name, ok: false, error: 'not in registry', online: false }
             }
             try {
-              const r = writePromptToPending(entry.state_dir, self, text)
+              const r = writePromptToPending(entry.state_dir, self, text, hop.value)
               return { target: name, ok: true, path: r.path, online: isOnline(entry.last_heartbeat) }
             } catch (err) {
               return { target: name, ok: false, error: err instanceof Error ? err.message : String(err), online: isOnline(entry.last_heartbeat) }
