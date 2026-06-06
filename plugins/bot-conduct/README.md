@@ -12,7 +12,8 @@ Identitas bot = basename project directory (mis. `C:\Users\Mirza\workspace\bot-0
 | 2 | **Commit ber-identitas** | Setiap commit memuat trailer `Agent: <bot-name>` (sebelum `Co-Authored-By:`), supaya user bisa melacak bot mana yang mengerjakan apa. `git config user.name` tidak diubah. |
 | 3 | **Subagent-first** | Kerja berat (search luas, refactor multi-file, test run, riset) didelegasikan ke subagent supaya main loop tetap responsif menjawab user. Heuristik: >~1 menit tool calls + user mungkin chat di tengah → subagent. |
 | 4 | **Playbook lintas-bot** | File bersama `~/.claude/agent-playbook/PLAYBOOK.md`: best practice teruji + kesalahan yang tidak boleh diulang + gotcha mesin. Dibaca di awal task substansial, di-update saat ada pelajaran durable. Format entry + template + aturan hygiene ada di SKILL.md. |
-| 5 | **Rumah untuk rule baru** | Aturan kerja baru dari user ditambahkan sebagai rule bernomor di skill ini (lalu bump version), bukan tersebar di CLAUDE.md per-repo — kecuali memang spesifik satu repo. |
+| 5 | **Disiplin channel** | Jawab di channel tempat pertanyaan datang: pertanyaan Telegram → jawaban final WAJIB lewat tool `reply` (transcript bukan user!); pertanyaan di terminal CC → jawab di transcript. Menyilang hanya atas permintaan eksplisit. Self-check mekanis di akhir turn: "jawaban final saya sudah lewat reply tool?" |
+| 6 | **Rumah untuk rule baru** | Aturan kerja baru dari user ditambahkan sebagai rule bernomor di skill ini (lalu bump version), bukan tersebar di CLAUDE.md per-repo — kecuali memang spesifik satu repo. |
 
 ## Kenapa playbook?
 

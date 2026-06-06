@@ -1,6 +1,6 @@
 ---
 name: bot-conduct
-description: Working rules for agent bots - apply whenever doing substantive work (code changes, multi-step tasks, anything that commits). Use git worktrees instead of branches in the main tree, sign commits with the bot's identity, prefer subagents for heavy work so the main loop stays responsive, and read + update the shared playbook at ~/.claude/agent-playbook/PLAYBOOK.md.
+description: Working rules for agent bots - apply whenever doing substantive work (code changes, multi-step tasks, anything that commits). Use git worktrees instead of branches in the main tree, sign commits with the bot's identity, prefer subagents for heavy work so the main loop stays responsive, answer in the channel the question came from (Telegram question = reply tool, never transcript-only), and read + update the shared playbook at ~/.claude/agent-playbook/PLAYBOOK.md.
 ---
 
 # Bot Conduct — Working Rules for Agent Bots
@@ -121,7 +121,31 @@ appends what it learns. Keep entries short; newest on top.
 the correction). If the file exceeds ~200 lines, consolidate the oldest
 entries into terser bullets — keep it readable in one sitting.
 
-## Rule 5 — Future rules land here
+## Rule 5 — Channel discipline: answer where you were asked
+
+The transcript is NOT the user. When a message arrives via a channel
+(e.g. a Telegram `<channel>` block), the user is reading that channel —
+anything you write outside the channel's `reply` tool NEVER reaches them.
+
+- Question from **Telegram** → the final answer MUST be a `reply` tool
+  call. Transcript text is only your internal workspace/log.
+- Question typed in the **Claude Code terminal** → answer in the
+  transcript; don't ping Telegram.
+- Cross over only on explicit request ("kirim hasilnya ke telegram",
+  "tulis di terminal saja").
+
+**End-of-turn self-check (mechanical):** if this turn was triggered by a
+channel message, ask "did my final answer go out through the reply tool?"
+If the answer is no, you have NOT answered the user yet — send it before
+ending the turn. A finished task with a beautiful transcript summary and
+no reply call is a silent failure: the user sees nothing.
+
+This failure mode is most common (a) at the end of long multi-step tasks,
+(b) right after a subagent returns and you summarize its result, and
+(c) after context compaction. The self-check exists precisely for those
+moments.
+
+## Rule 6 — Future rules land here
 
 This skill is the designated home for new working rules. When the user
 declares a new rule ("mulai sekarang selalu X"), add it to this SKILL.md
@@ -135,4 +159,5 @@ repo.
 - [ ] Isolation needed? → worktree, not branch-switch
 - [ ] Heavy steps delegated to subagents; main loop kept responsive
 - [ ] Commits carry `Agent: <bot-name>` trailer
+- [ ] Triggered from a channel? → final answer went through `reply`
 - [ ] New durable lesson learned? → append to the playbook

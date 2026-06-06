@@ -25,7 +25,7 @@ Katalog resmi ada di [`.claude-plugin/marketplace.json`](.claude-plugin/marketpl
 | [`teach-me`](plugins/teach-me/) | 0.0.1 | Mode mengajar: bangun mental model selangkah demi selangkah saat user ingin memahami konsep — 10 elemen gaya + daftar anti-pattern. |
 | [`handoff`](plugins/handoff/) | 0.0.7 | `/handoff` menangkap sesi ke file markdown 10-section di `<repo>/.handoff/` (dengan clarity check + brainstorm); `/handoff-resume [yes]` memuatnya kembali di sesi baru dengan human gate. |
 | [`daily-report`](plugins/daily-report/) | 0.0.3 | `/daily-report` menyusun laporan kerja harian plain-text siap-paste ke chat app mana pun dari aktivitas git, dengan template terkunci Yesterday/Today dan aturan anti-fabrication. |
-| [`bot-conduct`](plugins/bot-conduct/) | 0.0.1 | Aturan kerja agent bot: git worktree (bukan branch-switch), commit ber-trailer `Agent: <bot-name>`, subagent-first supaya main loop tetap responsif, dan playbook lintas-bot di `~/.claude/agent-playbook/PLAYBOOK.md`. |
+| [`bot-conduct`](plugins/bot-conduct/) | 0.0.2 | Aturan kerja agent bot: git worktree (bukan branch-switch), commit ber-trailer `Agent: <bot-name>`, subagent-first supaya main loop tetap responsif, disiplin channel (jawab di channel asal pertanyaan), dan playbook lintas-bot di `~/.claude/agent-playbook/PLAYBOOK.md`. |
 
 ### Bagaimana semuanya saling terkait
 
