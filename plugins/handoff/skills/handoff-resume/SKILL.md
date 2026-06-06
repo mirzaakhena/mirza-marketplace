@@ -77,7 +77,7 @@ Apakah Anda yakin ingin melanjutkan task handover ini?
 
 Then stop and wait for the user's reply. Do NOT begin executing the plan from Section 5 until the user confirms.
 
-**If the `inline-buttons` skill is available** (listed in the session's available skills; older installs may know it as `interactive-prompts`), render the confirmation as inline-keyboard buttons instead of plain text — the user is likely on Telegram and tapping is faster than typing. Invoke the skill, then attach `buttons` to your `reply` call:
+**If the `inline-buttons` skill is available** (listed in the session's available skills), render the confirmation as inline-keyboard buttons instead of plain text — the user is likely on Telegram and tapping is faster than typing. Invoke the skill, then attach `buttons` to your `reply` call:
 
 ```json
 "buttons": [

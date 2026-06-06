@@ -1,7 +1,5 @@
 # inline-buttons
 
-> ℹ️ **Rename:** plugin ini sebelumnya bernama `interactive-prompts` (≤ 0.0.3). Nama diganti supaya lebih konkret dan mudah dikenali agent. Kalau kamu masih punya `interactive-prompts@mirza-marketplace` di `enabledPlugins`, ganti dengan `inline-buttons@mirza-marketplace`.
-
 Plugin skill-only yang memaksa Claude menjalankan **self-audit** sebelum mengirim setiap reply Telegram: apakah reply ini **PERTANYAAN** atau sekadar **JAWABAN**? Kalau pertanyaan → wajib pakai inline-keyboard buttons, supaya user bisa menjawab dengan **satu tap** — bukan ngetik.
 
 Plugin ini tidak punya MCP server, tidak punya command, hanya satu skill: `inline-buttons`.

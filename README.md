@@ -21,9 +21,9 @@ Katalog resmi ada di [`.claude-plugin/marketplace.json`](.claude-plugin/marketpl
 | Plugin | Versi | Apa itu |
 |---|---|---|
 | [`immediate-reply`](plugins/immediate-reply/) | 0.0.4 | Ack instan (~1 detik) sebelum tool call pertama di setiap inbound Telegram — pre-flight check mekanis 4 pertanyaan, plus narasi progress untuk task panjang. |
-| [`inline-buttons`](plugins/inline-buttons/) | 0.0.5 | (rename dari `interactive-prompts`) Self-audit setiap reply Telegram: PERTANYAAN atau JAWABAN? Pertanyaan WAJIB pakai inline-keyboard buttons — minimum Ya/Tidak + tombol escape `✏️ Jelaskan manual`, label pendek (opsi dinarasikan bernomor di body, tombol cukup angkanya). Butuh telegram ≥ 0.0.9-mirza.0. |
+| [`inline-buttons`](plugins/inline-buttons/) | 0.0.6 | Self-audit setiap reply Telegram: PERTANYAAN atau JAWABAN? Pertanyaan WAJIB pakai inline-keyboard buttons — minimum Ya/Tidak + tombol escape `✏️ Jelaskan manual`, label pendek (opsi dinarasikan bernomor di body, tombol cukup angkanya). Butuh telegram ≥ 0.0.9-mirza.0. |
 | [`teach-me`](plugins/teach-me/) | 0.0.1 | Mode mengajar: bangun mental model selangkah demi selangkah saat user ingin memahami konsep — 10 elemen gaya + daftar anti-pattern. |
-| [`handoff`](plugins/handoff/) | 0.0.6 | `/handoff` menangkap sesi ke file markdown 10-section di `<repo>/.handoff/` (dengan clarity check + brainstorm); `/handoff-resume [yes]` memuatnya kembali di sesi baru dengan human gate. |
+| [`handoff`](plugins/handoff/) | 0.0.7 | `/handoff` menangkap sesi ke file markdown 10-section di `<repo>/.handoff/` (dengan clarity check + brainstorm); `/handoff-resume [yes]` memuatnya kembali di sesi baru dengan human gate. |
 | [`daily-report`](plugins/daily-report/) | 0.0.3 | `/daily-report` menyusun laporan kerja harian plain-text siap-paste ke chat app mana pun dari aktivitas git, dengan template terkunci Yesterday/Today dan aturan anti-fabrication. |
 | [`bot-conduct`](plugins/bot-conduct/) | 0.0.1 | Aturan kerja agent bot: git worktree (bukan branch-switch), commit ber-trailer `Agent: <bot-name>`, subagent-first supaya main loop tetap responsif, dan playbook lintas-bot di `~/.claude/agent-playbook/PLAYBOOK.md`. |
 
