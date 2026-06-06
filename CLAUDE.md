@@ -27,9 +27,9 @@ A plugin change that skips any of these is an INCOMPLETE change. If you notice y
 
 - `plugins/telegram/` — Telegram bridge for Claude Code. Per-project state isolation, registry-driven slash menu (`commands-registry.ts`), `/context` shows context-window + session info; `/version` shows plugin/wrapper versions (all resolved dynamically).
 - `plugins/pty-controller/` — Wraps Claude Code in `node-pty` so the AI can inject slash commands into its own session (powers `/new`, `/switch`, `/delete`, `/rename`).
-- `plugins/immediate-reply/`, `plugins/interactive-prompts/`, `plugins/teach-me/`, `plugins/daily-report/`, `plugins/handoff/` — Behavioral skills, no MCP server.
+- `plugins/immediate-reply/`, `plugins/inline-buttons/`, `plugins/teach-me/`, `plugins/daily-report/`, `plugins/handoff/`, `plugins/bot-conduct/` — Behavioral skills, no MCP server.
 
-Each plugin is independent — bumping one does not require bumping the others. But if a behavioral skill plugin depends on a feature added to (e.g.) the telegram plugin, mention the minimum version in its `description` (see `interactive-prompts`'s "Requires telegram >= 0.0.9-mirza.0").
+Each plugin is independent — bumping one does not require bumping the others. But if a behavioral skill plugin depends on a feature added to (e.g.) the telegram plugin, mention the minimum version in its `description` (see `inline-buttons`'s "Requires telegram >= 0.0.9-mirza.0").
 
 ## Specs and plans
 

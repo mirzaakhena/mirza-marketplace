@@ -19,10 +19,10 @@
       "source": "./plugins/immediate-reply"
     },
     {
-      "name": "interactive-prompts",
-      "description": "Behavioral skill that teaches Claude to render inline-keyboard buttons on Telegram for choice prompts (confirmation, single-select) so the user can answer with one tap. Requires telegram >= 0.0.9-mirza.0.",
+      "name": "inline-buttons",
+      "description": "Behavioral skill (renamed from interactive-prompts) that forces a self-audit before every Telegram reply: replies that ask a question MUST carry inline-keyboard buttons — minimum Yes/No plus a final manual-fallback button — so the user answers with one tap. Requires telegram >= 0.0.9-mirza.0.",
       "category": "productivity",
-      "source": "./plugins/interactive-prompts"
+      "source": "./plugins/inline-buttons"
     },
     {
       "name": "teach-me",
@@ -32,7 +32,7 @@
     },
     {
       "name": "daily-report",
-      "description": "Slash command + skill that produce a KakaoTalk-ready daily work report from recent git activity and a free-form prompt. Locked Yesterday/Today template with anti-fabrication rules.",
+      "description": "Slash command + skill that produce a paste-ready plain-text daily work report from recent git activity and a free-form prompt — provider-agnostic, works with any chat app. Locked Yesterday/Today template with anti-fabrication rules.",
       "category": "productivity",
       "source": "./plugins/daily-report"
     },
@@ -47,6 +47,12 @@
       "description": "Programmatically inject slash commands into a running Claude Code session by going through a companion wrapper process (mirza-cc) that hosts CC inside a node-pty pseudo-terminal. Provides the /new slash command (clears the session via PTY) and the pty_send_slash / pty_status MCP tools. Requires the mirza-cc wrapper running — see plugin README. Pairs well with the telegram plugin (the wrapper drops a session-change event into telegram's outbox so the user gets a post-/clear ping; the telegram plugin owns the /notify-user command itself).",
       "category": "productivity",
       "source": "./plugins/pty-controller"
+    },
+    {
+      "name": "bot-conduct",
+      "description": "Behavioral skill encoding working rules for agent bots: git worktrees instead of branch-switching, commits signed with the bot's identity (Agent: <bot-name> trailer), subagent-first delegation so the main loop stays responsive, and a shared cross-bot playbook at ~/.claude/agent-playbook/PLAYBOOK.md for proven practices and past mistakes.",
+      "category": "productivity",
+      "source": "./plugins/bot-conduct"
     },
     {
       "name": "agent-bus",
