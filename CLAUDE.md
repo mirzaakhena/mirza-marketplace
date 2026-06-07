@@ -19,8 +19,9 @@ A plugin change that skips any of these is an INCOMPLETE change. If you notice y
 **Commit message suggestion:** `release(<plugin>): bump to X.Y.Z-mirza.N — <one-line what's new>`.
 
 **Activation steps for the user after publish:**
-- `/reload-plugins` in Claude Code (the marketplace fetches the new version)
-- `/mcp` reconnect for the affected plugin
+- `/reload-plugins` in Claude Code (the marketplace fetches the new version). ⚠️ Reloading **severs every plugin MCP-server connection in the running session** — it is not just a refresh. After each reload, every bot needs an `/mcp` reconnect for the affected plugin(s) before its tools work again.
+- Skills: an **updated** skill reloads into running sessions, but a **brand-new** skill (a SKILL.md that wasn't registered before) only appears in sessions started AFTER the reload — open a new session to use it.
+- Wrapper changes (`plugins/pty-controller/wrapper/`): the running `mirza-cc` process keeps executing the old code — the user must restart the wrapper (close + relaunch the bot) for them to take effect.
 - For Telegram specifically: force-close + reopen Telegram on the user's phone, otherwise the slash-menu cache hides any `setMyCommands` change
 
 ## Plugin layout
