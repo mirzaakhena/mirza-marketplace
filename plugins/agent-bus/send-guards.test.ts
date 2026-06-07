@@ -1,5 +1,8 @@
 import { test, expect, describe } from 'bun:test'
-import { normalizeTargets, isDestructiveSlash } from './send-guards'
+import { normalizeTargets } from './send-guards'
+
+// (isDestructiveSlash tests were removed together with kind:"slash" —
+// neighbor-autonomy design decision 2026-06-07.)
 
 describe('normalizeTargets', () => {
   test('wraps a single string in an array', () => {
@@ -14,16 +17,5 @@ describe('normalizeTargets', () => {
   test('throws on empty input', () => {
     expect(() => normalizeTargets([])).toThrow('at least one target')
     expect(() => normalizeTargets('  ')).toThrow('at least one target')
-  })
-})
-
-describe('isDestructiveSlash', () => {
-  test('flags /clear and /delete (with or without args)', () => {
-    expect(isDestructiveSlash('/clear')).toBe(true)
-    expect(isDestructiveSlash('/delete hard')).toBe(true)
-  })
-  test('does not flag non-destructive commands', () => {
-    expect(isDestructiveSlash('/rename foo')).toBe(false)
-    expect(isDestructiveSlash('/effort low')).toBe(false)
   })
 })

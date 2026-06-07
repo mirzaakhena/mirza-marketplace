@@ -9,7 +9,6 @@ import {
   updateHeartbeat,
   unregisterAgent,
 } from './registry'
-import { writeAgentMessage } from './inbox-writer'
 import { readPeerSessionInfo } from './peer-status'
 import { composePromptText, writePromptToPending } from './prompt-compose'
 
@@ -40,7 +39,7 @@ describe('integration: bot-01 ↔ bot-02 loopback', () => {
     expect(resolveRegistryPath({ AGENT_REGISTRY_PATH: registryPath })).toBe(registryPath)
   })
 
-  test('full happy path: both bots register, bot-01 sends /clear+rename to bot-02, file lands', () => {
+  test('full happy path: both bots register, bot-01 sends a prompt to bot-02, file lands', () => {
     registerAgent(registryPath, 'bot-01', {
       project_dir: bot01Dir,
       state_dir: bot01StateDir,
@@ -56,11 +55,8 @@ describe('integration: bot-01 ↔ bot-02 loopback', () => {
     expect(Object.keys(reg.agents).sort()).toEqual(['bot-01', 'bot-02'])
 
     const target = reg.agents['bot-02']!
-    const res = writeAgentMessage(target.state_dir, 'bot-01', {
-      kind: 'slash',
-      command: '/clear',
-      sessionName: 'sprint-2',
-    })
+    const text = composePromptText('bot-01', 'please reset yourself to an idle session')
+    const res = writePromptToPending(target.state_dir, 'bot-01', text)
 
     expect(res.id).toMatch(/^[0-9a-f-]{36}$/)
 
@@ -69,11 +65,9 @@ describe('integration: bot-01 ↔ bot-02 loopback', () => {
     expect(files).toHaveLength(1)
     const body = JSON.parse(readFileSync(join(pending, files[0]!), 'utf8'))
     expect(body.from).toBe('bot-01')
-    expect(body.kind).toBe('slash')
-    expect(body.command).toBe('/clear')
-    expect(body.sessionName).toBe('sprint-2')
+    expect(body.type).toBe('prompt')
+    expect(body.text).toContain('please reset yourself')
     expect(body.hop_count).toBe(0)
-    expect(typeof body.correlation_id).toBe('string')
   })
 
   test('heartbeat refresh + online detection threshold', async () => {

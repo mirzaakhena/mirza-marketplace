@@ -22,10 +22,18 @@ import {
   readAgentRegistry,
   resolveAgentRegistryPath,
   resolveStateDir,
+  readWrapperVersion,
+  versionAtLeast,
+  writeBatch,
   writeCommand,
   wrapperLikelyRunning,
 } from './ipc.ts'
 import { telegramLayerCommandError } from './slash-guards.ts'
+
+// Batch injection (array payloads) landed in wrapper 0.0.7. Older RUNNING
+// wrappers ignore an array pending file as "unknown payload type", so the
+// tool refuses batch sends until the user restarts mirza-cc.
+const BATCH_MIN_WRAPPER_VERSION = '0.0.7'
 
 // Accepts either a bare command (`/clear`, `/rename foo`) or a namespaced
 // plugin command (`/telegram:notify-user brief`). Plugin commands need
@@ -57,25 +65,24 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'pty_send_slash',
       description:
-        'Send a Claude Code slash command to a PTY. Only CC-native (or CC plugin) commands work — telegram-layer commands (`/new`, `/switch`, `/delete`, `/effort`) are REJECTED with an error naming the correct alternative (e.g. /new → inject "/clear" then "/rename <name>"). WITHOUT `target` — targets the CURRENT (self) CC session; safe to call autonomously. WITH `target` (a single agent name) — targets a peer agent\'s session; this is a CROSS-AGENT side effect and REQUIRES the user to have explicitly asked you to message that peer. WITH `target` as an ARRAY — broadcasts to multiple peers at once; same explicit-user-consent rule applies, and the destructive `/clear` is REJECTED on array targets to prevent accidental fan-out wipes. Peer state is resolved from `~/.claude/agent-registry.json`; call `pty_list_agents` first to discover valid names. Returns immediately; the wrapper(s) inject the keystrokes on the next input-loop tick.',
+        'Send one Claude Code slash command — or an atomic BATCH of them — to the CURRENT (self) CC session\'s PTY. SELF-ONLY by design (neighbor-autonomy decision 2026-06-07): bots never inject commands into peers; to ask another bot to do something, send it an agent-bus kind:"prompt" and let its own AI act. Only CC-native (or CC plugin) commands work — telegram-layer commands (`/new`, `/switch`, `/delete`, `/effort`) are REJECTED with an error naming the correct alternative. Pass `command` (single) OR `commands` (ordered array, max 8): a batch is written as ONE pending file, enqueued contiguously so no other payload can interleave between its items — use it for sequences like a handoff self-reset ["/rename done-…", "/clear", "/rename idle"]. When the batch contains /clear, the wrapper defers the session-change notification to the end of the batch so it carries the final session name. Batch needs a RUNNING wrapper >= 0.0.7; on older wrappers the tool errors — fall back to sequential single-command calls and tell the user to restart mirza-cc. Returns immediately; the wrapper injects the keystrokes on the next input-loop tick. Safe to call autonomously.',
       inputSchema: {
         type: 'object',
         properties: {
           command: {
             type: 'string',
             description:
-              'The slash command to inject, including the leading slash. Must match /^\\/[a-z][a-z0-9_:-]{0,63}(\\s.{0,256})?$/ — at most 64-char command name (the `:` is allowed so namespaced plugin commands like `/telegram:notify-user` dispatch correctly), optional 256-char argument. Examples: "/clear", "/compact", "/telegram:notify-user fresh session ready".',
+              'A single slash command to inject, including the leading slash. Must match /^\\/[a-z][a-z0-9_:-]{0,63}(\\s.{0,256})?$/ — at most 64-char command name (the `:` is allowed so namespaced plugin commands like `/telegram:notify-user` dispatch correctly), optional 256-char argument. Examples: "/clear", "/compact", "/telegram:notify-user fresh session ready". Exactly one of `command` / `commands` must be set.',
           },
-          target: {
+          commands: {
+            type: 'array',
+            items: { type: 'string' },
+            minItems: 1,
+            maxItems: 8,
             description:
-              'Optional. Omit (or pass null) to target self. Pass a single string (e.g. "bot-03") for one peer, or a string array (e.g. ["bot-02", "bot-03"]) to broadcast. Names must match entries in `pty_list_agents`. The destructive "/clear" is rejected when target is an array.',
-            oneOf: [
-              { type: 'string' },
-              { type: 'array', items: { type: 'string' } },
-            ],
+              'An ordered batch of slash commands (each validated like `command`), written as ONE atomic pending file. Example: ["/rename done-task-202606071500", "/clear", "/rename idle"]. Exactly one of `command` / `commands` must be set.',
           },
         },
-        required: ['command'],
       },
     },
     {
@@ -90,7 +97,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'pty_list_agents',
       description:
-        'List all peer Claude Code agents currently registered in the shared agent registry (~/.claude/agent-registry.json, written by every mirza-cc wrapper). Each entry exposes its agent name (basename of its project dir), state directory, last heartbeat, heartbeat age in seconds, and whether it is alive (heartbeat fresher than 30s). Pass `only_alive: true` to filter out stale entries. Use this before passing `target` to `pty_send_slash` to discover valid targets.',
+        'List all peer Claude Code agents currently registered in the shared agent registry (~/.claude/agent-registry.json, written by every mirza-cc wrapper). Each entry exposes its agent name (basename of its project dir), state directory, last heartbeat, heartbeat age in seconds, and whether it is alive (heartbeat fresher than 30s). Pass `only_alive: true` to filter out stale entries. Read-only discovery — to interact with a peer, use the agent-bus tools (kind:"prompt").',
       inputSchema: {
         type: 'object',
         properties: {
@@ -109,130 +116,95 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
   try {
     switch (req.params.name) {
       case 'pty_send_slash': {
-        const command = args.command
-        if (typeof command !== 'string' || command.length === 0) {
-          throw new Error('command must be a non-empty string')
-        }
-        if (!SLASH_COMMAND_RE.test(command)) {
+        // SELF-ONLY (neighbor-autonomy decision 2026-06-07): the `target`
+        // parameter was removed — bots never inject commands into peers.
+        // Reject it loudly so an out-of-date caller gets a teaching error
+        // instead of a silently-ignored argument.
+        if (args.target !== undefined && args.target !== null) {
           throw new Error(
-            `command must match /^\\/[a-z][a-z0-9_:-]{0,63}(\\s.{0,256})?$/ — got: ${JSON.stringify(command)}`,
+            'pty_send_slash is self-only: the `target` parameter was removed ' +
+              '(neighbor-autonomy design decision 2026-06-07). To ask another ' +
+              'bot to run a command, send it an agent-bus kind:"prompt" and ' +
+              'let its own AI execute the command itself.',
           )
         }
-        // Telegram-layer commands don't exist inside Claude Code — injecting
-        // them wedges the TUI on an invalid command. Reject with a message
-        // that names the correct alternative.
-        const layerError = telegramLayerCommandError(command)
-        if (layerError) {
-          throw new Error(layerError)
+
+        const rawCommand = args.command
+        const rawCommands = args.commands
+        if (rawCommand !== undefined && rawCommands !== undefined) {
+          throw new Error('pass exactly one of `command` / `commands`, not both')
         }
 
-        // Normalise the `target` argument into a list of agent names. `null`
-        // and undefined both mean self.
-        const rawTarget = args.target
-        let targets: string[] | null
-        if (rawTarget === undefined || rawTarget === null) {
-          targets = null
-        } else if (typeof rawTarget === 'string') {
-          if (rawTarget.length === 0) {
-            throw new Error('target must be a non-empty string when set')
+        // Normalise to a list; validate every entry identically.
+        let commands: string[]
+        if (rawCommands !== undefined) {
+          if (!Array.isArray(rawCommands) || rawCommands.length === 0) {
+            throw new Error('commands must be a non-empty array of slash commands')
           }
-          targets = [rawTarget]
-        } else if (Array.isArray(rawTarget)) {
-          if (rawTarget.length === 0) {
-            throw new Error('target array must contain at least one agent name')
+          if (rawCommands.length > 8) {
+            throw new Error(`commands batch too long (${rawCommands.length} items, max 8)`)
           }
-          for (const t of rawTarget) {
-            if (typeof t !== 'string' || t.length === 0) {
-              throw new Error('every entry in target array must be a non-empty string')
-            }
-          }
-          targets = rawTarget as string[]
+          commands = rawCommands as string[]
         } else {
-          throw new Error('target must be a string, an array of strings, or omitted')
+          if (typeof rawCommand !== 'string' || rawCommand.length === 0) {
+            throw new Error('command must be a non-empty string (or pass `commands` for a batch)')
+          }
+          commands = [rawCommand]
         }
-
-        // SELF path — preserves the original behaviour of pty_send_slash.
-        if (targets === null) {
-          if (!wrapperLikelyRunning(STATE_DIR)) {
+        for (const c of commands) {
+          if (typeof c !== 'string' || !SLASH_COMMAND_RE.test(c)) {
             throw new Error(
-              'wrapper not detected (no fresh heartbeat). Launch CC via `mirza-cc` instead of `claude` directly.',
+              `every command must match /^\\/[a-z][a-z0-9_:-]{0,63}(\\s.{0,256})?$/ — got: ${JSON.stringify(c)}`,
             )
           }
-          const { id, path } = writeCommand(STATE_DIR, command)
+          // Telegram-layer commands don't exist inside Claude Code — injecting
+          // them wedges the TUI on an invalid command. Reject with a message
+          // that names the correct alternative.
+          const layerError = telegramLayerCommandError(c)
+          if (layerError) {
+            throw new Error(layerError)
+          }
+        }
+
+        if (!wrapperLikelyRunning(STATE_DIR)) {
+          throw new Error(
+            'wrapper not detected (no fresh heartbeat). Launch CC via `mirza-cc` instead of `claude` directly.',
+          )
+        }
+
+        // Single command — original pending-file shape, works on any wrapper.
+        if (rawCommands === undefined) {
+          const { id, path } = writeCommand(STATE_DIR, commands[0]!)
           return {
             content: [
               {
                 type: 'text',
-                text: `queued (id: ${id}) — wrapper will inject "${command}" into PTY shortly\npath: ${path}`,
+                text: `queued (id: ${id}) — wrapper will inject "${commands[0]}" into PTY shortly\npath: ${path}`,
               },
             ],
           }
         }
 
-        // CROSS-AGENT path (single or broadcast).
-        // Blast-radius guard: refuse destructive commands on array targets so
-        // a one-tap fan-out cannot wipe multiple peers at once. Single-target
-        // destructive calls still go through (user already named one peer).
-        const isDestructive = /^\/(clear|delete)(\s|$)/.test(command)
-        if (isDestructive && targets.length > 1) {
+        // Batch — needs a RUNNING wrapper that understands array payloads.
+        // The wrapper process keeps running old code until mirza-cc restarts,
+        // so gate on its self-reported version, not the installed plugin's.
+        const wrapperVersion = readWrapperVersion(STATE_DIR)
+        if (!wrapperVersion || !versionAtLeast(wrapperVersion, BATCH_MIN_WRAPPER_VERSION)) {
           throw new Error(
-            `destructive command "${command}" rejected for array target (${targets.length} peers). ` +
-              `Send to one peer at a time to confirm intent.`,
+            `running wrapper ${wrapperVersion ?? '(version unknown)'} does not support batch ` +
+              `injection (needs >= ${BATCH_MIN_WRAPPER_VERSION}). Fall back to sequential ` +
+              `single-command pty_send_slash calls, and tell the user to restart mirza-cc ` +
+              `to activate the new wrapper.`,
           )
         }
-
-        const regPath = resolveAgentRegistryPath(process.env)
-        const reg = readAgentRegistry(regPath)
-
-        // Resolve + validate all targets up-front. If any name is unknown or
-        // any peer is offline, fail before writing any file so the caller
-        // gets one clear error instead of partial dispatch.
-        const known = Object.keys(reg.agents).join(', ') || '(none)'
-        const resolved: { name: string; state_dir: string }[] = []
-        for (const name of targets) {
-          const entry = reg.agents[name]
-          if (!entry) {
-            throw new Error(
-              `unknown agent "${name}". Known agents: ${known}. Call pty_list_agents to refresh.`,
-            )
-          }
-          const [info] = describeAgents({ agents: { [name]: entry } })
-          if (!info.alive) {
-            throw new Error(
-              `target agent "${name}" is not alive (last heartbeat ${info.last_heartbeat_age_s}s ago, threshold 30s).`,
-            )
-          }
-          resolved.push({ name, state_dir: entry.state_dir })
-        }
-
-        // Write to each peer's inbox. Failures partway through are
-        // surfaced as a partial-success error message — earlier writes are
-        // NOT rolled back (the wrapper protocol has no notion of rollback;
-        // a queued message is queued).
-        const results: { name: string; id: string; path: string }[] = []
-        for (const r of resolved) {
-          try {
-            const { id, path } = writeCommand(r.state_dir, command)
-            results.push({ name: r.name, id, path })
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err)
-            throw new Error(
-              `partial dispatch: wrote ${results.length}/${resolved.length} ` +
-                `successfully; failed on "${r.name}": ${msg}. ` +
-                `Already-queued targets: ${results.map(r => r.name).join(', ') || '(none)'}.`,
-            )
-          }
-        }
+        const { id, path } = writeBatch(STATE_DIR, commands)
         return {
           content: [
             {
               type: 'text',
-              text: results
-                .map(
-                  r =>
-                    `queued (id: ${r.id}) for agent "${r.name}" — wrapper will inject "${command}" into its PTY shortly\npath: ${r.path}`,
-                )
-                .join('\n---\n'),
+              text:
+                `queued batch (id: ${id}, ${commands.length} commands) — wrapper will inject ` +
+                `${commands.map(c => `"${c}"`).join(' → ')} in order, atomically\npath: ${path}`,
             },
           ],
         }

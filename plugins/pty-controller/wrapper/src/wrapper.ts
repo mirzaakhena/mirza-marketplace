@@ -11,12 +11,21 @@
  *      FIFO queue drained one item at a time behind an injection gate
  *      (min-gap between injections; hard barrier while CC rebuilds a
  *      session post-/clear — see InjectionGate / BUG #3). Payload
- *      shape (tagged union):
+ *      shape (tagged union, or an array for a batch):
  *        { command: "/clear" }                    — inject a slash command
  *        { type: "slash", command: "/clear" }     — explicit form, same thing
  *        { type: "switch", sessionId: "<uuid>" }  — inject `/resume <uuid>`
  *                                                   as keystrokes into the
  *                                                   live PTY
+ *        [ {command:"/a"}, {command:"/b"} ]       — BATCH: ordered slash
+ *                                                   items enqueued contiguously
+ *                                                   (atomic — no foreign payload
+ *                                                   can interleave); when the
+ *                                                   batch contains /clear, the
+ *                                                   session-change notification
+ *                                                   is deferred to the END of
+ *                                                   the batch so it carries the
+ *                                                   final session name
  *   4. Periodically touch <state>/wrapper.heartbeat so the plugin can probe
  *      whether we're alive.
  *   5. After injecting /clear specifically, poll ~/.claude/projects/<encoded>/
@@ -63,6 +72,7 @@ import { randomUUID } from 'node:crypto'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { promptTextFromPayload, chunkPromptText } from './prompt-inject'
+import { validateBatch } from './batch'
 import { renameArgFromCommand, type Lifecycle } from './session-name'
 import {
   buildNextState,
@@ -645,9 +655,17 @@ function writeSystemOutbox(payload: Record<string, unknown>): void {
 // session jsonl files and start polling for a new one to appear — its
 // appearance signals that the fresh CC session is live and ready to accept
 // `/notify-user`. Null means we're not currently waiting.
+// `suppressNotify` = the /clear came from a batch with more items after it;
+// the session-change outbox event is deferred to the end of the batch (so it
+// carries the FINAL session name instead of "(unnamed)").
 let awaitingClearReady:
-  | { sessionsBefore: Set<string>; sessionName?: string }
+  | { sessionsBefore: Set<string>; sessionName?: string; suppressNotify?: boolean }
   | null = null
+
+// Shared bookkeeping for one batch's items as they flow through the queue.
+// `remaining` counts not-yet-dispatched items; `sawClear` records whether any
+// item was a /clear (→ the batch finale must emit the deferred notification).
+type BatchState = { remaining: number; sawClear: boolean }
 
 // Shape of a pending/<uuid>.json payload (tagged union; `type`/`kind` are
 // synonyms, default "slash").
@@ -676,7 +694,11 @@ type PendingPayload = {
 // CC is rebuilding a session post-/clear. See the constants block above for
 // the failure modes this prevents.
 const injectionGate = new InjectionGate(CLEAR_BARRIER_TIMEOUT_MS)
-const injectionQueue: Array<{ filename: string; payload: PendingPayload }> = []
+const injectionQueue: Array<{
+  filename: string
+  payload: PendingPayload
+  batch?: BatchState
+}> = []
 let drainingQueue = false
 
 function sleepMs(ms: number): Promise<void> {
@@ -703,8 +725,15 @@ async function drainInjectionQueue(): Promise<void> {
         awaitingClearReady = null
       }
       const item = injectionQueue.shift()!
+      // Batch bookkeeping: decrement BEFORE dispatch so the dispatcher can
+      // tell whether this is the batch's final item (remaining === 0).
+      let isLastOfBatch = true
+      if (item.batch) {
+        item.batch.remaining -= 1
+        isLastOfBatch = item.batch.remaining === 0
+      }
       try {
-        dispatchPayload(item.filename, item.payload)
+        dispatchPayload(item.filename, item.payload, item.batch, isLastOfBatch)
       } catch (err) {
         log(`dispatch failed for ${item.filename}: ${err}`)
       }
@@ -803,7 +832,7 @@ const sessionPollInterval = setInterval(() => {
   for (const f of current) {
     if (!awaitingClearReady.sessionsBefore.has(f)) {
       const sid = f.slice(0, -'.jsonl'.length)
-      const { sessionName } = awaitingClearReady
+      const { sessionName, suppressNotify } = awaitingClearReady
       log(
         `fresh session detected: ${sid} — injecting${
           sessionName ? ` /rename (+${POST_INJECTION_DELAY_MS}ms) + /notify-user` : ` /notify-user`
@@ -837,15 +866,22 @@ const sessionPollInterval = setInterval(() => {
       // Notify the user via direct bot.api send (no AI roundtrip). The
       // payload carries `sessionName` if we just renamed, so the plugin
       // doesn't have to race the registry refresh to find the label.
-      setTimeout(
-        () =>
-          writeSystemOutbox({
-            type: 'session-change',
-            sessionId: sid,
-            sessionName: sessionName ?? null,
-          }),
-        delay,
-      )
+      // Batch case: when the /clear came from a batch with items still
+      // pending (e.g. a trailing /rename), defer — the batch finale in
+      // dispatchPayload emits the event with the FINAL name instead.
+      if (suppressNotify) {
+        log(`session-change notification deferred to end of batch`)
+      } else {
+        setTimeout(
+          () =>
+            writeSystemOutbox({
+              type: 'session-change',
+              sessionId: sid,
+              sessionName: sessionName ?? null,
+            }),
+          delay,
+        )
+      }
       return
     }
   }
@@ -967,13 +1003,39 @@ async function consumePending(filename: string): Promise<void> {
     /* swallow — already gone is fine */
   }
 
-  let payload: PendingPayload
+  let parsed: unknown
   try {
-    payload = JSON.parse(raw)
+    parsed = JSON.parse(raw)
   } catch (err) {
     log(`malformed json in ${filename}: ${err}`)
     return
   }
+
+  // BATCH: a JSON array is an ordered list of slash items. All items are
+  // pushed in ONE synchronous block — Node's single thread guarantees no
+  // other consumePending can splice its payload between them (this is the
+  // atomicity that three separate pending files cannot provide; see the
+  // 2026-06-07 design decision doc).
+  if (Array.isArray(parsed)) {
+    const v = validateBatch(parsed)
+    if (!v.ok) {
+      log(`ignored ${filename}: ${v.error}`)
+      return
+    }
+    const batch: BatchState = { remaining: v.items.length, sawClear: false }
+    log(
+      `batch ${filename}: ${v.items.length} item(s) — ${v.items
+        .map(i => i.command)
+        .join('  →  ')}`,
+    )
+    for (const it of v.items) {
+      injectionQueue.push({ filename, payload: it as PendingPayload, batch })
+    }
+    void drainInjectionQueue()
+    return
+  }
+
+  const payload = parsed as PendingPayload
 
   // Agent-bus extension: enforce hop limit on inter-agent messages. Local
   // messages (no `from` field) skip this check — they originate inside this
@@ -1000,7 +1062,12 @@ async function consumePending(filename: string): Promise<void> {
 // drainInjectionQueue, only when the injection gate is open. Every branch
 // holds the gate for its own injection duration + MIN_INJECTION_GAP_MS so
 // the next item cannot splice into this one's keystroke window.
-function dispatchPayload(filename: string, payload: PendingPayload): void {
+function dispatchPayload(
+  filename: string,
+  payload: PendingPayload,
+  batch?: BatchState,
+  isLastOfBatch = true,
+): void {
   // Phase 1 contract: `type` (legacy) and `kind` (new) are synonyms. Default
   // to "slash" when neither is set (backward compat for the original
   // single-string-command payload shape).
@@ -1051,7 +1118,13 @@ function dispatchPayload(filename: string, payload: PendingPayload): void {
         typeof (payload as { sessionName?: unknown }).sessionName === 'string'
           ? ((payload as { sessionName: string }).sessionName as string)
           : undefined
-      awaitingClearReady = { sessionsBefore: listSessions(), sessionName }
+      // A /clear mid-batch defers its session-change notification to the
+      // batch finale below (the final name isn't known yet — a trailing
+      // /rename is still queued). A /clear that ends its batch notifies
+      // from the poll loop exactly like a standalone /clear.
+      const suppressNotify = batch !== undefined && !isLastOfBatch
+      if (batch) batch.sawClear = true
+      awaitingClearReady = { sessionsBefore: listSessions(), sessionName, suppressNotify }
       // Arm the injection barrier: nothing else gets injected until the
       // fresh session jsonl shows up (sessionPollInterval releases it).
       injectionGate.beginClearBarrier(Date.now())
@@ -1059,8 +1132,24 @@ function dispatchPayload(filename: string, payload: PendingPayload): void {
       log(
         `awaiting fresh session after /clear${
           sessionName ? ` (will rename to "${sessionName}")` : ''
-        } — injection queue held`,
+        }${suppressNotify ? ' (batch: notify at end)' : ''} — injection queue held`,
       )
+    }
+    // Batch finale: a /clear earlier in this batch suppressed its
+    // session-change notification (the name wasn't final yet). Emit it now,
+    // after the last item has been injected, with the final state — the user
+    // is ALWAYS told which session they landed in; only the timing moved so
+    // the event carries the real name instead of "(unnamed)". sessionState
+    // is already current: the /rename sniffer above updates it synchronously
+    // at dispatch time.
+    if (batch && isLastOfBatch && batch.sawClear && command !== '/clear') {
+      setTimeout(() => {
+        writeSystemOutbox({
+          type: 'session-change',
+          sessionId: sessionState?.session_id ?? null,
+          sessionName: sessionState?.session_name ?? null,
+        })
+      }, POST_INJECTION_DELAY_MS)
     }
     return
   }

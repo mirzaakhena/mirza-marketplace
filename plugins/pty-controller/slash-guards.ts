@@ -11,13 +11,13 @@
  */
 const TELEGRAM_LAYER_COMMANDS: Record<string, string> = {
   '/new':
-    '/new is a telegram-layer command, not a Claude Code command. To reset+rename a session: inject "/clear" then "/rename <name>" (two pty_send_slash calls), or use agent_send kind:"slash" {command:"/clear", sessionName:"<name>"}.',
+    '/new is a telegram-layer command, not a Claude Code command. To reset+rename a session, send ONE atomic batch: pty_send_slash commands:["/clear", "/rename <name>"].',
   '/switch':
     '/switch is a telegram-layer picker, not a Claude Code command. To switch sessions: inject "/resume <sessionId>" instead (that is exactly what the wrapper does for /switch), or ask the user to run /switch from Telegram.',
   '/delete':
     '/delete is a telegram-layer picker that removes session files; Claude Code has no equivalent slash command. Ask the user to run /delete from Telegram.',
   '/effort':
-    "/effort pops a confirm picker that pty_send_slash cannot auto-confirm, so the injection wedges. Use agent_send kind:\"slash\" {command:\"/effort <level>\", confirmAfterMs:500} instead, or ask the user to run /effort from Telegram.",
+    '/effort pops a confirm picker that pty_send_slash cannot auto-confirm, so the injection wedges. Ask the user to run /effort from Telegram.',
 }
 
 /**

@@ -2,12 +2,12 @@ import { test, expect, describe } from 'bun:test'
 import { telegramLayerCommandError } from './slash-guards'
 
 describe('telegramLayerCommandError', () => {
-  test('rejects /new and names the /clear + /rename alternative', () => {
+  test('rejects /new and names the atomic batch alternative', () => {
     const err = telegramLayerCommandError('/new idle')
     expect(err).not.toBe(null)
     expect(err).toContain('/clear')
     expect(err).toContain('/rename')
-    expect(err).toContain('sessionName')
+    expect(err).toContain('commands:')
   })
 
   test('rejects bare /new (no argument)', () => {
@@ -24,10 +24,10 @@ describe('telegramLayerCommandError', () => {
     expect(telegramLayerCommandError('/delete')).not.toBe(null)
   })
 
-  test('rejects /effort and points at agent_send confirmAfterMs', () => {
+  test('rejects /effort and points at the user-run alternative', () => {
     const err = telegramLayerCommandError('/effort high')
     expect(err).not.toBe(null)
-    expect(err).toContain('confirmAfterMs')
+    expect(err).toContain('Telegram')
   })
 
   test('allows CC-native and plugin commands through', () => {

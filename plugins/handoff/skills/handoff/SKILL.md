@@ -14,8 +14,9 @@ Identitasmu (**nama bot**) = basename project dir-mu (mis.
 workspace-nya sendiri — **repo kerja** selalu repo proyek lain; semua path di
 protokol ini absolut.
 
-Tool yang dipakai: `agent_list`/`agent_status`/`agent_send` (agent-bus),
-`pty_send_slash` **self-target saja** (pty-controller), `reply` + skill
+Tool yang dipakai: `agent_list`/`agent_status`/`agent_send` kind:"prompt"
+(agent-bus), `pty_send_slash` (pty-controller — self-only by design sejak
+0.0.30; mendukung batch atomik via param `commands`), `reply` + skill
 `inline-buttons` (telegram), CronCreate/CronDelete one-shot (ACK timeout).
 
 ## 0. Konvensi nama session (kontrak antar bot)
@@ -198,12 +199,18 @@ Setelah file tertulis → **lapor user (laporan #1):** "file handoff selesai:
 4. **ACK diterima** → urutan WAJIB, jangan dibalik:
    1. Cancel cron timeout (CronDelete) — kalau tidak, cron akan fire ke session baru yang kosong dan membingungkan;
    2. **Lapor user (laporan #3):** "ACK diterima dari `<R>`, estafet resmi berpindah — saya reset";
-   3. Self-reset via `pty_send_slash` TANPA target — TIGA injeksi berurutan:
-      `/rename done-<slug>-<yyyymmddhhmm>` → `/clear` → `/rename idle`.
-      PERINGATAN: JANGAN pakai `/new` — itu meta-command lapisan telegram
-      (handler-nya menulis payload wrapper `/clear`+sessionName), TIDAK
-      dikenal Claude Code; injeksi PTY `/new idle` gagal sebagai command
-      invalid.
+   3. Self-reset via `pty_send_slash` — SATU panggilan batch atomik:
+      `commands: ["/rename done-<slug>-<yyyymmddhhmm>", "/clear", "/rename idle"]`.
+      Batch masuk antrean wrapper sebagai blok kontigu — payload lain (mis.
+      handoff masuk) tidak bisa menyelip di tengah urutan, dan notifikasi
+      session-change otomatis ditunda sampai akhir batch. FALLBACK: tool
+      error "wrapper does not support batch" (wrapper berjalan < 0.0.7) →
+      pakai cara lama: TIGA panggilan `pty_send_slash` berurutan
+      (`/rename done-…` → `/clear` → `/rename idle`) + beri tahu user agar
+      me-restart mirza-cc supaya batch aktif.
+      PERINGATAN: JANGAN pakai `/new` — itu meta-command lapisan telegram,
+      TIDAK dikenal Claude Code; injeksi PTY `/new idle` gagal sebagai
+      command invalid.
 5. **Timeout fire tanpa ACK** → lapor user + buttons `[Kirim ulang] [Pilih bot lain] [❌ Cancel]`. JANGAN self-reset — estafet belum berpindah.
 6. **R menolak (sibuk)** → lapor user penjelasan R + kembali ke §3.
 7. **ACK datang terlambat** (setelah timeout): belum ada keputusan user → lanjutkan langkah 4 normal. User sudah memindahkan estafet ke bot lain → laporkan konflik ke user, JANGAN kirim apa pun ke R.
@@ -251,7 +258,7 @@ langkah 1; tunda sampai task berjalanmu selesai.` Designation full-auto
 
 - `agent_send` oleh S sah karena pilihan user di buttons / designation yang user setujui di muka ADALAH permintaan eksplisit user.
 - ACK dari R sah terhadap anti-bounce rule: prompt S eksplisit meminta report-back (pengecualian #2), dan memakai `hop_count` naik.
-- Self-reset memakai `pty_send_slash` self-target — kategori safe/autonomous; JANGAN pernah mengirim `/clear`/`/delete` ke peer dari skill ini.
+- Self-reset memakai `pty_send_slash` — tool-nya self-only by design (neighbor autonomy 2026-06-07), kategori safe/autonomous; meminta peer melakukan sesuatu HANYA via `agent_send` kind:"prompt".
 
 ## 6. Sisi receiver
 

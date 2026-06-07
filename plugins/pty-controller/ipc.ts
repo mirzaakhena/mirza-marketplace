@@ -64,6 +64,58 @@ export function writeCommand(
 }
 
 /**
+ * Write a BATCH of slash commands to the wrapper's inbox as ONE pending file
+ * (JSON array root). The wrapper enqueues all items contiguously — atomic:
+ * no foreign payload can interleave between them. Requires wrapper >= 0.0.7
+ * (older wrappers ignore array payloads as "unknown type"); callers gate on
+ * readWrapperVersion before using this.
+ */
+export function writeBatch(
+  stateDir: string,
+  commands: string[],
+): { id: string; path: string } {
+  const pending = join(stateDir, 'pending')
+  mkdirSync(pending, { recursive: true })
+  const id = randomUUID()
+  const payload = commands.map(command => ({ command }))
+  const finalPath = join(pending, `${id}.json`)
+  const tmpPath = `${finalPath}.tmp.${process.pid}`
+  writeFileSync(tmpPath, JSON.stringify(payload, null, 2))
+  renameSync(tmpPath, finalPath)
+  return { id, path: finalPath }
+}
+
+/**
+ * Read the wrapper's self-reported version from <stateDir>/wrapper.version
+ * (written once at wrapper boot). Returns null when the file is missing or
+ * malformed — i.e. a wrapper too old to report versions at all.
+ */
+export function readWrapperVersion(stateDir: string): string | null {
+  try {
+    const obj = JSON.parse(
+      readFileSync(join(stateDir, 'wrapper.version'), 'utf8'),
+    ) as { wrapper_version?: unknown }
+    return typeof obj.wrapper_version === 'string' ? obj.wrapper_version : null
+  } catch {
+    return null
+  }
+}
+
+/** Minimal semver-ish comparison: true when `version` >= `minimum`. */
+export function versionAtLeast(version: string, minimum: string): boolean {
+  const a = version.split('.').map(n => parseInt(n, 10))
+  const b = minimum.split('.').map(n => parseInt(n, 10))
+  for (let i = 0; i < 3; i++) {
+    const x = a[i] ?? 0
+    const y = b[i] ?? 0
+    if (Number.isNaN(x)) return false
+    if (x > y) return true
+    if (x < y) return false
+  }
+  return true
+}
+
+/**
  * Resolve the path to the shared agent registry file. The wrapper writes
  * this; we only read it. Override via AGENT_REGISTRY_PATH env var (kept in
  * sync with the writer in wrapper/src/wrapper.ts).

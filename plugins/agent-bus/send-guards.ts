@@ -1,9 +1,10 @@
 /**
  * Small pure helpers for agent_send routing decisions.
+ *
+ * (isDestructiveSlash / DESTRUCTIVE_COMMANDS were removed together with
+ * kind:"slash" — neighbor-autonomy design decision 2026-06-07. Prompts are
+ * the only inter-bot channel, so there is no slash blast-radius to guard.)
  */
-
-/** Slash commands that must never fan out to multiple targets at once. */
-export const DESTRUCTIVE_COMMANDS = ['/clear', '/delete'] as const
 
 /**
  * Normalize the `target` argument (string or string[]) to a clean, deduped,
@@ -19,13 +20,4 @@ export function normalizeTargets(target: string | string[]): string[] {
   }
   if (cleaned.length === 0) throw new Error('agent_send needs at least one target')
   return cleaned
-}
-
-/**
- * True when a slash command's first token is a destructive verb. Used to
- * reject destructive commands sent to an array of targets (blast-radius guard).
- */
-export function isDestructiveSlash(command: string): boolean {
-  const first = command.trim().split(/\s+/)[0] ?? ''
-  return (DESTRUCTIVE_COMMANDS as readonly string[]).includes(first)
 }

@@ -1,8 +1,17 @@
 # agent-bus
 
-**Agent-to-agent (bot-to-bot)** communication plugin for multiple Claude Code instances running on the same machine. One bot (the leader) can see other bots, read their session status, send natural-language instructions, or inject slash commands into a peer's session.
+**Agent-to-agent (bot-to-bot)** communication plugin for multiple Claude Code instances running on the same machine. One bot (the leader) can see other bots, read their session status, and send natural-language instructions.
 
 Consists of one MCP server (3 tools) + one skill (`using-agent-bus`) that carries the safe-usage rules.
+
+> **Neighbor autonomy (design decision 2026-06-07):** `kind:"slash"` was
+> REMOVED. A slash injection bypassed the receiving bot's AI entirely — no
+> guard on its side could refuse it. Prompts are now the ONLY inter-bot
+> channel: the peer's own AI decides whether and how to act, and runs any
+> command itself via its own self-only `pty_send_slash`. Rescuing a stuck
+> bot is the user's prerogative (each bot has its own Telegram chat → TSC
+> `/new`). Rationale: `docs/2026-06-07-design-decision-batch-injection-and-neighbor-autonomy.md`
+> in the marketplace repo.
 
 ## MCP Tools
 
@@ -14,23 +23,20 @@ Consists of one MCP server (3 tools) + one skill (`using-agent-bus`) that carrie
 
 A peer is considered **online** if its last heartbeat is < 30 seconds.
 
-## The two `agent_send` payload kinds
+## The `agent_send` payload
 
-### `kind: "prompt"` — natural-language instruction
+### `kind: "prompt"` — natural-language instruction (the only kind)
 
 - The body (max **8 KB**) is validated, newlines are flattened into a single line (Claude Code submits on Enter), then given an **anti-bounce marker** that tags the message as an inter-agent instruction — including its hop level (`(hop N)`).
 - **`hop_count`** (optional, default 0): a mechanical anti-loop counter. When replying because an incoming prompt asked you to report back, send `hop_count = N + 1`. The sender rejects `hop_count > 5`, and the receiving wrapper drops payloads above the same limit — the relay loop dies at a maximum of 5 hops even if every AI in the chain misbehaves.
 - Written to the peer's pty-controller `pending/` inbox; the peer's `mirza-cc` wrapper types it into the PTY as a normal user turn.
 - **One-way — there is no reply channel.** If the leader needs results back, it must ask for them explicitly inside the body ("when done, send a one-line summary back to bot-01").
 
-### `kind: "slash"` — slash command injection
-
-- Fields: `command` (required, must start with `/`), `args` (optional, appended with a space), `sessionName` (optional — for `command:"/clear"`, chains a `/rename` to this name, effectively becoming `/new <name>`), `confirmAfterMs` (optional, pacing for auto-confirm of picker commands like `/effort`), plus an optional `correlation_id` (auto-generated if empty).
-- Written atomically (tmp + rename) to the peer's `pending/` inbox; the peer's wrapper consumes it and injects it into the PTY.
+Sending `kind:"slash"` returns a teaching error pointing at the prompt
+alternative (the schema and the writer were removed in 0.0.12).
 
 ## Built-in guards
 
-- **Blast-radius guard:** destructive commands (`/clear`, `/delete`) are **rejected** if the target is an array — you can't broadcast a state-wiping command.
 - **Target validation:** names are trimmed and deduped; a target not in the registry is returned as `{ok: false, error: "not in registry"}` per-entry without failing the other targets.
 - **Offline still delivered:** a message to an offline peer still lands in the inbox (queued) — the call result marks `online: false` so the AI can warn the user that the message will only be consumed when the peer boots.
 - **Prompt body validation:** non-empty string, max 8 KB UTF-8.
@@ -41,8 +47,8 @@ Triggers when the user asks for inter-bot coordination ("tell bot-02 to run /dai
 
 - `agent_send` **must not** be called on the AI's own initiative — only on explicit user request, or when an incoming prompt explicitly asks for a report back.
 - **Anti-bounce:** an incoming message from agent-bus is terminal context, not a trigger for back-and-forth. Default: do the work, report to your own Telegram, STOP. This prevents infinite loops between bots.
-- **Destructive commands** (`/clear`, `/clear`+`sessionName`, `/delete`) require re-confirmation with the user right before sending — use inline-buttons if available.
-- Ready-made patterns: **leader fan-out** (broadcast a slash / prompt to many peers) and **targeted relay** (check status → send → report correlation id).
+- **Prompts that ask a peer to wipe state** (reset/clear/delete a session) require re-confirmation with the user right before sending — use inline-buttons if available. The peer's AI is the final judge and may refuse.
+- Ready-made patterns: **leader fan-out** (broadcast a prompt to many peers) and **targeted relay** (check status → send → report).
 
 ## Architecture & state
 
@@ -59,7 +65,7 @@ Triggers when the user asks for inter-bot coordination ("tell bot-02 to run /dai
 
 ## Testing
 
-`bun test` from inside `plugins/agent-bus/` — unit tests per module (`registry`, `inbox-writer`, `prompt-compose`, `peer-status`, `send-guards`) plus `integration.test.ts`.
+`bun test` from inside `plugins/agent-bus/` — unit tests per module (`registry`, `prompt-compose`, `peer-status`, `send-guards`) plus `integration.test.ts`.
 
 ## Install
 

@@ -45,7 +45,7 @@ detektor idle antar bot via `agent_status`.
 
 1. Sender: clarity check → **update README repo kerja** → tulis file `<repo-kerja>/.handoff/<yyyymmddhhmm>-prompt-<slug>.md` → lapor user.
 2. Sender → receiver via `agent_send`: path file **eksplisit** (bukan "latest"), repo kerja, instruksi ACK dua arah + gate adaptif.
-3. Timeout ACK 10 menit (one-shot cron). ACK masuk → cancel cron → lapor user → self-reset (`/rename done-…` → `/clear` → `/rename idle`; `/new` hanya ada di lapisan telegram, bukan command Claude Code). Timeout → tawarkan `[Kirim ulang] [Pilih bot lain] [❌ Cancel]`.
+3. Timeout ACK 10 menit (one-shot cron). ACK masuk → cancel cron → lapor user → self-reset SATU batch atomik `pty_send_slash commands:["/rename done-…", "/clear", "/rename idle"]` (wrapper berjalan < 0.0.7 → fallback tiga panggilan berurutan; `/new` hanya ada di lapisan telegram, bukan command Claude Code). Timeout → tawarkan `[Kirim ulang] [Pilih bot lain] [❌ Cancel]`.
 4. Receiver: guard sibuk PALING DULU (sibuk → tolak dengan penjelasan; kecuali user memilihnya secara eksplisit → ACK + tunda sampai task berjalan selesai) → baca file → `/rename task-<slug>` → ACK ke sender + lapor user → eksekusi (kalau section Blocker terisi → tanya user dulu).
 
 `/delete hard all` (bersih-bersih arsip session) tetap manual oleh user.

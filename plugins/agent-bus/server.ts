@@ -4,11 +4,17 @@
  *
  *   • agent_list     — list peers in the global registry
  *   • agent_status   — peer's current session + context/model/effort
- *   • agent_send     — write a slash-command request to a peer's inbox
+ *   • agent_send     — deliver a natural-language prompt to a peer
  *
  * agent_list and agent_status are read-only. agent_send is mutating —
  * the tool description tells the AI to call it ONLY when the user has
  * explicitly asked to message another agent.
+ *
+ * kind:"slash" was REMOVED (neighbor-autonomy design decision 2026-06-07,
+ * docs/2026-06-07-design-decision-batch-injection-and-neighbor-autonomy.md):
+ * a slash injection bypasses the peer's AI entirely — no guard on the
+ * receiving side can refuse it. Prompts are the only inter-bot channel;
+ * the peer's own AI decides whether and how to act.
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -18,9 +24,8 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { readRegistry, resolveRegistryPath } from './registry'
 import { readPeerSessionInfo } from './peer-status'
-import { writeAgentMessage, type AgentPayload } from './inbox-writer'
 import { validatePromptBody, validateHopCount, composePromptText, writePromptToPending } from './prompt-compose'
-import { normalizeTargets, isDestructiveSlash } from './send-guards'
+import { normalizeTargets } from './send-guards'
 
 const REGISTRY_PATH = resolveRegistryPath(process.env)
 process.stderr.write(`agent-bus: registry path = ${REGISTRY_PATH}\n`)
@@ -68,10 +73,9 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'agent_send',
       description:
-        "Send a one-way message to one or more peer bots. Two kinds:\n" +
-        "  • kind=\"prompt\": deliver a natural-language instruction to the peer. It is typed into the peer's Claude session as a normal user turn (via the mirza-cc wrapper) and the peer acts on it. One-way — there is NO reply channel. Newlines in the body are flattened to one line. If you want the peer to report back, say so inside the body (e.g. \"...when done, send a one-line summary back to bot-01\").\n" +
-        "  • kind=\"slash\": inject a slash command into the peer's PTY via pty-controller (e.g. /clear, /rename, /effort).\n" +
-        "`target` may be a single name or an array (broadcast/fan-out). DO NOT call autonomously — only when the user explicitly asks you to message another agent, OR when an inbound agent prompt explicitly told you to report back. Never auto-reply to an incoming agent message otherwise. Destructive slash commands (/clear, /delete) cannot be broadcast to an array.",
+        "Send a one-way natural-language prompt (kind=\"prompt\") to one or more peer bots. The body is typed into the peer's Claude session as a normal user turn (via the mirza-cc wrapper) and the peer's OWN AI decides how to act — including whether to refuse. One-way — there is NO reply channel. Newlines in the body are flattened to one line. If you want the peer to report back, say so inside the body (e.g. \"...when done, send a one-line summary back to bot-01\").\n" +
+        "kind=\"slash\" was REMOVED (neighbor-autonomy decision 2026-06-07): bots never inject commands into peers. To have a peer run a command (/clear, /rename, /daily-report, …), describe it in a prompt — its AI executes the command itself via its own self-only pty_send_slash.\n" +
+        "`target` may be a single name or an array (broadcast/fan-out). DO NOT call autonomously — only when the user explicitly asks you to message another agent, OR when an inbound agent prompt explicitly told you to report back. Never auto-reply to an incoming agent message otherwise.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -85,38 +89,18 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           payload: {
             type: 'object',
             properties: {
-              kind: { type: 'string', enum: ['prompt', 'slash'] },
+              kind: { type: 'string', enum: ['prompt'] },
               body: {
                 type: 'string',
-                description: 'For kind="prompt": the natural-language instruction (max 8 KB).',
-              },
-              command: {
-                type: 'string',
-                description: 'For kind="slash": slash command including leading "/" (e.g. "/clear", "/rename").',
-              },
-              sessionName: {
-                type: 'string',
-                description: 'For kind="slash" with command="/clear": chain a /rename to this session name.',
-              },
-              args: {
-                type: 'string',
-                description: 'For kind="slash": optional argument string appended to command with a space.',
-              },
-              confirmAfterMs: {
-                type: 'number',
-                description: 'For kind="slash": optional auto-confirm pacing for picker commands (e.g. /effort).',
+                description: 'The natural-language instruction (max 8 KB).',
               },
               hop_count: {
                 type: 'number',
                 description:
-                  'For kind="prompt": loop-prevention counter. Omit (= 0) for a fresh, user-initiated prompt. When replying because an inbound agent-bus prompt explicitly asked you to report back, pass the hop value named in that message PLUS ONE. Sends with hop_count > 5 are refused.',
+                  'Loop-prevention counter. Omit (= 0) for a fresh, user-initiated prompt. When replying because an inbound agent-bus prompt explicitly asked you to report back, pass the hop value named in that message PLUS ONE. Sends with hop_count > 5 are refused.',
               },
             },
             required: ['kind'],
-          },
-          correlation_id: {
-            type: 'string',
-            description: 'Optional UUID for slash sends; auto-generated if omitted.',
           },
         },
         required: ['target', 'payload'],
@@ -171,7 +155,6 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
       case 'agent_send': {
         const target = args.target
         const payload = args.payload as Record<string, unknown> | undefined
-        const correlation = typeof args.correlation_id === 'string' ? args.correlation_id : undefined
         if (target === undefined) throw new Error('target (string or string[]) is required')
         if (!payload || typeof payload !== 'object') throw new Error('payload is required')
 
@@ -209,30 +192,15 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         }
 
         if (kind === 'slash') {
-          const command = payload.command
-          if (typeof command !== 'string' || !command) throw new Error('slash payload needs a command')
-          // Blast-radius guard: never fan out a destructive command.
-          if (targets.length > 1 && isDestructiveSlash(command)) {
-            throw new Error(`refusing to broadcast destructive command "${command}" to ${targets.length} targets`)
-          }
-          const results = targets.map(name => {
-            const entry = reg.agents[name]
-            if (!entry) {
-              return { target: name, ok: false, error: 'not in registry', online: false }
-            }
-            try {
-              const r = writeAgentMessage(entry.state_dir, self, payload as unknown as AgentPayload, correlation)
-              return { target: name, ok: true, path: r.path, online: isOnline(entry.last_heartbeat) }
-            } catch (err) {
-              return { target: name, ok: false, error: err instanceof Error ? err.message : String(err), online: isOnline(entry.last_heartbeat) }
-            }
-          })
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ kind: 'slash', results }, null, 2) }],
-          }
+          throw new Error(
+            'kind:"slash" was removed (neighbor-autonomy design decision 2026-06-07): ' +
+              'bots may not inject commands into a peer\'s session — that bypasses the ' +
+              'peer\'s AI and no receiving-side guard can refuse it. Send kind:"prompt" ' +
+              'describing what the peer should do; its own AI executes the command itself.',
+          )
         }
 
-        throw new Error(`unsupported payload kind: ${JSON.stringify(kind)} (expected "prompt" or "slash")`)
+        throw new Error(`unsupported payload kind: ${JSON.stringify(kind)} (expected "prompt")`)
       }
       default:
         return {
