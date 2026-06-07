@@ -63,7 +63,8 @@ import { randomUUID } from 'node:crypto'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { promptTextFromPayload, chunkPromptText } from './prompt-inject'
-import { renameArgFromCommand } from './session-name'
+import { renameArgFromCommand, deriveLifecycle } from './session-name'
+import { buildNextState, writeSessionState, type SessionState } from './session-state'
 import { InjectionGate } from './injection-gate'
 
 // Portable equivalent of __dirname under ES modules. `import.meta.dir` only
@@ -126,6 +127,12 @@ const CURRENT_SESSION_NAME_FILE = join(
   'wrapper.current_session_name',
 )
 
+// Single source of truth for identity + lifecycle (see session-state.ts).
+// Written alongside the legacy current_session_* files for backward-compat
+// with peers running an older agent-bus reader.
+const SESSION_STATE_FILE = join(STATE_DIR, 'wrapper.state.json')
+let sessionState: SessionState | null = null
+
 // Global agent registry shared by all bot peers on this machine.
 // See plugins/agent-bus/registry.ts for the writer-side contract.
 const AGENT_REGISTRY_PATH =
@@ -158,6 +165,27 @@ function writeCurrentSessionName(name: string | null): void {
   } catch (err) {
     log(`failed to write current_session_name: ${err}`)
   }
+}
+
+// Canonical updater: patches identity/lifecycle, writes wrapper.state.json
+// atomically, AND mirrors to the legacy current_session_* files. Call this
+// instead of writeCurrentSessionId/Name directly.
+function updateSessionState(patch: {
+  session_id?: string | null
+  session_name?: string | null
+  lifecycle?: ReturnType<typeof deriveLifecycle>
+}): void {
+  sessionState = buildNextState(sessionState, patch, Date.now())
+  try {
+    writeSessionState(SESSION_STATE_FILE, sessionState)
+  } catch (err) {
+    log(`failed to write session state: ${err}`)
+  }
+  // Mirror to legacy files (readers on older agent-bus).
+  if (patch.session_id !== undefined && sessionState.session_id)
+    writeCurrentSessionId(sessionState.session_id)
+  if (patch.session_name !== undefined)
+    writeCurrentSessionName(sessionState.session_name)
 }
 
 // Pacing between chained PTY injections. 1000ms is the empirical floor at
@@ -756,11 +784,10 @@ const sessionPollInterval = setInterval(() => {
           sessionName ? ` /rename (+${POST_INJECTION_DELAY_MS}ms) + /notify-user` : ` /notify-user`
         }`,
       )
-      writeCurrentSessionId(sid)
+      updateSessionState({ session_id: sid, session_name: sessionName ?? null })
       // Record the fresh session's name immediately (or clear the previous
       // one when this /clear came without a name) so peer-status readers
       // never see the old session's name attached to the new session.
-      writeCurrentSessionName(sessionName ?? null)
       awaitingClearReady = null
       // Release the injection barrier — but keep the queue held until the
       // post-/clear chain below (/rename, when present) has had time to
@@ -806,10 +833,9 @@ const sessionPollInterval = setInterval(() => {
 // still runs in this mode but won't detect anything; that's harmless.
 if (!startupMode.isFirstRun && startupMode.latestSessionId) {
   const sid = startupMode.latestSessionId
-  writeCurrentSessionId(sid)
   // Resolve label from telegram registry directly (best-effort).
   const resolvedName = readTelegramRegistryName(sid)
-  writeCurrentSessionName(resolvedName)
+  updateSessionState({ session_id: sid, session_name: resolvedName })
   writeSystemOutbox({
     type: 'session-change',
     sessionId: sid,
@@ -837,7 +863,7 @@ const initialSessionPoll = setInterval(() => {
     if (initialSessionsBefore.has(f)) continue
     const sid = f.slice(0, -'.jsonl'.length)
     log(`initial session detected: ${sid}`)
-    writeCurrentSessionId(sid)
+    updateSessionState({ session_id: sid })
     clearInterval(initialSessionPoll)
 
     if (startupMode.isFirstRun) {
@@ -863,7 +889,7 @@ const initialSessionPoll = setInterval(() => {
       }
       if (canRename) {
         writeTelegramRegistryName(sid, 'idle')
-        writeCurrentSessionName('idle')
+        updateSessionState({ session_name: 'idle' })
         injectSlashCommand(`/rename idle`)
         // Keep queued payloads (if any arrived during boot) out of this
         // injection's keystroke window.
@@ -881,7 +907,7 @@ const initialSessionPoll = setInterval(() => {
         log(
           `"idle" already taken in registry — leaving new session unnamed`,
         )
-        writeCurrentSessionName(null)
+        updateSessionState({ session_name: null })
         writeSystemOutbox({
           type: 'session-change',
           sessionId: sid,
@@ -966,7 +992,7 @@ function dispatchPayload(filename: string, payload: PendingPayload): void {
     // runs only after the fresh session was detected ready); recording the
     // name here therefore reflects an injection that actually landed.
     const renamedTo = renameArgFromCommand(command)
-    if (renamedTo) writeCurrentSessionName(renamedTo)
+    if (renamedTo) updateSessionState({ session_name: renamedTo })
     // Optional confirm-after: some CC slash commands (e.g. /effort) pop up a
     // confirmation picker with the default option pre-selected. A single \r
     // commits it. If no picker appears, the extra \r is a harmless empty
@@ -996,6 +1022,7 @@ function dispatchPayload(filename: string, payload: PendingPayload): void {
       // Arm the injection barrier: nothing else gets injected until the
       // fresh session jsonl shows up (sessionPollInterval releases it).
       injectionGate.beginClearBarrier(Date.now())
+      updateSessionState({ lifecycle: 'resetting' })
       log(
         `awaiting fresh session after /clear${
           sessionName ? ` (will rename to "${sessionName}")` : ''
@@ -1034,10 +1061,12 @@ function dispatchPayload(filename: string, payload: PendingPayload): void {
         (sessionName ? ` (label: "${sessionName}")` : '') +
         ` (id: ${payload.id ?? '?'})`,
     )
-    writeCurrentSessionId(sid)
     // Prefer the name carried in the payload; fall back to the telegram
     // registry (the payload's sessionName is informational and may be null).
-    writeCurrentSessionName(sessionName ?? readTelegramRegistryName(sid))
+    updateSessionState({
+      session_id: sid,
+      session_name: sessionName ?? readTelegramRegistryName(sid),
+    })
     injectSlashCommand(`/resume ${sid}`)
     // /resume swaps the session inside CC — hold a little longer than a
     // plain slash so the next payload lands after the swap settles.
