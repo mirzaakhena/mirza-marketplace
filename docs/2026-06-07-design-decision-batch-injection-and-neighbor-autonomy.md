@@ -1,7 +1,7 @@
 # Design Decision — Batch Injection & Neighbor Autonomy
 
 **Tanggal:** 2026-06-07
-**Status:** DIPUTUSKAN, belum diimplementasikan. Kedua keputusan diimplementasikan BERSAMAAN dalam satu gelombang rilis.
+**Status:** ✅ DIIMPLEMENTASIKAN (commit `963f3e0`, 2026-06-07) — pty-controller 0.0.30 (wrapper 0.0.7), agent-bus 0.0.12, handoff 0.0.16. Catatan deviasi kecil dari rencana: migrasi telegram `/new` ke bentuk batch DITUNDA (compound masih diterima wrapper selama transisi) untuk menghindari hazard urutan deploy — plugin telegram bisa ter-reload lebih dulu daripada wrapper yang berjalan.
 **Diputuskan oleh:** Mirza (via diskusi Telegram dengan bot-06)
 **Cakupan:** pty-controller (wrapper + MCP server), agent-bus, handoff, telegram
 
