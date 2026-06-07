@@ -64,7 +64,12 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { promptTextFromPayload, chunkPromptText } from './prompt-inject'
 import { renameArgFromCommand, type Lifecycle } from './session-name'
-import { buildNextState, writeSessionState, type SessionState } from './session-state'
+import {
+  buildNextState,
+  writeSessionState,
+  nameFromLastStatus,
+  type SessionState,
+} from './session-state'
 import { InjectionGate } from './injection-gate'
 
 // Portable equivalent of __dirname under ES modules. `import.meta.dir` only
@@ -328,6 +333,23 @@ function readTelegramRegistryName(sessionId: string): string | null {
       readFileSync(join(dir, 'session-names.json'), 'utf8'),
     ) as Record<string, { name?: string }>
     return obj[sessionId]?.name ?? null
+  } catch {
+    return null
+  }
+}
+
+// Freshest name source: CC's own statusline snapshot. Only valid when the
+// snapshot describes the asked-for session (id match) — see nameFromLastStatus.
+// Used to seed state on startup-resume, where the telegram registry can be
+// stale (a PTY-injected /rename never passes through the telegram handler).
+function readLastStatusSessionName(sessionId: string): string | null {
+  const dir = resolveTelegramStateDir()
+  if (!dir) return null
+  try {
+    return nameFromLastStatus(
+      readFileSync(join(dir, 'last-status.json'), 'utf8'),
+      sessionId,
+    )
   } catch {
     return null
   }
@@ -836,8 +858,9 @@ const sessionPollInterval = setInterval(() => {
 // still runs in this mode but won't detect anything; that's harmless.
 if (!startupMode.isFirstRun && startupMode.latestSessionId) {
   const sid = startupMode.latestSessionId
-  // Resolve label from telegram registry directly (best-effort).
-  const resolvedName = readTelegramRegistryName(sid)
+  // Resolve label: prefer CC's own statusline snapshot (fresh even when a
+  // PTY-injected /rename bypassed the telegram registry), then the registry.
+  const resolvedName = readLastStatusSessionName(sid) ?? readTelegramRegistryName(sid)
   updateSessionState({ session_id: sid, session_name: resolvedName })
   writeSystemOutbox({
     type: 'session-change',
@@ -995,7 +1018,14 @@ function dispatchPayload(filename: string, payload: PendingPayload): void {
     // runs only after the fresh session was detected ready); recording the
     // name here therefore reflects an injection that actually landed.
     const renamedTo = renameArgFromCommand(command)
-    if (renamedTo) updateSessionState({ session_name: renamedTo })
+    if (renamedTo) {
+      updateSessionState({ session_name: renamedTo })
+      // Keep the telegram registry in sync: a PTY-injected /rename never
+      // passes through the telegram handler, so without this the registry
+      // (and any restart that seeds from it) goes stale.
+      const sidNow = sessionState?.session_id
+      if (sidNow) writeTelegramRegistryName(sidNow, renamedTo)
+    }
     // Optional confirm-after: some CC slash commands (e.g. /effort) pop up a
     // confirmation picker with the default option pre-selected. A single \r
     // commits it. If no picker appears, the extra \r is a harmless empty

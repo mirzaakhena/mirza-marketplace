@@ -2,7 +2,26 @@ import { test, expect, describe } from 'bun:test'
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { buildNextState, writeSessionState, type SessionState } from './session-state'
+import { buildNextState, writeSessionState, nameFromLastStatus, type SessionState } from './session-state'
+
+describe('nameFromLastStatus', () => {
+  const raw = (payload: unknown) => JSON.stringify({ captured_at_ms: 1, payload })
+
+  test('returns the name when the snapshot describes the given session', () => {
+    expect(nameFromLastStatus(raw({ session_id: 'sid-1', session_name: 'idle' }), 'sid-1')).toBe('idle')
+  })
+  test('returns null on session_id mismatch (snapshot describes another session)', () => {
+    expect(nameFromLastStatus(raw({ session_id: 'old-sid', session_name: 'idle' }), 'sid-1')).toBe(null)
+  })
+  test('returns null when payload or name is missing/empty', () => {
+    expect(nameFromLastStatus(raw(null), 'sid-1')).toBe(null)
+    expect(nameFromLastStatus(raw({ session_id: 'sid-1' }), 'sid-1')).toBe(null)
+    expect(nameFromLastStatus(raw({ session_id: 'sid-1', session_name: '' }), 'sid-1')).toBe(null)
+  })
+  test('returns null on malformed JSON', () => {
+    expect(nameFromLastStatus('{ not json', 'sid-1')).toBe(null)
+  })
+})
 
 describe('buildNextState', () => {
   test('first state: derives lifecycle from name, seq starts at 1', () => {

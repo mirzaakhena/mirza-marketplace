@@ -46,3 +46,23 @@ export function writeSessionState(stateFile: string, state: SessionState): void 
   writeFileSync(tmp, JSON.stringify(state))
   renameSync(tmp, stateFile)
 }
+
+/**
+ * Parse a telegram statusline snapshot (last-status.json contents) and return
+ * the session name it carries — but ONLY when it describes the given session.
+ * CC's statusline is the freshest source of a session's own name (e.g. after
+ * a PTY-injected /rename that bypassed the telegram registry), so the wrapper
+ * prefers it when seeding state on startup-resume.
+ */
+export function nameFromLastStatus(raw: string, sessionId: string): string | null {
+  try {
+    const o = JSON.parse(raw) as {
+      payload?: { session_id?: string; session_name?: string } | null
+    }
+    const p = o.payload
+    if (!p || p.session_id !== sessionId) return null
+    return typeof p.session_name === 'string' && p.session_name ? p.session_name : null
+  } catch {
+    return null
+  }
+}
