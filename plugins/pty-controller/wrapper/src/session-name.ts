@@ -13,3 +13,18 @@ export function renameArgFromCommand(command: string): string | null {
   const name = m[1].trim()
   return name.length > 0 ? name : null
 }
+
+export type Lifecycle = 'idle' | 'busy' | 'resetting' | 'transitioning' | 'unknown'
+
+/**
+ * Map a session display name to its lifecycle. `resetting` is never derived
+ * from a name — it is an explicit in-progress marker set by the wrapper at
+ * `/clear` begin. Manual / non-convention names map to `unknown`.
+ */
+export function deriveLifecycle(name: string | null): Lifecycle {
+  if (!name) return 'unknown'
+  if (name === 'idle') return 'idle'
+  if (name.startsWith('task-')) return 'busy'
+  if (name.startsWith('done-')) return 'transitioning'
+  return 'unknown'
+}

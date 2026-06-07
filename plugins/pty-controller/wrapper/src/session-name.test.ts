@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test'
-import { renameArgFromCommand } from './session-name'
+import { renameArgFromCommand, deriveLifecycle } from './session-name'
 
 describe('renameArgFromCommand', () => {
   test('extracts a single-word name', () => {
@@ -29,5 +29,28 @@ describe('renameArgFromCommand', () => {
 
   test('returns null for commands that merely start with "rename"', () => {
     expect(renameArgFromCommand('/renamed foo')).toBe(null)
+  })
+})
+
+describe('deriveLifecycle', () => {
+  test('null/empty name → unknown', () => {
+    expect(deriveLifecycle(null)).toBe('unknown')
+    expect(deriveLifecycle('')).toBe('unknown')
+  })
+
+  test('"idle" → idle', () => {
+    expect(deriveLifecycle('idle')).toBe('idle')
+  })
+
+  test('task-* → busy', () => {
+    expect(deriveLifecycle('task-todolist-pingpong')).toBe('busy')
+  })
+
+  test('done-* → transitioning', () => {
+    expect(deriveLifecycle('done-foo-202606071200')).toBe('transitioning')
+  })
+
+  test('manual non-convention name → unknown', () => {
+    expect(deriveLifecycle('refactoring besar')).toBe('unknown')
   })
 })
