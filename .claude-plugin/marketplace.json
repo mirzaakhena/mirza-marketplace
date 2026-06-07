@@ -38,7 +38,7 @@
     },
     {
       "name": "handoff",
-      "description": "Direct bot-to-bot handoff. /handoff (inline buttons: Now / After this task / Ping pong / File only) writes a structured handoff file and relays it to an idle peer via agent-bus with two-way ACK; sender self-resets to an idle session. Proactive context-threshold offer (1M→35%, 200k→75%). /handoff-resume removed.",
+      "description": "Direct bot-to-bot handoff. /handoff (inline buttons: Now / After this task / Ping pong / File only) writes a structured handoff file and relays it to an idle peer via agent-bus with two-way ACK; sender self-resets to an idle session. Proactive context-threshold offer via agent_status context_window_size (>=1M tokens→35%, else→75%; model-string fallback); READY accepts null context (fresh session). /handoff-resume removed.",
       "category": "productivity",
       "source": "./plugins/handoff"
     },

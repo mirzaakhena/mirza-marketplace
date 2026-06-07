@@ -27,7 +27,7 @@ Tool yang dipakai: `agent_list`/`agent_status`/`agent_send` (agent-bus),
 | `done-<slug>-<yyyymmddhhmm>` | Arsip session yang sudah diserahkan |
 | nama lain (manual oleh user) | Status **unknown** — bukan ready, jangan dipilih otomatis |
 
-- **READY** (boleh menerima handoff otomatis) = `current_session_name == "idle"` **DAN** `context_used_percent < 10`.
+- **READY** (boleh menerima handoff otomatis) = `current_session_name == "idle"` **DAN** (`context_used_percent < 10` **ATAU** `context_used_percent == null`). `null` = session fresh yang belum pernah aktif (statusline belum fire) — itu justru kandidat terbaik, BUKAN error; lolos syarat READY.
 - `<slug>`: kebab-case, ≤6 kata, alfanumerik+hyphen — **sama** dengan slug di filename handoff, supaya arsip session bisa di-trace ke file-nya.
 - Timestamp arsip = format timestamp filename handoff (`yyyymmddhhmm`, waktu lokal).
 
@@ -36,7 +36,8 @@ Tool yang dipakai: `agent_list`/`agent_status`/`agent_send` (agent-bus),
 Setiap kamu **menyelesaikan task substansial**, WAJIB cek
 `agent_status(<nama-bot-sendiri>)`:
 
-- Field `model` mengandung `"1M"` → threshold **35%**; selain itu → **75%**.
+- Threshold ditentukan dari field `context_window_size` hasil `agent_status` (jumlah token window): `>= 1_000_000` → threshold **35%**; selain itu (mis. `200_000`) → **75%**.
+- Fallback (sementara, HANYA bila `context_window_size` belum tersedia — mis. agent-bus peer < 0.0.10 / session fresh): tebak dari string `model` — mengandung `"1M"` → 35%, selain itu 75%.
 - Threshold boleh terlampaui **selama sebuah task masih berjalan** — pengecekan hanya di batas selesai-task, jangan menginterupsi pekerjaan.
 
 Jika `context_used_percent` ≥ threshold:

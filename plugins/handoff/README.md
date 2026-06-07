@@ -28,13 +28,15 @@ kapan pun. Skill-only — tidak ada MCP server, tidak ada hook.
 ## Trigger proaktif
 
 Setiap selesai task substansial bot mengecek `agent_status` dirinya:
-model 1M → threshold **35%**, model 200k → **75%** (boleh terlampaui selama
-task masih berjalan). Lewat threshold → bot menawarkan `[🤝 Handoff]
-[▶️ Lanjutkan]`, atau langsung jalan bila ada designation aktif.
+`context_window_size` ≥ 1.000.000 token → threshold **35%**, selain itu
+(mis. 200k) → **75%** (boleh terlampaui selama task masih berjalan).
+Fallback bila field itu belum tersedia: tebak dari string model ("1M").
+Lewat threshold → bot menawarkan `[🤝 Handoff] [▶️ Lanjutkan]`, atau
+langsung jalan bila ada designation aktif.
 
 ## Konvensi nama session
 
-`idle` (standby, READY bila ctx <10%) → `task-<slug>` (sedang kerja) →
+`idle` (standby, READY bila ctx <10% atau null — null = fresh, belum aktif) → `task-<slug>` (sedang kerja) →
 `done-<slug>-<yyyymmddhhmm>` (arsip) → `/clear` + `/rename idle`. Nama manual oleh user =
 unknown (tidak pernah dipilih otomatis). Konvensi ini sekaligus menjadi
 detektor idle antar bot via `agent_status`.
