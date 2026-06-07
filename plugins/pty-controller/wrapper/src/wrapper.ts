@@ -63,7 +63,7 @@ import { randomUUID } from 'node:crypto'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { promptTextFromPayload, chunkPromptText } from './prompt-inject'
-import { renameArgFromCommand, deriveLifecycle } from './session-name'
+import { renameArgFromCommand, type Lifecycle } from './session-name'
 import { buildNextState, writeSessionState, type SessionState } from './session-state'
 import { InjectionGate } from './injection-gate'
 
@@ -173,7 +173,7 @@ function writeCurrentSessionName(name: string | null): void {
 function updateSessionState(patch: {
   session_id?: string | null
   session_name?: string | null
-  lifecycle?: ReturnType<typeof deriveLifecycle>
+  lifecycle?: Lifecycle
 }): void {
   sessionState = buildNextState(sessionState, patch, Date.now())
   try {
@@ -181,7 +181,10 @@ function updateSessionState(patch: {
   } catch (err) {
     log(`failed to write session state: ${err}`)
   }
-  // Mirror to legacy files (readers on older agent-bus).
+  // Mirror to legacy files (readers on older agent-bus). The session_id file
+  // has no "cleared" representation (writeCurrentSessionId takes a string), so
+  // we only (re)write it when the patch carries a concrete id — a lifecycle-
+  // only patch (e.g. the /clear `resetting` marker) leaves it untouched.
   if (patch.session_id !== undefined && sessionState.session_id)
     writeCurrentSessionId(sessionState.session_id)
   if (patch.session_name !== undefined)
