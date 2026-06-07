@@ -25,6 +25,7 @@ import {
   writeCommand,
   wrapperLikelyRunning,
 } from './ipc.ts'
+import { telegramLayerCommandError } from './slash-guards.ts'
 
 // Accepts either a bare command (`/clear`, `/rename foo`) or a namespaced
 // plugin command (`/telegram:notify-user brief`). Plugin commands need
@@ -56,7 +57,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'pty_send_slash',
       description:
-        'Send a Claude Code slash command to a PTY. WITHOUT `target` — targets the CURRENT (self) CC session; safe to call autonomously. WITH `target` (a single agent name) — targets a peer agent\'s session; this is a CROSS-AGENT side effect and REQUIRES the user to have explicitly asked you to message that peer. WITH `target` as an ARRAY — broadcasts to multiple peers at once; same explicit-user-consent rule applies, and destructive commands (`/clear`, `/delete`) are REJECTED on array targets to prevent accidental fan-out wipes. Peer state is resolved from `~/.claude/agent-registry.json`; call `pty_list_agents` first to discover valid names. Returns immediately; the wrapper(s) inject the keystrokes on the next input-loop tick.',
+        'Send a Claude Code slash command to a PTY. Only CC-native (or CC plugin) commands work — telegram-layer commands (`/new`, `/switch`, `/delete`, `/effort`) are REJECTED with an error naming the correct alternative (e.g. /new → inject "/clear" then "/rename <name>"). WITHOUT `target` — targets the CURRENT (self) CC session; safe to call autonomously. WITH `target` (a single agent name) — targets a peer agent\'s session; this is a CROSS-AGENT side effect and REQUIRES the user to have explicitly asked you to message that peer. WITH `target` as an ARRAY — broadcasts to multiple peers at once; same explicit-user-consent rule applies, and the destructive `/clear` is REJECTED on array targets to prevent accidental fan-out wipes. Peer state is resolved from `~/.claude/agent-registry.json`; call `pty_list_agents` first to discover valid names. Returns immediately; the wrapper(s) inject the keystrokes on the next input-loop tick.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -67,7 +68,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           target: {
             description:
-              'Optional. Omit (or pass null) to target self. Pass a single string (e.g. "bot-03") for one peer, or a string array (e.g. ["bot-02", "bot-03"]) to broadcast. Names must match entries in `pty_list_agents`. Destructive commands like "/clear" and "/delete" are rejected when target is an array.',
+              'Optional. Omit (or pass null) to target self. Pass a single string (e.g. "bot-03") for one peer, or a string array (e.g. ["bot-02", "bot-03"]) to broadcast. Names must match entries in `pty_list_agents`. The destructive "/clear" is rejected when target is an array.',
             oneOf: [
               { type: 'string' },
               { type: 'array', items: { type: 'string' } },
@@ -116,6 +117,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
           throw new Error(
             `command must match /^\\/[a-z][a-z0-9_:-]{0,63}(\\s.{0,256})?$/ — got: ${JSON.stringify(command)}`,
           )
+        }
+        // Telegram-layer commands don't exist inside Claude Code — injecting
+        // them wedges the TUI on an invalid command. Reject with a message
+        // that names the correct alternative.
+        const layerError = telegramLayerCommandError(command)
+        if (layerError) {
+          throw new Error(layerError)
         }
 
         // Normalise the `target` argument into a list of agent names. `null`

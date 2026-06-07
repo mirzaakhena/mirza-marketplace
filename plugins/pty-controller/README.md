@@ -73,6 +73,7 @@ What's different vs. plain `claude`:
    - `wrapper.heartbeat` — touched every 5 seconds, used by the plugin to check "alive".
    - `wrapper.log` — best-effort log file.
    - `wrapper.current_session_id` — the id of the session currently live in the PTY (used by the telegram plugin to exclude the active session from the `/delete` picker).
+   - `wrapper.current_session_name` — the display name of that session, as far as the wrapper knows it (written on the `/clear`+`sessionName` chain, on `/rename` injections, on `/switch`, and at startup resume; empty file = unnamed). Read by the agent-bus plugin's `agent_status` as the authoritative name when the telegram `last-status.json` is stale.
 
 4. **Raw mode stdin**. The wrapper puts the host terminal into raw mode so keypresses get forwarded straight through. If the wrapper crashes mid-run, your terminal can get stuck in raw mode — recover with `reset` (Unix) or close-and-reopen the window.
 
@@ -93,8 +94,8 @@ The server in [`server.ts`](./server.ts) exposes three tools. Called over the st
 Queue a slash command for the wrapper to inject into the PTY. Can target itself (default) or one/more peer agents.
 
 - **Input**:
-  - `command: string` — starts with `/`. Must match the regex `/^\/[a-z][a-z0-9_:-]{0,63}(\s[\s\S]{0,256})?$/`. Supports bare commands (`/clear`) and namespaced plugin commands (`/telegram:notify-user brief`). The tool **rejects raw text injection** by design — if it's not a structurally valid slash command, it errors.
-  - `target?: string | string[]` — optional. Omitted = target self (current CC session), safe to call autonomously. A single name = a single peer, requires the user to explicitly ask. An array = broadcast to several peers; **destructive commands (`/clear`, `/delete`) are rejected** for array targets as a blast-radius guard.
+  - `command: string` — starts with `/`. Must match the regex `/^\/[a-z][a-z0-9_:-]{0,63}(\s[\s\S]{0,256})?$/`. Supports bare commands (`/clear`) and namespaced plugin commands (`/telegram:notify-user brief`). The tool **rejects raw text injection** by design — if it's not a structurally valid slash command, it errors. It also **rejects telegram-layer commands** (`/new`, `/switch`, `/delete`, `/effort`) — those only exist in the telegram plugin / wrapper layer, so injecting them wedges CC's TUI on an unknown command; the error message names the correct alternative (e.g. `/new` → inject `/clear` then `/rename <name>`, `/switch` → inject `/resume <sessionId>`). See [`slash-guards.ts`](./slash-guards.ts).
+  - `target?: string | string[]` — optional. Omitted = target self (current CC session), safe to call autonomously. A single name = a single peer, requires the user to explicitly ask. An array = broadcast to several peers; the **destructive `/clear` is rejected** for array targets as a blast-radius guard.
 - **Behavior**:
   - **Self path**: check the local wrapper heartbeat → write to `<state>/pending/<uuid>.json` atomically (tmp + rename).
   - **Peer path**: resolve each name in `~/.claude/agent-registry.json`, validate alive (heartbeat <30s), then writeCommand per peer state_dir. Validate all names first before writing a single file — if any name is unknown or offline, fail upfront (no partial dispatch).
@@ -141,7 +142,7 @@ The "fresh session ready" notification is **not the AI's responsibility** — th
 |-----------|--------------------------------------|---------------------------------------------------------------------------------------------|
 | `slash` (default if `type`/`kind` is absent) | `command: string`, optional `sessionName` (for `/clear`), optional `confirmAfterMs` | Write `command` then `\r` (separated by 250ms) to PTY stdin. `confirmAfterMs` (clamped 50–5000ms) sends one extra `\r` after the delay — to commit the confirmation picker of commands like `/effort`. |
 | `prompt`  | `text: string` (already composed by the sender, including the anti-bounce marker) | Type `text` into the PTY as a normal user turn, then submit. Written **in chunks of 100 code points with a 30ms gap** — a single big write on Windows ConPTY overflows the input buffer and the head of the message silently goes missing (only the tail survives). Chunking on code points (not UTF-16 units) so emoji surrogate pairs don't get split. |
-| `switch`  | `sessionId: string`, optional `sessionName` | Inject `/resume <sessionId>` into the PTY, write `current_session_id`, and emit a `session-change` event to the telegram system-outbox after 1 second. |
+| `switch`  | `sessionId: string`, optional `sessionName` | Inject `/resume <sessionId>` into the PTY, write `current_session_id` + `current_session_name`, and emit a `session-change` event to the telegram system-outbox after 1 second. |
 
 Payloads carrying a `from` field (inter-agent messages sent via the `agent-bus` plugin) are subject to a **hop limit**: `hop_count > 5` is dropped — a loop guard between bots. Local messages (no `from`) pass without this check.
 
@@ -153,7 +154,7 @@ If the command just injected is exactly `/clear`, the wrapper enters a special s
 
 1. Snapshot the current list of `.jsonl` sessions in `~/.claude/projects/<encoded-cwd>/`.
 2. Poll every 500ms until a new file appears (= the fresh session is live).
-3. As soon as it's found: write `wrapper.current_session_id`, optionally inject `/rename <sessionName>` if the payload carries a name, then emit a `session-change` event to the telegram system-outbox (the Telegram message is sent by the telegram plugin, with no AI roundtrip).
+3. As soon as it's found: write `wrapper.current_session_id` + `wrapper.current_session_name` (the payload's `sessionName`, or empty when the `/clear` came without a name — never the previous session's name), optionally inject `/rename <sessionName>` if the payload carries a name, then emit a `session-change` event to the telegram system-outbox (the Telegram message is sent by the telegram plugin, with no AI roundtrip).
 
 Pacing between injections: the constants `POST_INJECTION_DELAY_MS = 1000` and `SUBMIT_DELAY_MS = 250`. The second one separates the text write from the trailing `\r` — needed because for namespaced commands (`/telegram:foo`), if the `\r` lands in the same chunk, CC's autocomplete picker swallows it instead of submitting.
 
@@ -175,6 +176,7 @@ Per-project state layout:
 ├── wrapper.heartbeat              # wrapper updates every 5 seconds
 ├── wrapper.pid                    # wrapper PID, second liveness signal (unlinked on clean shutdown)
 ├── wrapper.current_session_id     # the live CC session id
+├── wrapper.current_session_name   # the live CC session's display name ('' = unnamed; read by agent-bus agent_status)
 ├── wrapper.version                # {plugin_version, wrapper_version} written at boot (read by telegram /status)
 └── wrapper.log                    # wrapper log (best-effort)
 ```

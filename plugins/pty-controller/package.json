@@ -1,6 +1,6 @@
 {
   "name": "pty-controller-server",
-  "version": "0.0.24",
+  "version": "0.0.25",
   "description": "MCP server backing the pty-controller Claude Code plugin.",
   "private": true,
   "type": "module",

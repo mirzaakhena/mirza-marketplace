@@ -60,6 +60,7 @@ import { randomUUID } from 'node:crypto'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { promptTextFromPayload, chunkPromptText } from './prompt-inject'
+import { renameArgFromCommand } from './session-name'
 
 // Portable equivalent of __dirname under ES modules. `import.meta.dir` only
 // exists on Bun; the wrapper actually runs under tsx (Node), where we need
@@ -107,6 +108,20 @@ const CLAUDE_PROJECTS_DIR = join(
 // the active session can be excluded from the deletion list.
 const CURRENT_SESSION_FILE = join(STATE_DIR, 'wrapper.current_session_id')
 
+// Companion to wrapper.current_session_id: the live session's display name,
+// as far as the wrapper knows it. Written at every point where the wrapper
+// LEARNS the name — the /clear+sessionName chain (telegram /new), a /rename
+// injection, a /switch payload, and the startup resume path. An empty file
+// means "current session has no (known) name". Consumed by agent-bus
+// peer-status: when telegram's last-status.json is stale (its session_id
+// differs from wrapper.current_session_id), this file is the authoritative
+// session name — last-status only updates while the statusline bridge fires,
+// so a fresh never-active session would otherwise report the OLD name.
+const CURRENT_SESSION_NAME_FILE = join(
+  STATE_DIR,
+  'wrapper.current_session_name',
+)
+
 // Global agent registry shared by all bot peers on this machine.
 // See plugins/agent-bus/registry.ts for the writer-side contract.
 const AGENT_REGISTRY_PATH =
@@ -124,6 +139,20 @@ function writeCurrentSessionId(sid: string): void {
     renameSync(tmp, CURRENT_SESSION_FILE)
   } catch (err) {
     log(`failed to write current_session_id: ${err}`)
+  }
+}
+
+// Null/unknown name is recorded as an empty file (readers treat '' as null).
+// Always overwriting — rather than skipping on null — matters: leaving the
+// previous session's name behind would recreate the staleness bug this file
+// exists to fix.
+function writeCurrentSessionName(name: string | null): void {
+  const tmp = `${CURRENT_SESSION_NAME_FILE}.tmp.${process.pid}`
+  try {
+    writeFileSync(tmp, name ?? '')
+    renameSync(tmp, CURRENT_SESSION_NAME_FILE)
+  } catch (err) {
+    log(`failed to write current_session_name: ${err}`)
   }
 }
 
@@ -230,6 +259,21 @@ function writeTelegramRegistryName(sessionId: string, name: string): void {
     renameSync(tmp, path)
   } catch (err) {
     log(`failed to write telegram registry: ${err}`)
+  }
+}
+
+// Read-side counterpart: resolve a session's label from the telegram
+// registry. Best-effort — missing dir/file/entry all yield null.
+function readTelegramRegistryName(sessionId: string): string | null {
+  const dir = resolveTelegramStateDir()
+  if (!dir) return null
+  try {
+    const obj = JSON.parse(
+      readFileSync(join(dir, 'session-names.json'), 'utf8'),
+    ) as Record<string, { name?: string }>
+    return obj[sessionId]?.name ?? null
+  } catch {
+    return null
   }
 }
 
@@ -620,6 +664,10 @@ const sessionPollInterval = setInterval(() => {
         }`,
       )
       writeCurrentSessionId(sid)
+      // Record the fresh session's name immediately (or clear the previous
+      // one when this /clear came without a name) so peer-status readers
+      // never see the old session's name attached to the new session.
+      writeCurrentSessionName(sessionName ?? null)
       awaitingClearReady = null
       // Pace /rename so CC has time to process it before the system-outbox
       // event fires — the event triggers a Telegram-side "switch to session"
@@ -659,20 +707,8 @@ if (!startupMode.isFirstRun && startupMode.latestSessionId) {
   const sid = startupMode.latestSessionId
   writeCurrentSessionId(sid)
   // Resolve label from telegram registry directly (best-effort).
-  const stateDir = resolveTelegramStateDir()
-  let resolvedName: string | null = null
-  if (stateDir) {
-    try {
-      const path = join(stateDir, 'session-names.json')
-      const obj = JSON.parse(readFileSync(path, 'utf8')) as Record<
-        string,
-        { name: string }
-      >
-      resolvedName = obj[sid]?.name ?? null
-    } catch {
-      /* missing/malformed → null */
-    }
-  }
+  const resolvedName = readTelegramRegistryName(sid)
+  writeCurrentSessionName(resolvedName)
   writeSystemOutbox({
     type: 'session-change',
     sessionId: sid,
@@ -722,6 +758,7 @@ const initialSessionPoll = setInterval(() => {
       }
       if (canRename) {
         writeTelegramRegistryName(sid, 'main session')
+        writeCurrentSessionName('main session')
         injectSlashCommand(`/rename main session`)
         setTimeout(
           () =>
@@ -736,6 +773,7 @@ const initialSessionPoll = setInterval(() => {
         log(
           `"main session" already taken in registry — leaving new session unnamed`,
         )
+        writeCurrentSessionName(null)
         writeSystemOutbox({
           type: 'session-change',
           sessionId: sid,
@@ -819,6 +857,10 @@ async function consumePending(filename: string): Promise<void> {
     }
     log(`injecting "${command}" (id: ${payload.id ?? '?'})`)
     injectSlashCommand(command)
+    // /rename — the wrapper just learned the current session's new name;
+    // mirror it into wrapper.current_session_name for peer-status readers.
+    const renamedTo = renameArgFromCommand(command)
+    if (renamedTo) writeCurrentSessionName(renamedTo)
     // Optional confirm-after: some CC slash commands (e.g. /effort) pop up a
     // confirmation picker with the default option pre-selected. A single \r
     // commits it. If no picker appears, the extra \r is a harmless empty
@@ -880,6 +922,9 @@ async function consumePending(filename: string): Promise<void> {
         ` (id: ${payload.id ?? '?'})`,
     )
     writeCurrentSessionId(sid)
+    // Prefer the name carried in the payload; fall back to the telegram
+    // registry (the payload's sessionName is informational and may be null).
+    writeCurrentSessionName(sessionName ?? readTelegramRegistryName(sid))
     injectSlashCommand(`/resume ${sid}`)
     // Delay matches the post-/clear path so the plugin's session-change
     // handler sees a consistent rhythm and CC has time to fully swap before

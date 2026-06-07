@@ -44,7 +44,7 @@
     },
     {
       "name": "pty-controller",
-      "description": "Programmatically inject slash commands into a running Claude Code session by going through a companion wrapper process (mirza-cc) that hosts CC inside a node-pty pseudo-terminal. Provides the /new slash command (clears the session via PTY) and the pty_send_slash / pty_status MCP tools. Requires the mirza-cc wrapper running — see plugin README. Pairs well with the telegram plugin (the wrapper drops a session-change event into telegram's outbox so the user gets a post-/clear ping; the telegram plugin owns the /notify-user command itself).",
+      "description": "Programmatically inject slash commands into a running Claude Code session by going through a companion wrapper process (mirza-cc) that hosts CC inside a node-pty pseudo-terminal. Provides the /new slash command (clears the session via PTY) and the pty_send_slash / pty_status MCP tools; pty_send_slash rejects telegram-layer commands (/new, /switch, /delete, /effort) with an error naming the correct alternative. The wrapper tracks the live session's id + name in state files for peer plugins. Requires the mirza-cc wrapper running — see plugin README. Pairs well with the telegram plugin (the wrapper drops a session-change event into telegram's outbox so the user gets a post-/clear ping; the telegram plugin owns the /notify-user command itself).",
       "category": "productivity",
       "source": "./plugins/pty-controller"
     },
