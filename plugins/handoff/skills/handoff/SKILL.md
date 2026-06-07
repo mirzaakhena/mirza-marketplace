@@ -27,7 +27,12 @@ Tool yang dipakai: `agent_list`/`agent_status`/`agent_send` (agent-bus),
 | `done-<slug>-<yyyymmddhhmm>` | Arsip session yang sudah diserahkan |
 | nama lain (manual oleh user) | Status **unknown** — bukan ready, jangan dipilih otomatis |
 
-- **READY** (boleh menerima handoff otomatis) = `current_session_name == "idle"` **DAN** (`context_used_percent < 10` **ATAU** `context_used_percent == null`). `null` = session fresh yang belum pernah aktif (statusline belum fire) — itu justru kandidat terbaik, BUKAN error; lolos syarat READY.
+- **READY** (boleh menerima handoff otomatis) = `lifecycle == "idle"` dari
+  `agent_status`. Nilai `lifecycle` lain — `busy`/`resetting`/`transitioning`/
+  `unknown` — semuanya NOT ready. **Fallback** (peer memakai wrapper lama dan
+  `lifecycle` tak tersedia/`null`): pakai heuristik lama
+  `current_session_name == "idle"` **DAN** (`context_used_percent < 10`
+  **ATAU** `context_used_percent == null`). `null` context = session fresh yang belum pernah aktif (statusline belum fire) — itu justru kandidat terbaik, BUKAN error; lolos syarat READY.
 - `<slug>`: kebab-case, ≤6 kata, alfanumerik+hyphen — **sama** dengan slug di filename handoff, supaya arsip session bisa di-trace ke file-nya.
 - Timestamp arsip = format timestamp filename handoff (`yyyymmddhhmm`, waktu lokal).
 
@@ -78,9 +83,11 @@ hanya nama bot + Cancel:
 [bot-02] [bot-03] [bot-04] [bot-06] [❌ Cancel]
 ```
 
-Marka: ✅ READY (§0) · ⛔ sibuk (`task-*`) · ⚠️ nama manual (unknown) ·
-📴 offline. Bot non-ready/offline TETAP bisa dipilih — user pegang kendali;
-marka hanya informasi. Tidak ada peer sama sekali → katakan itu dan tawarkan
+Marka (dari `lifecycle`): ✅ READY (`idle`) · ⛔ sibuk (`busy`) ·
+🔄 transisi (`resetting`/`transitioning`) · ⚠️ nama manual (`unknown`) ·
+📴 offline. (Peer wrapper lama tanpa `lifecycle` → marka dari nama session
+seperti sebelumnya.) Bot non-ready/offline TETAP bisa dipilih — user pegang
+kendali; marka hanya informasi. Tidak ada peer sama sekali → katakan itu dan tawarkan
 hanya `[📄 File only] [❌ Cancel]`.
 
 ## 4. Menulis file handoff (sender)
@@ -180,7 +187,9 @@ Setelah file tertulis → **lapor user (laporan #1):** "file handoff selesai:
 
 ## 5. Protokol kirim (sender)
 
-0. **Designation full-auto?** Guard dulu: cek READY target via `agent_status`. Tidak ready → designation BATAL, beri tahu user, fallback ke §3.
+0. **Designation full-auto?** Guard dulu: cek READY target via `agent_status`
+   (`lifecycle == "idle"`; fallback ke heuristik nama bila `lifecycle` null).
+   Tidak ready → designation BATAL, beri tahu user, fallback ke §3.
 1. `agent_send(target=<R>, payload={kind:"prompt", body:<template di bawah>})`. Target offline → tetap terkirim (antre di inbox); sebutkan itu di laporan #2.
 2. Pasang **one-shot timeout 10 menit** (CronCreate) berlabel "ACK handoff `<slug>`". Tool schedule tak tersedia → lanjut tanpa timeout otomatis, beri tahu user agar menyusulkan manual.
 3. **Lapor user (laporan #2):** "handoff `<slug>` terkirim ke `<R>`, menunggu ACK".
