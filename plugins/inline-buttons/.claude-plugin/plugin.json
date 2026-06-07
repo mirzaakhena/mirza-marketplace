@@ -1,7 +1,7 @@
 {
   "name": "inline-buttons",
-  "description": "Self-audit before every Telegram reply: a reply that asks a question MUST carry inline-keyboard buttons (minimum Yes/No) plus a final '✏️ Explain manually' fallback, so the user answers with one tap. Button labels stay short — options are narrated as a numbered list in the body, buttons are just the numbers. Requires the `telegram` plugin (>= 0.0.9-mirza.0) which exposes the `buttons` parameter on the reply and edit_message tools.",
-  "version": "0.0.8",
+  "description": "Self-audit before every Telegram reply: a reply that asks a question MUST carry inline-keyboard buttons (minimum Yes/No) plus a final '✏️ Explain manually' fallback, so the user answers with one tap. Button labels stay short — options are narrated as a numbered list in the body, buttons are just the numbers, and the body never repeats the button row as text. Requires the `telegram` plugin (>= 0.0.9-mirza.0) which exposes the `buttons` parameter on the reply and edit_message tools.",
+  "version": "0.0.9",
   "author": {
     "name": "Mirza"
   },

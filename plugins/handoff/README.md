@@ -1,65 +1,71 @@
 # handoff
 
-Toolkit for **session handoff** in Claude Code. This plugin captures a running session into a structured markdown file, then reloads it in a new session so context isn't lost every time you start from scratch. Skill-only — no MCP server, no hooks, no channel.
+**Direct bot-to-bot handoff** untuk Claude Code multi-bot. Bot yang sedang
+bekerja menyerahkan estafet ke bot idle secara langsung — file handoff →
+prompt agent-bus → ACK dua arah → self-reset — tanpa mediasi user per
+langkah. User mendapat laporan Telegram di tiap tahap dan bisa interupsi
+kapan pun. Skill-only — tidak ada MCP server, tidak ada hook.
 
-## Slash commands
+> v2 menggantikan model lama dua command (`/handoff` + `/handoff-resume`).
+> `/handoff-resume` DIHAPUS; resume kini terjadi otomatis di bot penerima,
+> atau via bahasa natural ("lanjutkan handoff `<path>`") untuk file-only.
 
-| Command | Function |
+## Slash command
+
+| Command | Fungsi |
 |---|---|
-| `/handoff [optional note]` | Save the current session to a new handoff file in `<repo>/.handoff/`. Free-form arguments go verbatim into Section 9. |
-| `/handoff-resume` | In a new session: read the latest handoff, show a brief summary, wait for confirmation before continuing execution. |
-| `/handoff-resume yes` | Pre-confirmed: the summary is still shown (so you can interrupt if something looks off), but execution continues immediately without waiting for an answer. |
+| `/handoff` | Bare-only (tanpa argumen). Memunculkan inline buttons dua step: pilih mode, lalu pilih bot tujuan. |
 
-`/handoff-resume` confirmation is Telegram-aware: if the `inline-buttons` skill is available in the session, the question "resume this handoff?" is rendered as inline buttons (`✅ Continue / ❌ Start fresh / ✏️ Explain manually`); otherwise it falls back to a plain text confirmation.
+**Step 1 — mode:** `[🚀 Now] [⏭️ After this task] [🏓 Ping pong] [📄 File only] [❌ Cancel]`
 
-## Skills
+- **Now** — handoff sekarang juga.
+- **After this task** — penunjukan one-shot: lanjut kerja, handoff otomatis (full-auto, notifikasi saja) saat task selesai atau threshold context tercapai.
+- **Ping pong** — pasangan tetap dua bot saling estafet; kontrak menular lewat header `Pair` di file handoff.
+- **File only** — tulis file handoff tanpa mengirim ke bot mana pun (use-case lama: berhenti, lanjut kapan-kapan).
 
-| Skill | Used by | Task |
-|---|---|---|
-| `handoff` | `/handoff` | Run the clarity check, generate the 10-section content (chain + plan pointer + commit SHA), write the file to `.handoff/`. |
-| `handoff-resume` | `/handoff-resume` | Find the latest file in `.handoff/`, follow its plan pointer, summarize, ask for user confirmation before executing. |
+**Step 2 — bot:** daftar peer + statusnya (✅ idle / ⛔ sibuk / ⚠️ nama manual / 📴 offline), buttons nama bot.
 
-## Handoff file location
+## Trigger proaktif
 
-```
-<repo-root>/.handoff/<yyyymmddhhmm>-prompt-<title>.md
-```
+Setiap selesai task substansial bot mengecek `agent_status` dirinya:
+model 1M → threshold **35%**, model 200k → **75%** (boleh terlampaui selama
+task masih berjalan). Lewat threshold → bot menawarkan `[🤝 Handoff]
+[▶️ Lanjutkan]`, atau langsung jalan bila ada designation aktif.
 
-- **Repo root** = result of `git rev-parse --show-toplevel`. If it's not a git repo, fall back to `pwd` with a warning.
-- **Timestamp** = local time, format `YYYYMMDDHHMM` (no seconds).
-- **Title** = kebab-case, ≤6 words, derived from the session content (or from the `/handoff` argument).
-- If filenames collide within the same minute, append `-2`, `-3`, etc.
-- Lexical sort of filenames = chronological sort, so `/handoff-resume` just grabs the last entry.
+## Konvensi nama session
 
-The file content uses a **10-section template** with the spine **Done → In Progress → Blockers → Next**: Project Context, Completed, In Progress / Unfinished, Blockers, Next Session Plan, Brainstorming Choices, Artifacts, Anti-Patterns, User Notes, Other Notes. The header also carries two pointers:
+`idle` (standby, READY bila ctx <10%) → `task-<slug>` (sedang kerja) →
+`done-<slug>-<yyyymmddhhmm>` (arsip) → `/new idle`. Nama manual oleh user =
+unknown (tidak pernah dipilih otomatis). Konvensi ini sekaligus menjadi
+detektor idle antar bot via `agent_status`.
 
-- **Continued from** — path of the previous handoff if this session is a continuation (append-only chain; each file is immutable, never re-edited).
-- **Related plan** — path of a multi-phase plan file (e.g. from `superpowers:writing-plans`) + position `phase N/total`. That plan is the **source of truth** for the roadmap; the handoff just points to a position, it doesn't duplicate the checklist. Cross-session progress is read from the plan, not reconstructed from the handoff chain.
+## Protokol estafet
 
-Artifacts also record the **HEAD SHA** (anchor), the session's **commit range**, and **per-phase** SHAs if the plan is multi-phase — so "what was done" can be verified via `git diff`, not just from prose. Full details are in `skills/handoff/SKILL.md` — the header fields + section structure are a contract between the two skills, don't change them unilaterally.
+1. Sender: clarity check → **update README repo kerja** → tulis file `<repo-kerja>/.handoff/<yyyymmddhhmm>-prompt-<slug>.md` → lapor user.
+2. Sender → receiver via `agent_send`: path file **eksplisit** (bukan "latest"), repo kerja, instruksi ACK dua arah + gate adaptif.
+3. Timeout ACK 10 menit (one-shot cron). ACK masuk → cancel cron → lapor user → self-reset (`/rename done-…` → `/new idle`). Timeout → tawarkan `[Kirim ulang] [Pilih bot lain] [❌ Cancel]`.
+4. Receiver: baca file → `/rename task-<slug>` → ACK ke sender + lapor user → eksekusi (kalau section Blocker terisi → tanya user dulu). Sibuk → tolak dengan penjelasan.
 
-## Workflow
+`/delete hard all` (bersih-bersih arsip session) tetap manual oleh user.
 
-1. **End of session:** run `/handoff`. Optionally add a note: `/handoff focus on the login bug tomorrow`.
-   - If the next-step direction isn't clear yet (e.g. the session was just exploration, or got left mid-debug), the skill **brainstorms first** — it won't write the file until the user picks an explicit direction. This is intentional — a vague handoff is worse than no handoff.
-2. **New session in the same repo:** run `/handoff-resume`.
-   - The skill loads the latest handoff, reads the linked plan file (if any), shows a summary (including the "in progress" state & blockers), then **waits for confirmation** ("yes"/"continue") before executing Section 5. The user can redirect ("change course, today I want X") — the handoff still serves as background context. The `Continued from` chain is only traversed if context is actually lacking — by default the latest handoff + plan is enough.
+## File handoff
 
-## Note on `.gitignore`
+Header: `Repo kerja` (absolute), `Dari → Ke`, `Pair`, `Lanjutan dari`
+(chain append-only), `Plan terkait` (fase N/total). 10 section: Tujuan
+Handoff, Konteks Proyek, SUDAH, SEDANG, Blocker (+kenapa), AKAN,
+**Referensi** (tabel `path → kapan dibaca`; playbook wajib; tidak menulis
+ulang isi referensi), Keputusan Brainstorming, Anti-Patterns, Catatan Lain.
+Lihat `skills/handoff/template.md`.
 
-The plugin **doesn't touch** your `.gitignore`. Whether you commit the `.handoff/` folder or ignore it — that's your call. Some people like to commit it (a greppable journal), others prefer to ignore it (privacy / noise).
+## Dependensi runtime
 
-## Install
+Plugin lain yang dipakai skill ini saat beraksi: `agent-bus` (≥0.0.6),
+`pty-controller` (self-target slash), `telegram` + `inline-buttons`
+(buttons), schedule one-shot harness untuk timeout. Tanpa mereka skill
+terdegradasi (mis. tanpa timeout otomatis) tapi tidak merusak.
 
-See the [root README](../../README.md#installation-in-claude-code) for full steps to add this marketplace. Once the marketplace is added:
+## Spec & rationale
 
-```
-/plugin install handoff@mirza-marketplace
-/reload-plugins
-```
-
-Skill-only plugin, so there's no need to enable MCP or set a dev flag — it just works as soon as it's installed.
-
-## Author
-
-- **Mirza** — [@mirzaakhena](https://github.com/mirzaakhena)
+`docs/superpowers/specs/2026-06-06-handoff-v2-direct-handoff-design.md`
+(di root repo marketplace ini) — keputusan desain, edge cases, acceptance
+criteria.

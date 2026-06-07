@@ -220,6 +220,7 @@ Commands the user types **in the Telegram chat** (not in CC). DM-only — silent
 | `/delete all` / `/delete hard all` | Bulk version: a single confirm button shows the session count; the active session is always excluded. |
 | `/rename <name>` | Rename the active session. The name must be unique; renaming to its own name = no-op. |
 | `/effort [level]` | No argument: a 6-level picker (low/medium/high/xhigh/max/auto, the active level marked with `→`). With an argument: apply directly. Session-scoped — `/new` resets it to the CC default. |
+| `/handoff` | **Not a meta-command** — the only menu entry forwarded to the AI: the text `/handoff` enters the CC session and the AI runs the handoff v2 skill (mode buttons Now / After this task / Ping pong / File only → pick the target bot → relay via agent-bus + two-way ACK). Requires the `handoff` plugin ≥ 0.0.9 loaded in the session. |
 
 `/new`/`/switch`/`/delete`/`/rename`/`/effort` require the `pty-controller` wrapper to be running (heartbeat at `<project>/.claude/channels/pty-controller/wrapper.heartbeat` < 30s). Without the wrapper, the command is replied to with an error explanation — not forwarded to the AI.
 

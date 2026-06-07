@@ -1,216 +1,260 @@
 ---
 name: handoff
-description: Use when the user invokes /handoff to capture the current session so it can be resumed cleanly later. Runs a clarity check first; if next-step direction is unclear, the AI brainstorms with the user before writing the file. Final output is a markdown file in <repo>/.handoff/ following a structured 10-section template that records done / in-progress / blockers / next-step, chains to the previous handoff, and pins the related plan and commit SHAs.
+description: Direct bot-to-bot work relay. Use when (1) the user invokes /handoff, (2) an inbound agent-bus prompt assigns you a handoff file to continue, (3) you just finished a substantive task — mandatory self context check via agent_status, or (4) an active handoff designation (after-this-task / ping-pong) reaches its trigger.
 ---
 
-# Handoff: Capturing a Session for the Next One
+# Handoff — Direct Bot-to-Bot Work Relay
 
-## When this skill runs
+Satu skill, dua peran: **sender** (bot yang menyerahkan estafet) dan
+**receiver** (bot yang menerima estafet), plus satu kewajiban proaktif yang
+berlaku untuk semua bot setiap saat (cek context, §1).
 
-You were invoked by the `/handoff` slash command. The user's argument string (free-form notes, possibly empty) was passed to you. Your job is to:
+Identitasmu (**nama bot**) = basename project dir-mu (mis.
+`C:\Users\Mirza\workspace\bot-05` → `bot-05`). Bot TIDAK PERNAH bekerja di
+workspace-nya sendiri — **repo kerja** selalu repo proyek lain; semua path di
+protokol ini absolut.
 
-1. Run the **clarity check** below.
-2. If unclear, brainstorm with the user until clear.
-3. Generate the handoff file content following the 10-section template.
-4. Write the file into the repo's `.handoff/` directory.
-5. Confirm to the user with the file path.
+Tool yang dipakai: `agent_list`/`agent_status`/`agent_send` (agent-bus),
+`pty_send_slash` **self-target saja** (pty-controller), `reply` + skill
+`inline-buttons` (telegram), CronCreate/CronDelete one-shot (ACK timeout).
 
-## Step 1 — Clarity check (REQUIRED, before any writing)
+## 0. Konvensi nama session (kontrak antar bot)
 
-Before writing any file, decide whether the **next-session direction** is clear enough that someone reading the handoff cold could act on it.
+| Nama session | Arti |
+|---|---|
+| `idle` | Standby, siap menerima estafet |
+| `task-<slug>` | Sedang mengerjakan task `<slug>` |
+| `done-<slug>-<yyyymmddhhmm>` | Arsip session yang sudah diserahkan |
+| nama lain (manual oleh user) | Status **unknown** — bukan ready, jangan dipilih otomatis |
 
-**Default: assume UNCLEAR.** Brainstorm with the user unless **all three** of these positive signals hold:
+- **READY** (boleh menerima handoff otomatis) = `current_session_name == "idle"` **DAN** `context_used_percent < 10`.
+- `<slug>`: kebab-case, ≤6 kata, alfanumerik+hyphen — **sama** dengan slug di filename handoff, supaya arsip session bisa di-trace ke file-nya.
+- Timestamp arsip = format timestamp filename handoff (`yyyymmddhhmm`, waktu lokal).
 
-1. **You can name the next step in one sentence without hedging.** ("Implement Option B for SWE-bench" passes; "continue working on X" or "address open items" does not.)
-2. **You can name the file, branch, or spec where it lives.** A concrete artifact — `docs/superpowers/specs/2026-04-27-handoff-design.md`, branch `add-swe-bench`, or "the failing test in `app/auth_test.py`" — exists and you can cite it.
-3. **The user confirmed this is the next step in this session.** Either through an explicit choice ("go with Option B", "I pick A"), an approved spec/plan committed during the session, or a direct instruction. AI-inferred "probably they want X" does NOT count.
+## 1. Kewajiban proaktif — cek context tiap selesai task
 
-If any of the three is missing, the direction is unclear.
+Setiap kamu **menyelesaikan task substansial**, WAJIB cek
+`agent_status(<nama-bot-sendiri>)`:
 
-**Common situations where clarity FAILS even though something feels in progress:**
+- Field `model` mengandung `"1M"` → threshold **35%**; selain itu → **75%**.
+- Threshold boleh terlampaui **selama sebuah task masih berjalan** — pengecekan hanya di batas selesai-task, jangan menginterupsi pekerjaan.
 
-- The session was exploratory Q&A with no decision recorded.
-- Multiple plausible next steps exist and the user has not chosen between them.
-- The session ended mid-edit or mid-debug; the breakage exists but isn't characterised.
-- The session was a long debug with a fix not yet validated by the user.
-- The session is blocked on something external ("waiting for review", "credentials needed").
-- You yourself feel uncertain about how to interpret what comes next.
+Jika `context_used_percent` ≥ threshold:
 
-**If unclear: brainstorm before writing.** Use the same discipline as the `superpowers:brainstorming` skill: one question at a time, multiple-choice when possible, lead with a recommendation. Do NOT write the file until the user's answers leave you with a clear next step. Examples of brainstorm questions:
+- **Ada designation aktif** (§2 mode After this task / Ping pong) → langsung jalankan handoff full-auto (§5), user cukup dinotifikasi.
+- **Tidak ada designation** → tawarkan via inline buttons: `[🤝 Handoff] [▶️ Lanjutkan]` (label tawaran ini boleh mengikuti bahasa user). User pilih Handoff → lanjut ke pemilihan bot (§3). User pilih Lanjutkan → JANGAN tawarkan lagi sampai batas selesai-task berikutnya (no spam).
 
-- "Do you want to move on to Option B next session, or is there another direction you're considering?"
-- "This session was mostly exploration with no explicit decision yet. Before I write the handoff, which is the right 'next step'? (a) merge and deploy feature X, (b) continue with bug Y, (c) pause and decide a new direction next session."
-- "This session was left with a failing test. Are you confident there's enough info for a handoff, or should we first summarise the state of the bug before writing the file?"
+## 2. `/handoff` — Step 1: pilih mode
 
-Once the user answers, proceed to Step 2.
+Tampilkan buttons (label **English, fixed**, jangan diterjemahkan):
 
-## Step 2 — Generate the title
+```
+[🚀 Now] [⏭️ After this task] [🏓 Ping pong] [📄 File only] [❌ Cancel]
+```
 
-The title goes in the filename: `<yyyymmddhhmm>-prompt-<title>.md`.
+- **🚀 Now** — handoff sekarang juga: §3 (pilih bot) → §4 (tulis file) → §5 (kirim).
+- **⏭️ After this task** — designation **one-shot**: §3 (pilih target), lalu lanjut bekerja; saat trigger §1 tercapai ATAU task selesai → full-auto §4–§5 tanpa bertanya lagi. Habis dipakai sekali.
+- **🏓 Ping pong** — designation **pair**: seperti After this task, tapi kontraknya menular — tulis `**Pair:** <bot-A> ⇄ <bot-B>` di header file handoff; receiver mewarisinya (§6 langkah 8).
+- **📄 File only** — tulis file handoff (§4) TANPA mengirim ke bot mana pun. Use-case: berhenti kerja, lanjut kapan-kapan; resume dengan menyuruh bot mana pun "lanjutkan handoff `<path>`" via bahasa natural.
+- **❌ Cancel** — batal, tidak terjadi apa-apa.
 
-Rules:
+Perintah bahasa natural "nanti handoff ke bot-02" ≡ After this task dengan
+target `bot-02` (skip kedua step buttons). "handoff ke bot-02 sekarang" ≡ Now
+dengan target `bot-02` (skip step 2).
 
-- Lowercase, kebab-case, ≤6 words, alphanumerics and hyphens only.
-- Inferred from what the session was about, biased toward what is most useful for the next session ("swe-bench-add-deploy" beats "session-2026-04-27").
-- If the user's `/handoff` argument contains a clear topic phrase, you may use it as the title hint (slugify it). Otherwise infer from the session.
+## 3. Step 2: pilih bot
 
-Examples:
+Panggil `agent_list()`, lalu `agent_status(<peer>)` untuk tiap peer.
+Narasikan status di body pesan sebagai bullet **TANPA penomoran**; buttons
+hanya nama bot + Cancel:
 
-- A session that finished SWE-bench browse-only and is teeing up Option B → `swe-bench-add-deploy-prep`
-- A session debugging a flaky test → `flaky-checkout-test-fix`
-- A session reviewing PRs without changes → `pr-review-2026-04-28` (date in title is acceptable when the session has no clear topic)
+```
+- bot-02 — idle ✅ (ctx 3%)
+- bot-03 — task-m2m-benchmark ⛔ sibuk
+- bot-04 — eksperimen-x ⚠️ nama manual
+- bot-06 — 📴 offline (pesan akan antre di inbox)
 
-Validate the title before writing. If it has more than 6 words or contains illegal characters, trim and clean it.
+[bot-02] [bot-03] [bot-04] [bot-06] [❌ Cancel]
+```
 
-## Step 3 — Compute the filename
+Marka: ✅ READY (§0) · ⛔ sibuk (`task-*`) · ⚠️ nama manual (unknown) ·
+📴 offline. Bot non-ready/offline TETAP bisa dipilih — user pegang kendali;
+marka hanya informasi. Tidak ada peer sama sekali → katakan itu dan tawarkan
+hanya `[📄 File only] [❌ Cancel]`.
 
-- Timestamp: local time, format `YYYYMMDDHHMM` (no seconds).
-- Path: `<repo-root>/.handoff/<yyyymmddhhmm>-prompt-<title>.md`.
-- **Repo root** is the nearest ancestor of the current working directory that contains a `.git/` directory. Use `git rev-parse --show-toplevel`. If that fails (not in a git repo), fall back to `pwd` and warn the user once in your final message.
-- Create `.handoff/` if it does not exist.
-- If the exact filename already exists (rare: same minute, same title), append `-2`, `-3`, ... before `.md` until you find a free name.
+## 4. Menulis file handoff (sender)
 
-## Step 4 — Determine the chain pointer and plan pointer
+### Pra-syarat — urutan wajib
 
-Two header fields connect this handoff to a wider context. Fill them **before** generating the body.
+1. **Clarity check.** Tulis file hanya jika ketiganya terpenuhi: (a) next-step bisa kamu nyatakan satu kalimat tanpa hedging; (b) ada artefak konkret yang bisa dikutip (file/branch/spec/plan); (c) user mengkonfirmasi arah itu di session ini (pilihan eksplisit / spec yang di-approve / instruksi langsung — inferensi AI TIDAK dihitung). Gagal → brainstorm dulu dengan user (satu pertanyaan per pesan, multiple-choice via buttons, sertai rekomendasi).
+2. **Mandat README.** Update README yang relevan SEBELUM menulis file handoff: root README repo kerja + README sub-folder yang tersentuh pekerjaan session ini. Handoff yang dikirim dengan README basi = handoff cacat.
 
-- **Continued from (chain).** If this session continues work from an earlier handoff, link it. Find the lex-last existing file in `.handoff/` (the previous handoff, before the file you are about to write) and cite its filename. Only link when this session is genuinely a continuation of that thread — if the topic is unrelated new work, write `—`. **Do not guess a relationship.** This forms an append-only chain: each handoff points back one hop, never edits a prior file. To reconstruct history, a reader walks the chain backward — so the link must be accurate.
-- **Related plan (roadmap pointer).** If the work is driven by a multi-phase plan (e.g. one produced by `superpowers:writing-plans` under `docs/superpowers/plans/...`), cite the plan's path **and** the current position (`phase 3/7`). The plan file is the single source of truth for the phase checklist and overall roadmap — the handoff only records *where in it you are*. Do NOT duplicate the plan's checklist into the handoff. If the work is not plan-driven, write `—`.
+### Lokasi & penamaan
 
-## Step 5 — Generate the content
+- Path: `<repo-kerja>/.handoff/<yyyymmddhhmm>-prompt-<slug>.md`.
+- `<slug>`: turunkan dari topik task session ini, bias ke apa yang paling berguna bagi bot berikutnya (mis. `swe-bench-add-deploy`, bukan `session-2026-06-06`); kebab-case ≤6 kata, alfanumerik+hyphen — validasi dulu, lalu pakai slug yang SAMA ini untuk filename, `task-<slug>`, `done-<slug>-…`, dan "ACK handoff <slug>".
+- Repo kerja = `git rev-parse --show-toplevel` dari direktori kerja; bukan git repo → fallback `pwd` + beri tahu user sekali.
+- Timestamp waktu lokal `YYYYMMDDHHMM`; collision → suffix `-2`, `-3`, … sebelum `.md`. Buat `.handoff/` bila belum ada.
 
-> **CONTRACT:** the header fields and the section numbers/headings below are part of the cross-skill contract with `/handoff-resume`. Do **not** add, remove, or renumber sections, or rename header fields, without updating `skills/handoff-resume/SKILL.md` in lockstep. Section *content* is free-form; section *structure* is shared.
+### Template (generate langsung; JANGAN load `template.md` dari disk)
 
-Use the 10-section template below. Every section is present even if its content is `—` (so `/handoff-resume` can parse predictably).
-
-The spine is **Done (Sec 2) → In Progress (Sec 3) → Blockers (Sec 4) → Next (Sec 5)** — fill these so a fresh agent immediately understands what is done, what is mid-flight, what is stuck, and what comes next.
-
-Use `git log`, `git status`, `git diff --stat`, the conversation, and any TodoWrite/superpowers state visible in the session to fill the sections. Be specific — cite commit SHAs, file paths, and document paths.
-
-**Template (the AI generates this; do not load `template.md` from disk — it exists for human reference only):**
+Semua section selalu ada; isi yang kosong ditulis `—`.
 
 ```markdown
 # {Title in Title Case}
 
 **Date:** YYYY-MM-DD HH:MM ({TZ})
-**Repo:** {basename of `git rev-parse --show-toplevel`, or basename of `pwd` if not in git}
+**Repo kerja:** {ABSOLUTE path repo proyek, mis. C:\Users\Mirza\workspace\some-project}
 **Branch:** {git branch} (HEAD: {short SHA})
-**Generated by:** /handoff [{verbatim user argument, or blank}]
-**Continued from:** `.handoff/{previous handoff filename}` (or `—` if this is the first handoff / the work is unrelated)
-**Related plan:** `path/to/plan.md` — phase {N}/{total} (or `—` if not multi-phase work)
+**Dari → Ke:** {bot-pengirim} → {bot-penerima | —}
+**Pair:** {bot-A ⇄ bot-B | —}
+**Lanjutan dari:** `.handoff/{file sebelumnya}` | —
+**Plan terkait:** `path/to/plan.md` — fase {N}/{total} | —
 
 ---
 
-## 1. Project Context
-2-4 sentences about the project in general so a new session understands the
-domain without having to read a long CLAUDE.md. Mention: domain, main stack,
-what lives in this repo.
+## 1. Tujuan Handoff
+Kenapa handoff ini dibuat (threshold context / task selesai tapi ada
+lanjutan / perintah user) + goal estafet dalam satu kalimat.
 
-## 2. Completed in This Session  (DONE)
-- Short bullets with an action verb + concrete object.
-- Include commit SHA, file path, or spec/plan references inline.
-- Mark whether it's verified/merged or just written (an important distinction).
-- More specific > longer. Avoid narrative.
+## 2. Konteks Proyek
+2-4 kalimat: domain, stack utama, ada apa di repo — supaya bot baru paham
+tanpa baca CLAUDE.md panjang lebar.
 
-## 3. In Progress / Unfinished  (IN PROGRESS)
-> Mid-flight state that is NOT captured in git or in the chain — this is what
-> most often gets lost. Write it as accurately as you can.
+## 3. Yang Sudah Selesai (SUDAH)
+- Action verb + objek konkret; commit SHA / path inline.
+- Tandai: sudah diverifikasi/merged vs baru ditulis.
 
-- Work that is half-done: which file is being edited, how far it got, what
-  hasn't been committed yet (WIP / uncommitted changes).
-- If you stopped mid-phase: which phase, which step within it.
-- Mental context that needs restoring ("was investigating why test X fails,
-  latest hypothesis: ...").
+## 4. Yang Sedang Dikerjakan (SEDANG)
+- State mid-flight yang tidak terekam git: file setengah diedit, sampai
+  mana, apa yang belum di-commit, hipotesis debug terakhir.
+(`—` kalau berhenti di titik bersih.)
 
-(If nothing is left hanging — the session ended at a clean point — write `—`.)
+## 5. Blocker
+- Apa yang menghambat, **kenapa itu menjadi blocker**, dan apa yang
+  dibutuhkan untuk membukanya. Internal (butuh keputusan user) vs eksternal
+  (nunggu review/credential/API).
+(`—` kalau tidak ada. Section ini ≠ `—` → receiver wajib tanya user dulu.)
 
-## 4. Blockers
-- What's preventing progress, internal (needs a user decision / design not
-  finalised) or external (waiting for review, needs credentials/access, API down).
-- For each blocker: what is needed to unblock it.
+## 6. Yang Akan Dikerjakan (AKAN)
+**Goal:** {satu kalimat}
+- Langkah konkret berikutnya.
+**Starting point:** branch {X}; baca dulu {path}.
 
-(If there are no blockers, write `—`.)
+## 7. Referensi
+| Referensi | Kapan dibaca |
+|---|---|
+| `~/.claude/agent-playbook/PLAYBOOK.md` | Di awal, sebelum kerja substantif |
+| `{plan/tasks lintas-session}` | Di awal — roadmap source of truth, posisi fase {N}/{total} |
+| `{spec}` | Saat butuh rationale keputusan desain |
+| `{doc troubleshoot}` | HANYA saat menemui {kondisi/error tertentu} |
 
-## 5. Next Session Plan  (NEXT)
-**Goal:** {one-sentence}
+Aturan: playbook WAJIB ada; plan/tasks WAJIB bila pekerjaan bagian proses
+panjang terencana; JANGAN tulis ulang isi referensi — tunjuk + kondisi baca;
+setiap baris wajib punya kolom "Kapan dibaca" (di awal vs kondisional).
 
-- Step / area / decision needing follow-up
-- ...
-
-**Starting point for the new session:**
-- Branch: {current branch, or instruction like "rebase add-foo onto main first"}
-- Existing spec/plan to read first: {path} (see also "Related plan" in the header)
-
-## 6. Brainstorming Choices
-| Question | User's Choice | Consequence |
+## 8. Keputusan User Lewat Brainstorming
+| Pertanyaan | Pilihan User | Konsekuensi |
 |---|---|---|
-| {short question} | {user's answer} | {impact on the code or next step} |
+(`—` kalau tidak ada.)
 
-(If no brainstorming choices were made in this session, write `—` instead of an empty table.)
+## 9. Anti-Patterns / Lessons (CARRY FORWARD)
+- ❌ JANGAN … (alasan) / ✅ LAKUKAN … (alasan)
+(`—` kalau tidak ada.)
 
-## 7. Artifacts
-- **Spec:** `path/to/spec.md` (or `—`)
-- **Plan:** `path/to/plan.md` (or `—`)
-- **HEAD at handoff:** `{short SHA}` (anchor — same as the header)
-- **Commits this session:** {N} commits (`{base-SHA}..{head-SHA}`) (or `—`)
-- **Per-phase (if multi-phase plan):** "phase 2 finished at `{SHA}`, phase 3 in-progress" — so each phase can be diffed/reverted. (or `—`)
-- **New files:** ...
-- **Changed files:** ...
-- **Deleted files:** ...
-
-To compute the commit range, use `git log --oneline <merge-base>..HEAD`
-where `<merge-base>` is the closest ancestor of HEAD and the default
-branch (usually `main` or `master`). If you cannot determine a sensible
-base, list the commits made during this session by checking `git reflog`
-or by counting commits with timestamps inside the session window.
-
-> Note: SHAs can become orphaned if history is rebased/squashed. Branch +
-> commit message help re-locate them if that happens.
-
-## 8. Anti-Patterns / Lessons Learned (CARRY FORWARD)
-> These rules apply to subsequent development too.
-
-- ❌ DO NOT ... (reason / context of the incident this session, if any)
-- ✅ DO ... (reason)
-
-(If no carry-forward lessons emerged, write `—`.)
-
-## 9. User Notes
-{verbatim from /handoff <extra info>, or `—` if argument was empty}
-
-## 10. Other Notes for the Next Session
-- Environment, tooling, host IP, credentials notes
-- Open questions you noticed but the user hasn't decided yet
-- Anything else surprising or hard to rediscover from code alone
-- Time-sensitive items (deadlines, freeze windows)
+## 10. Catatan Lain
+- Artefak: HEAD SHA (anchor), commit range sesi (`base..head`), files
+  baru/diubah/dihapus, SHA per-fase kalau plan multi-fase.
+- Environment/tooling/credential notes, open questions, deadline.
+- Catatan tambahan user (dari percakapan — command tidak menerima argumen).
 ```
 
-## Step 6 — Write the file
+Sifat file: **append-only chain** — jangan pernah edit handoff lama;
+`Lanjutan dari` hanya diisi kalau benar-benar kontinuasi (jangan mengarang);
+jangan duplikasi checklist plan (plan = source of truth, handoff hanya
+mencatat posisi).
 
-Use the Write tool with the absolute path computed in Step 3. Do not modify any other file (do not auto-edit `.gitignore`). In particular, **do not edit the previous handoff** that you linked in "Continued from" — the chain is append-only.
+Setelah file tertulis → **lapor user (laporan #1):** "file handoff selesai:
+`<absolute path>`".
 
-## Step 7 — Confirm to the user
+## 5. Protokol kirim (sender)
 
-Reply briefly:
+0. **Designation full-auto?** Guard dulu: cek READY target via `agent_status`. Tidak ready → designation BATAL, beri tahu user, fallback ke §3.
+1. `agent_send(target=<R>, payload={kind:"prompt", body:<template di bawah>})`. Target offline → tetap terkirim (antre di inbox); sebutkan itu di laporan #2.
+2. Pasang **one-shot timeout 10 menit** (CronCreate) berlabel "ACK handoff `<slug>`". Tool schedule tak tersedia → lanjut tanpa timeout otomatis, beri tahu user agar menyusulkan manual.
+3. **Lapor user (laporan #2):** "handoff `<slug>` terkirim ke `<R>`, menunggu ACK".
+4. **ACK diterima** → urutan WAJIB, jangan dibalik:
+   1. Cancel cron timeout (CronDelete) — kalau tidak, cron akan fire ke session baru yang kosong dan membingungkan;
+   2. **Lapor user (laporan #3):** "ACK diterima dari `<R>`, estafet resmi berpindah — saya reset";
+   3. Self-reset via `pty_send_slash` TANPA target: `/rename done-<slug>-<yyyymmddhhmm>` lalu `/new idle`.
+5. **Timeout fire tanpa ACK** → lapor user + buttons `[Kirim ulang] [Pilih bot lain] [❌ Cancel]`. JANGAN self-reset — estafet belum berpindah.
+6. **R menolak (sibuk)** → lapor user penjelasan R + kembali ke §3.
+7. **ACK datang terlambat** (setelah timeout): belum ada keputusan user → lanjutkan langkah 4 normal. User sudah memindahkan estafet ke bot lain → laporkan konflik ke user, JANGAN kirim apa pun ke R.
 
-> "Handoff saved at `<absolute path>`. To continue in a new session, run `/handoff-resume` from the same repo directory."
+### Template body `agent_send` (isi placeholder `<...>`)
 
-If you linked a previous handoff or a plan, mention it in one line ("continued from handoff X, phase 3/7 of plan Y"). If you fell back to `pwd` because not in a git repo, add a one-line warning before the confirmation.
+Substitusi SEMUA placeholder `<...>` dengan nilai literal SEBELUM mengirim —
+termasuk `<slug>` di langkah 3-4: receiver tidak bisa merekonstruksinya
+sendiri.
+
+```
+[HANDOFF] dari <S> — lanjutkan estafet pekerjaan.
+
+1. Baca file handoff: <ABSOLUTE-PATH-FILE> — file INI persis; JANGAN cari
+   "latest" di .handoff/ (bisa ada handoff paralel dari bot lain).
+2. Repo kerja: <ABSOLUTE-PATH-REPO>. Kerjakan semuanya terhadap path ini.
+3. Rename session-mu: pty_send_slash "/rename task-<slug>" (self, tanpa target).
+4. ACK dua arah, WAJIB: (a) agent_send balik ke <S>, hop_count=<N+1>, body
+   "ACK handoff <slug>"; (b) lapor ke user via telegram bahwa kamu menerima
+   handoff <slug> dari <S> + ringkasan next-step yang akan kamu kerjakan.
+5. Baca referensi bertanda "di awal" (playbook + plan terkait). Referensi
+   kondisional dibaca hanya saat kondisinya terjadi.
+6. Gate adaptif: section Blocker ≠ "—" → TANYA user dulu (inline buttons)
+   sebelum eksekusi; selain itu langsung eksekusi section AKAN.
+7. Kamu sedang TIDAK idle / sedang mengerjakan sesuatu → JANGAN terima:
+   balas ke <S> via agent_send (hop_count=<N+1>) dengan penjelasan singkat,
+   lalu lanjutkan pekerjaanmu sendiri.
+8. Header Pair ≠ "—" → kamu mewarisi designation ping-pong: saat trigger-mu
+   sendiri tercapai (task selesai / threshold context, lihat skill handoff
+   §1), handoff balik ke partner secara full-auto.
+```
+
+### Legalitas terhadap aturan agent-bus (patuhi, jangan tafsirkan ulang)
+
+- `agent_send` oleh S sah karena pilihan user di buttons / designation yang user setujui di muka ADALAH permintaan eksplisit user.
+- ACK dari R sah terhadap anti-bounce rule: prompt S eksplisit meminta report-back (pengecualian #2), dan memakai `hop_count` naik.
+- Self-reset memakai `pty_send_slash` self-target — kategori safe/autonomous; JANGAN pernah mengirim `/clear`/`/delete` ke peer dari skill ini.
+
+## 6. Sisi receiver
+
+Kamu menerima prompt `[HANDOFF] dari <S>` via agent-bus → jalankan
+langkah-langkah di prompt itu persis. Ringkasan kewajiban:
+
+baca file yang DITUNJUK (bukan latest) → `/rename task-<slug>` →
+ACK dua arah (balik ke S + lapor user) → baca referensi "di awal" →
+gate adaptif (Blocker ≠ `—` → tanya user dulu) → eksekusi AKAN →
+warisi Pair bila ada. Sibuk → tolak dengan penjelasan (prompt langkah 7).
+
+Larangan receiver: jangan edit/hapus file handoff atau plan; jangan walk
+seluruh chain `Lanjutan dari` (satu hop, hanya bila konteks kurang); jangan
+balas apa pun ke S selain ACK/penolakan yang diminta.
 
 ## Edge cases
 
-- **Argument provided but session has no substantive content.** The clarity check covers this: the AI brainstorms first, e.g. "This session doesn't have substantive content to hand off yet. Are you sure you still want to create the file? Or is there context I haven't captured?"
-- **Filename collision.** Append `-2`, `-3`, ... before `.md`.
-- **`.handoff/` already exists with files.** Fine — just add a new file. Consider whether the latest one is the parent for "Continued from".
-- **User runs `/handoff` again immediately.** Clarity check will likely pass (the previous handoff is the latest "next step"); produce a new file with a slightly newer timestamp, linking the previous one as "Continued from" if it is the same thread.
-- **Repo with no commits yet.** Use `pwd` as the root, warn once. Commit fields become `—`.
+- **Dua bot membuat handoff paralel di repo yang sama** — aman: path file eksplisit di prompt; collision filename ditangani suffix.
+- **Bot yang di-designate keburu dipakai user** — guard §5.0 membatalkan designation, fallback pilihan manual.
+- **Plan terkait hilang / branch berbeda / SHA yatim** — jangan gagal; catat di laporan/summary dan lanjutkan dari file handoff.
+- **`/handoff` diketik dengan argumen** — abaikan argumennya, jalankan flow buttons normal.
+- **Threshold tercapai berulang & user selalu Lanjutkan** — tawarkan lagi hanya di batas selesai-task berikutnya.
+- **Bukan git repo** — fallback `pwd` + beri tahu user sekali (file `.handoff/` tetap dibuat di situ).
 
-## Anti-patterns to avoid
+## Anti-patterns
 
-- ❌ Do NOT silently overwrite an existing handoff file. Always create a new file with the timestamp/title naming. If a collision occurs, suffix with `-2`, `-3`.
-- ❌ Do NOT edit a previous handoff to "update" it. Handoffs are immutable journal entries; chain forward with a new file instead.
-- ❌ Do NOT duplicate the plan's phase checklist into the handoff. Point to the plan file ("Related plan") and record only the current position. The plan is the source of truth.
-- ❌ Do NOT fabricate a "Continued from" link. Only link a real continuation.
-- ❌ Do NOT auto-edit `.gitignore`. The README explains the trade-off; the user owns that choice.
-- ❌ Do NOT pad the handoff with filler. Every bullet should be actionable or referential.
-- ❌ Do NOT write a handoff file when the clarity check fails. Brainstorm first.
+- ❌ Self-reset SEBELUM ACK diterima, atau tanpa cancel cron lebih dulu.
+- ❌ Menyuruh receiver membaca "latest handoff" alih-alih path eksplisit.
+- ❌ Mengedit handoff lama / menduplikasi checklist plan ke dalam file.
+- ❌ Melewatkan mandat README atau clarity check sebelum menulis file.
+- ❌ Menawarkan handoff berkali-kali di tengah task yang sama (spam).
+- ❌ `agent_send` tanpa basis permintaan/persetujuan user yang bisa ditunjuk.
+- ❌ Receiver auto-bounce: membalas agent-bus di luar ACK/penolakan yang diminta prompt.
+- ❌ Mengirim `/clear`/`/delete` ke peer; reset hanya self-target.

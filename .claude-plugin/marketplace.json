@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "telegram",
-      "description": "Custom Telegram channel for Claude Code. Forked from the official Telegram plugin, with per-project state, a registry-driven slash menu, /context that shows context window plus session info plus effort level, /version that lists installed plugin and wrapper versions (telegram, pty-controller, mirza-cc, agent-bus — all resolved dynamically), /delete (safe-default soft delete; /delete hard for permanent), Prev/Next pagination across the session pickers, /effort picker to set Claude's reasoning depth from a phone, quoted-message context forwarded inline to the agent, and get_message_by_id MCP tool for fetching older messages (text + attachments) by ID.",
+      "description": "Custom Telegram channel for Claude Code. Forked from the official Telegram plugin, with per-project state, a registry-driven slash menu, /context that shows context window plus session info plus effort level, /version that lists installed plugin and wrapper versions (telegram, pty-controller, mirza-cc, agent-bus — all resolved dynamically), /delete (safe-default soft delete; /delete hard for permanent), Prev/Next pagination across the session pickers, /effort picker to set Claude's reasoning depth from a phone, /handoff in the paired slash menu (forwarded to the AI's handoff-v2 skill), quoted-message context forwarded inline to the agent, and get_message_by_id MCP tool for fetching older messages (text + attachments) by ID.",
       "category": "productivity",
       "source": "./plugins/telegram"
     },
@@ -20,7 +20,7 @@
     },
     {
       "name": "inline-buttons",
-      "description": "Behavioral skill that forces a self-audit before every Telegram reply: replies that ask a question MUST carry inline-keyboard buttons — minimum Yes/No plus a final manual-fallback button — so the user answers with one tap. Labels stay short: options are narrated as a numbered list in the body, buttons are just the numbers. Requires telegram >= 0.0.9-mirza.0.",
+      "description": "Behavioral skill that forces a self-audit before every Telegram reply: replies that ask a question MUST carry inline-keyboard buttons — minimum Yes/No plus a final manual-fallback button — so the user answers with one tap. Labels stay short: options are narrated as a numbered list in the body, buttons are just the numbers, and the body never repeats the button row as text. Requires telegram >= 0.0.9-mirza.0.",
       "category": "productivity",
       "source": "./plugins/inline-buttons"
     },
@@ -38,7 +38,7 @@
     },
     {
       "name": "handoff",
-      "description": "Session handoff toolkit. /handoff captures the current session into a structured 10-section markdown file in <repo>/.handoff/; /handoff-resume loads the latest handoff in a new session, summarises it, and proceeds after user confirmation.",
+      "description": "Direct bot-to-bot handoff. /handoff (inline buttons: Now / After this task / Ping pong / File only) writes a structured handoff file and relays it to an idle peer via agent-bus with two-way ACK; sender self-resets to an idle session. Proactive context-threshold offer (1M→35%, 200k→75%). /handoff-resume removed.",
       "category": "productivity",
       "source": "./plugins/handoff"
     },

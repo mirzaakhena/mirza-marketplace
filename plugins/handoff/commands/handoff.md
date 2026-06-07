@@ -1,12 +1,7 @@
 ---
-description: Generate a handoff markdown file capturing the current session so the next session can resume cleanly. Brainstorms first if next-step direction is unclear.
-argument-hint: "[optional free-form notes]"
+description: Direct bot-to-bot handoff — serahkan estafet pekerjaan ke bot lain lewat inline buttons (Now / After this task / Ping pong / File only).
 ---
 
-You are producing a session handoff for the user. Invoke the `handoff` skill — it contains the full procedure: clarity-check rules, content structure, filename format, and write logic. Follow its instructions exactly.
+You were invoked by the `/handoff` slash command. This command takes NO arguments — if any text follows it, ignore that text entirely (do not treat it as a target bot or as notes).
 
-The user's argument string (everything after `/handoff`, or empty) is captured below as `$ARGUMENTS`. Pass it through to the skill as the "extra notes from user" input — it goes verbatim into Section 9 ("User Notes") of the handoff file.
-
-If `$ARGUMENTS` is empty, that is fine. The skill still runs the clarity check and produces the file. The argument is purely supplementary context.
-
-$ARGUMENTS
+Invoke the `handoff` skill and follow its **sender flow starting from the mode-selection buttons** (skill section "Step 1 — pilih mode"). The skill contains the full procedure: mode buttons, bot picker, handoff-file template, agent-bus send + ACK protocol, timeout, and self-reset.

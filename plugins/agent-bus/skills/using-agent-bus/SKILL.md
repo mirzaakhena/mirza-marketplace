@@ -1,6 +1,6 @@
 ---
 name: using-agent-bus
-description: Use whenever the user asks you to coordinate with, message, or relay a command to another bot agent on the same machine (e.g. "tell bot-02 to run /handoff-resume", "reset bot-03 and rename its session to sprint-2", "list which bots are online"). Provides the rules for calling the `agent_list` / `agent_status` / `agent_send` MCP tools safely.
+description: Use whenever the user asks you to coordinate with, message, or relay a command to another bot agent on the same machine (e.g. "tell bot-02 to run /daily-report", "reset bot-03 and rename its session to sprint-2", "list which bots are online"). Provides the rules for calling the `agent_list` / `agent_status` / `agent_send` MCP tools safely.
 ---
 
 # Using agent-bus
@@ -16,9 +16,9 @@ This skill is loaded whenever the user is coordinating multiple bot peers via th
 ## When to use `agent_send`
 
 You may call `agent_send` only when the user has explicitly said something like:
-- *"tell bot-02 to run /handoff-resume"*
+- *"tell bot-02 to run /daily-report"*
 - *"reset bot-03 with session name X"*
-- *"create a handoff for bot-04, then ask it to run /handoff-resume"*
+- *"ask bot-04 to continue the handoff `.handoff/<file>.md` in repo X"* — a natural-language prompt relay (handoff v2 resume goes via prompt, not a slash command)
 - *"switch bot-05 to session Y"*
 - *"ask bot-03 to audit the test suite"* — a natural-language prompt to a peer
 
@@ -111,7 +111,7 @@ User wants a single peer to run a specific command:
 
 ```
 1. agent_status("bot-02")                  # confirm it's the right peer + check context state
-2. agent_send(target="bot-02", payload={ kind:"slash", command:"/handoff-resume" })
+2. agent_send(target="bot-02", payload={ kind:"slash", command:"/daily-report" })
 3. report message id + correlation id back to user; explain that the peer will execute on its next turn boundary
 ```
 

@@ -99,6 +99,14 @@ export const COMMANDS: CommandSpec[] = [
       'Shows the installed versions of the telegram plugin (from its plugin.json), the pty-controller plugin and mirza-cc wrapper (self-reported by the running wrapper), and the agent-bus plugin (from Claude Code\'s installed-plugins registry). Entries whose source is unavailable are omitted — e.g. pty-controller/mirza-cc lines disappear when the wrapper is not running.',
   },
   {
+    name: 'handoff',
+    audience: 'paired',
+    menuHint: 'Relay work to another bot (handoff v2)',
+    helpSummary: 'Relay current work to another bot via inline buttons',
+    helpDetail:
+      'Direct bot-to-bot handoff (plugin handoff >= 0.0.9). Unlike /new or /switch, this is NOT a meta-command: the text "/handoff" is forwarded to the Claude session, where the AI runs the handoff skill. The skill walks you through two button steps: mode (🚀 Now / ⏭️ After this task / 🏓 Ping pong / 📄 File only / ❌ Cancel), then the target bot (with idle/busy status). It then writes a handoff file in the work repo, relays it to the target via agent-bus with a two-way ACK, and self-resets this bot\'s session to "idle". Requires: a session where the handoff skill is loaded, the agent-bus plugin, and the mirza-cc wrapper running on both bots.',
+  },
+  {
     name: 'help',
     audience: 'both',
     menuHint: 'Bot intro and command list',

@@ -37,7 +37,7 @@ A peer is considered **online** if its last heartbeat is < 30 seconds.
 
 ## Skill `using-agent-bus`
 
-Triggers when the user asks for inter-bot coordination ("tell bot-02 to run /handoff-resume", "list which bots are online"). The key rules:
+Triggers when the user asks for inter-bot coordination ("tell bot-02 to run /daily-report", "list which bots are online"). The key rules:
 
 - `agent_send` **must not** be called on the AI's own initiative — only on explicit user request, or when an incoming prompt explicitly asks for a report back.
 - **Anti-bounce:** an incoming message from agent-bus is terminal context, not a trigger for back-and-forth. Default: do the work, report to your own Telegram, STOP. This prevents infinite loops between bots.

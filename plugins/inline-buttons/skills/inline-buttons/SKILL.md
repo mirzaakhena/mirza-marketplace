@@ -75,6 +75,11 @@ Layout rules:
   fit). 9+ options: continue on a second row of numbers.
 - The manual button is its own last row, as always.
 - Detail/context lives ONLY in the body's numbered list — never in labels.
+- **The body NEVER repeats the button row as text.** Do NOT end the message
+  with `[1] [2]`, `[✅ Yes] [❌ No]`, or any textual rendition of the
+  buttons — Telegram renders the keyboard itself, right under the message.
+  The body ends at the numbered list (or the question). A trailing `[1] [2]`
+  is pure duplication and confuses the user.
 - Yes/no confirmations may keep short word labels (`✅ Yes` / `❌ No`);
   anything longer than ~15 chars per label → switch to numbered narration.
 - Never put two long-labelled buttons side by side in one row.
@@ -183,6 +188,9 @@ Buttons:
 ❌ Buttons without the `✏️ Explain manually` last row (#2 violation).
 ❌ Long descriptive button labels ("✅ Execute all (default)") — they
    truncate on phones; narrate in body, label with a number.
+❌ Repeating the buttons as text at the end of the body ("... 2. Not
+   yet\n\n[1] [2]") — the keyboard renders below the message; the trailing
+   `[1] [2]` is duplication. Body stops after the numbered list/question.
 ❌ Two long-labelled buttons squeezed into one row.
 ❌ "OK?" + [Yes][No] with an ambiguous body — spell out the action.
 ✅ Classify QUESTION vs ANSWER before every send.
@@ -204,6 +212,6 @@ through the options..."), research, then `edit_message`/new reply with buttons.
 | Situation | Buttons |
 |---|---|
 | "Continue?" / "OK?" / "Agree?" | ✅ Yes / ❌ No + ✏️ manual |
-| Menu of options | numbered list in body, `[1][2][3]…` one row + ✏️ manual |
+| Menu of options | numbered list in body; buttons = one row of `1` `2` `3`… + ✏️ manual (body does NOT repeat the row as text) |
 | Open-ended question | seed options (numbered) or yes/no + ✏️ manual |
 | Reply is pure ANSWER (no ask) | no buttons |

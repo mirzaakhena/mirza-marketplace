@@ -9,7 +9,7 @@ import {
 } from './commands-registry'
 
 describe('COMMANDS registry', () => {
-  test('contains exactly the 9 commands in the spec, in display order (paired first, then help, then default-only)', () => {
+  test('contains exactly the 10 commands in the spec, in display order (paired first, then help, then default-only)', () => {
     expect(COMMANDS.map(c => c.name)).toEqual([
       'context',
       'switch',
@@ -18,6 +18,7 @@ describe('COMMANDS registry', () => {
       'delete',
       'effort',
       'version',
+      'handoff',
       'help',
       'start',
     ])
@@ -55,7 +56,7 @@ describe('COMMANDS registry', () => {
 })
 
 describe('commandsFor', () => {
-  test('paired excludes /start and includes the 8 paired+both commands in registry order', () => {
+  test('paired excludes /start and includes the 9 paired+both commands in registry order', () => {
     expect(commandsFor('paired').map(c => c.name)).toEqual([
       'context',
       'switch',
@@ -64,6 +65,7 @@ describe('commandsFor', () => {
       'delete',
       'effort',
       'version',
+      'handoff',
       'help',
     ])
   })
@@ -84,6 +86,7 @@ describe('toSetMyCommandsPayload', () => {
       'delete',
       'effort',
       'version',
+      'handoff',
       'help',
     ])
     expect(payload[0]).toEqual({
@@ -105,7 +108,7 @@ describe('toSetMyCommandsPayload', () => {
 })
 
 describe('renderHelpList', () => {
-  test('paired list omits /start and contains the 8 paired commands', () => {
+  test('paired list omits /start and contains the 9 paired commands', () => {
     const out = renderHelpList('paired')
     expect(out.startsWith('This bot bridges Telegram')).toBe(true)
     expect(out).not.toContain('/start')

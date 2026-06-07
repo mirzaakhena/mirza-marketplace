@@ -1,15 +1,16 @@
 {
   "name": "handoff",
-  "description": "Session handoff toolkit. Ships /handoff (capture the current session into a structured 10-section markdown file in <repo>/.handoff/ — tracking done/in-progress/blockers/next-step, chaining to the previous handoff, and pinning the related plan + commit SHAs) and /handoff-resume (load the latest handoff in a new session, follow its plan pointer, summarise it, and proceed after user confirmation).",
-  "version": "0.0.10",
+  "description": "Direct bot-to-bot handoff. /handoff (bare-only, inline buttons: Now / After this task / Ping pong / File only) relays work to an idle peer: handoff file in <repo>/.handoff/ → agent-bus prompt with explicit file path → two-way ACK → sender self-reset (rename done-…, /new idle). Proactive context-threshold trigger (1M→35%, 200k→75%). Replaces /handoff-resume.",
+  "version": "0.0.11",
   "author": {
     "name": "Mirza"
   },
   "keywords": [
     "handoff",
     "session",
-    "resume",
-    "context",
+    "relay",
+    "agent-bus",
+    "bot-to-bot",
     "skill",
     "command"
   ]

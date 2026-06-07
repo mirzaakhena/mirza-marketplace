@@ -38,13 +38,14 @@ If the user taps `manual`, reply with a short follow-up (no buttons) inviting fr
 
 Phone screens truncate long button labels — the user sees "Execute all (def..." and loses context. So:
 
-- **Button labels must be short.** For a menu of choices: options are narrated as a numbered list in the message BODY, and the buttons are just numbers (`[1][2][3][4]`) on a **single row** (9+ options spill onto the next number row).
+- **Button labels must be short.** For a menu of choices: options are narrated as a numbered list in the message BODY, and the buttons are just numbers (labels `1`, `2`, `3`, `4`) on a **single row** (9+ options spill onto the next number row).
 - Detail/context lives only in the numbered list in the body — never in the label.
+- **The body NEVER repeats the button row as text.** Do not end the message with `[1] [2]` or `[✅ Yes] [❌ No]` — Telegram renders the keyboard right below the message; the body text stops at the numbered list/question.
 - Yes/no confirmations may keep short word labels (`✅ Yes` / `❌ No`); a label > ~15 characters → move it to the numbered narration.
 - No two long-labeled buttons side by side on one row.
 - The manual button stays on its own last row.
 
-Example:
+Example — the body text you send:
 
 ```
 explanatory narrative ...
@@ -54,7 +55,11 @@ Options:
 2. option two
 3. option three
 4. option four
+```
 
+…and the keyboard Telegram RENDERS below it (not part of the body text):
+
+```
 [1] [2] [3] [4]
 [✏️ Explain manually]
 ```
