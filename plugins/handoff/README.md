@@ -20,7 +20,7 @@ kapan pun. Skill-only — tidak ada MCP server, tidak ada hook.
 
 - **Now** — handoff sekarang juga.
 - **After this task** — penunjukan one-shot: lanjut kerja, handoff otomatis (full-auto, notifikasi saja) saat task selesai atau threshold context tercapai.
-- **Ping pong** — pasangan tetap dua bot saling estafet; kontrak menular lewat header `Pair` di file handoff.
+- **Ping pong** — pasangan tetap dua bot saling estafet; kontrak menular lewat header `Pair` di file handoff. Berakhir saat goal estafet tuntas (bot terakhir lapor user) atau user membatalkan ("stop ping pong").
 - **File only** — tulis file handoff tanpa mengirim ke bot mana pun (use-case lama: berhenti, lanjut kapan-kapan).
 
 **Step 2 — bot:** daftar peer + statusnya (✅ idle / ⛔ sibuk / ⚠️ nama manual / 📴 offline), buttons nama bot.
@@ -46,7 +46,7 @@ detektor idle antar bot via `agent_status`.
 1. Sender: clarity check → **update README repo kerja** → tulis file `<repo-kerja>/.handoff/<yyyymmddhhmm>-prompt-<slug>.md` → lapor user.
 2. Sender → receiver via `agent_send`: path file **eksplisit** (bukan "latest"), repo kerja, instruksi ACK dua arah + gate adaptif.
 3. Timeout ACK 10 menit (one-shot cron). ACK masuk → cancel cron → lapor user → self-reset (`/rename done-…` → `/clear` → `/rename idle`; `/new` hanya ada di lapisan telegram, bukan command Claude Code). Timeout → tawarkan `[Kirim ulang] [Pilih bot lain] [❌ Cancel]`.
-4. Receiver: baca file → `/rename task-<slug>` → ACK ke sender + lapor user → eksekusi (kalau section Blocker terisi → tanya user dulu). Sibuk → tolak dengan penjelasan.
+4. Receiver: guard sibuk PALING DULU (sibuk → tolak dengan penjelasan; kecuali user memilihnya secara eksplisit → ACK + tunda sampai task berjalan selesai) → baca file → `/rename task-<slug>` → ACK ke sender + lapor user → eksekusi (kalau section Blocker terisi → tanya user dulu).
 
 `/delete hard all` (bersih-bersih arsip session) tetap manual oleh user.
 

@@ -60,7 +60,7 @@ Tampilkan buttons (label **English, fixed**, jangan diterjemahkan):
 
 - **🚀 Now** — handoff sekarang juga: §3 (pilih bot) → §4 (tulis file) → §5 (kirim).
 - **⏭️ After this task** — designation **one-shot**: §3 (pilih target), lalu lanjut bekerja; saat trigger §1 tercapai ATAU task selesai → full-auto §4–§5 tanpa bertanya lagi. Habis dipakai sekali.
-- **🏓 Ping pong** — designation **pair**: seperti After this task, tapi kontraknya menular — tulis `**Pair:** <bot-A> ⇄ <bot-B>` di header file handoff; receiver mewarisinya (§6 langkah 8).
+- **🏓 Ping pong** — designation **pair**: seperti After this task, tapi kontraknya menular — tulis `**Pair:** <bot-A> ⇄ <bot-B>` di header file handoff; receiver mewarisinya (prompt §5 langkah 8). Pair BERAKHIR bila goal estafet tuntas (tidak ada AKAN lanjutan → bot terakhir lapor user, JANGAN handoff balik) atau user membatalkan (mis. "stop ping pong").
 - **📄 File only** — tulis file handoff (§4) TANPA mengirim ke bot mana pun. Use-case: berhenti kerja, lanjut kapan-kapan; resume dengan menyuruh bot mana pun "lanjutkan handoff `<path>`" via bahasa natural.
 - **❌ Cancel** — batal, tidak terjadi apa-apa.
 
@@ -87,14 +87,16 @@ Marka (dari `lifecycle`): ✅ READY (`idle`) · ⛔ sibuk (`busy`) ·
 🔄 transisi (`resetting`/`transitioning`) · ⚠️ nama manual (`unknown`) ·
 📴 offline. (Peer wrapper lama tanpa `lifecycle` → marka dari nama session
 seperti sebelumnya.) Bot non-ready/offline TETAP bisa dipilih — user pegang
-kendali; marka hanya informasi. Tidak ada peer sama sekali → katakan itu dan tawarkan
-hanya `[📄 File only] [❌ Cancel]`.
+kendali; marka hanya informasi. Bila user memilih bot non-ready, sertakan
+baris pilihan-eksplisit di body prompt §5 (lihat catatan template) — tanpa
+baris itu guard receiver akan menolak karena sibuk. Tidak ada peer sama
+sekali → katakan itu dan tawarkan hanya `[📄 File only] [❌ Cancel]`.
 
 ## 4. Menulis file handoff (sender)
 
 ### Pra-syarat — urutan wajib
 
-1. **Clarity check.** Tulis file hanya jika ketiganya terpenuhi: (a) next-step bisa kamu nyatakan satu kalimat tanpa hedging; (b) ada artefak konkret yang bisa dikutip (file/branch/spec/plan); (c) user mengkonfirmasi arah itu di session ini (pilihan eksplisit / spec yang di-approve / instruksi langsung — inferensi AI TIDAK dihitung). Gagal → brainstorm dulu dengan user (satu pertanyaan per pesan, multiple-choice via buttons, sertai rekomendasi).
+1. **Clarity check.** Tulis file hanya jika ketiganya terpenuhi: (a) next-step bisa kamu nyatakan satu kalimat tanpa hedging; (b) ada artefak konkret yang bisa dikutip (file/branch/spec/plan); (c) arah itu terkonfirmasi — oleh user di session ini (pilihan eksplisit / spec yang di-approve / instruksi langsung), ATAU, khusus estafet berantai, terdokumentasi di file handoff/plan yang sedang dilanjutkan session ini; inferensi AI murni TIDAK dihitung. Gagal → brainstorm dulu dengan user (satu pertanyaan per pesan, multiple-choice via buttons, sertai rekomendasi).
 2. **Mandat README.** Update README yang relevan SEBELUM menulis file handoff: root README repo kerja + README sub-folder yang tersentuh pekerjaan session ini. Handoff yang dikirim dengan README basi = handoff cacat.
 
 ### Lokasi & penamaan
@@ -209,30 +211,41 @@ Setelah file tertulis → **lapor user (laporan #1):** "file handoff selesai:
 ### Template body `agent_send` (isi placeholder `<...>`)
 
 Substitusi SEMUA placeholder `<...>` dengan nilai literal SEBELUM mengirim —
-termasuk `<slug>` di langkah 3-4: receiver tidak bisa merekonstruksinya
+termasuk `<slug>` di langkah 4-5: receiver tidak bisa merekonstruksinya
 sendiri.
 
 ```
 [HANDOFF] dari <S> — lanjutkan estafet pekerjaan.
 
-1. Baca file handoff: <ABSOLUTE-PATH-FILE> — file INI persis; JANGAN cari
+1. Guard — putuskan ini SEBELUM langkah lain: kamu sedang TIDAK idle /
+   sedang mengerjakan sesuatu → JANGAN terima: balas ke <S> via agent_send
+   (hop_count=<N+1>) dengan penjelasan singkat, lalu lanjutkan pekerjaanmu
+   sendiri; abaikan langkah di bawah. PENGECUALIAN: ada baris
+   pilihan-eksplisit user di bawah daftar ini → jangan tolak: ACK ke <S> +
+   lapor user bahwa kamu menunda, selesaikan task berjalanmu, baru jalankan
+   langkah 2-8.
+2. Baca file handoff: <ABSOLUTE-PATH-FILE> — file INI persis; JANGAN cari
    "latest" di .handoff/ (bisa ada handoff paralel dari bot lain).
-2. Repo kerja: <ABSOLUTE-PATH-REPO>. Kerjakan semuanya terhadap path ini.
-3. Rename session-mu: pty_send_slash "/rename task-<slug>" (self, tanpa target).
-4. ACK dua arah, WAJIB: (a) agent_send balik ke <S>, hop_count=<N+1>, body
+3. Repo kerja: <ABSOLUTE-PATH-REPO>. Kerjakan semuanya terhadap path ini.
+4. Rename session-mu: pty_send_slash "/rename task-<slug>" (self, tanpa target).
+5. ACK dua arah, WAJIB: (a) agent_send balik ke <S>, hop_count=<N+1>, body
    "ACK handoff <slug>"; (b) lapor ke user via telegram bahwa kamu menerima
    handoff <slug> dari <S> + ringkasan next-step yang akan kamu kerjakan.
-5. Baca referensi bertanda "di awal" (playbook + plan terkait). Referensi
+6. Baca referensi bertanda "di awal" (playbook + plan terkait). Referensi
    kondisional dibaca hanya saat kondisinya terjadi.
-6. Gate adaptif: section Blocker ≠ "—" → TANYA user dulu (inline buttons)
+7. Gate adaptif: section Blocker ≠ "—" → TANYA user dulu (inline buttons)
    sebelum eksekusi; selain itu langsung eksekusi section AKAN.
-7. Kamu sedang TIDAK idle / sedang mengerjakan sesuatu → JANGAN terima:
-   balas ke <S> via agent_send (hop_count=<N+1>) dengan penjelasan singkat,
-   lalu lanjutkan pekerjaanmu sendiri.
 8. Header Pair ≠ "—" → kamu mewarisi designation ping-pong: saat trigger-mu
    sendiri tercapai (task selesai / threshold context, lihat skill handoff
-   §1), handoff balik ke partner secara full-auto.
+   §1), handoff balik ke partner secara full-auto — KECUALI goal estafet
+   sudah tuntas (tidak ada AKAN lanjutan): lapor user, JANGAN handoff balik.
 ```
+
+**Baris pilihan-eksplisit** — tambahkan sebagai baris terakhir body (setelah
+langkah 8) HANYA bila user memilih bot non-ready secara sadar di §3:
+`User memilihmu secara eksplisit meski statusmu sibuk — jangan tolak via
+langkah 1; tunda sampai task berjalanmu selesai.` Designation full-auto
+(§5.0) TIDAK pernah memakai baris ini — non-ready = batal.
 
 ### Legalitas terhadap aturan agent-bus (patuhi, jangan tafsirkan ulang)
 
@@ -245,10 +258,12 @@ sendiri.
 Kamu menerima prompt `[HANDOFF] dari <S>` via agent-bus → jalankan
 langkah-langkah di prompt itu persis. Ringkasan kewajiban:
 
-baca file yang DITUNJUK (bukan latest) → `/rename task-<slug>` →
-ACK dua arah (balik ke S + lapor user) → baca referensi "di awal" →
-gate adaptif (Blocker ≠ `—` → tanya user dulu) → eksekusi AKAN →
-warisi Pair bila ada. Sibuk → tolak dengan penjelasan (prompt langkah 7).
+guard sibuk PALING DULU (prompt langkah 1) → baca file yang DITUNJUK
+(bukan latest) → `/rename task-<slug>` → ACK dua arah (balik ke S + lapor
+user) → baca referensi "di awal" → gate adaptif (Blocker ≠ `—` → tanya
+user dulu) → eksekusi AKAN → warisi Pair bila ada. Sibuk → tolak dengan
+penjelasan; kecuali prompt memuat baris pilihan-eksplisit user → ACK +
+tunda, proses setelah task berjalanmu selesai.
 
 Larangan receiver: jangan edit/hapus file handoff atau plan; jangan walk
 seluruh chain `Lanjutan dari` (satu hop, hanya bila konteks kurang); jangan

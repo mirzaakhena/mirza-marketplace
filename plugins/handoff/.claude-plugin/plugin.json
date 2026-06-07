@@ -1,7 +1,7 @@
 {
   "name": "handoff",
   "description": "Direct bot-to-bot handoff. /handoff (bare-only, inline buttons: Now / After this task / Ping pong / File only) relays work to an idle peer: handoff file in <repo>/.handoff/ → agent-bus prompt with explicit file path → two-way ACK → sender self-reset (rename done-… → /clear → /rename idle). Proactive context-threshold trigger via agent_status context_window_size (>=1M tokens→35%, else→75%; model-string fallback). READY accepts null context (fresh session). Replaces /handoff-resume.",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "author": {
     "name": "Mirza"
   },
