@@ -155,3 +155,77 @@ describe('peer-status: readPeerSessionInfo', () => {
     expect(readPeerSessionInfo(projectDir).current_session_id).toBe('wrapper-sid')
   })
 })
+
+function writeState(projectDir: string, state: object) {
+  writeFileSync(
+    join(projectDir, '.claude', 'channels', 'pty-controller', 'wrapper.state.json'),
+    JSON.stringify(state),
+  )
+}
+
+describe('peer-status: wrapper.state.json precedence', () => {
+  let projectDir: string
+  beforeEach(() => {
+    projectDir = mkdtempSync(join(tmpdir(), 'peer-state-'))
+    mkdirSync(join(projectDir, '.claude', 'channels', 'telegram'), { recursive: true })
+    mkdirSync(join(projectDir, '.claude', 'channels', 'pty-controller'), { recursive: true })
+  })
+  afterEach(() => rmSync(projectDir, { recursive: true, force: true }))
+
+  test('THE BUG: same session_id, stale last-status name, state says idle → returns idle + null ctx', () => {
+    writeState(projectDir, { session_id: 'e23f460f', session_name: 'idle', lifecycle: 'idle', seq: 5, updated_at_ms: 1 })
+    writeFileSync(
+      join(projectDir, '.claude', 'channels', 'telegram', 'last-status.json'),
+      JSON.stringify({ payload: { session_id: 'e23f460f', session_name: 'done-todolist-pingpong-202606071256', context_window: { used_percentage: 88 } } }),
+    )
+    const info = readPeerSessionInfo(projectDir)
+    expect(info.current_session_name).toBe('idle')
+    expect(info.lifecycle).toBe('idle')
+    expect(info.context_used_percent).toBe(null)
+  })
+
+  test('lifecycle busy + id match → telemetry trusted', () => {
+    writeState(projectDir, { session_id: 's1', session_name: 'task-x', lifecycle: 'busy', seq: 2, updated_at_ms: 1 })
+    writeFileSync(
+      join(projectDir, '.claude', 'channels', 'telegram', 'last-status.json'),
+      JSON.stringify({ payload: { session_id: 's1', context_window: { used_percentage: 42, context_window_size: 1000000 }, model: { display_name: 'Opus 4.8' } } }),
+    )
+    const info = readPeerSessionInfo(projectDir)
+    expect(info.lifecycle).toBe('busy')
+    expect(info.context_used_percent).toBe(42)
+    expect(info.context_window_size).toBe(1000000)
+    expect(info.model).toBe('Opus 4.8')
+  })
+
+  test('lifecycle resetting → telemetry nulled even if id matches', () => {
+    writeState(projectDir, { session_id: 's1', session_name: 'done-x-1', lifecycle: 'resetting', seq: 3, updated_at_ms: 1 })
+    writeFileSync(
+      join(projectDir, '.claude', 'channels', 'telegram', 'last-status.json'),
+      JSON.stringify({ payload: { session_id: 's1', context_window: { used_percentage: 70 } } }),
+    )
+    const info = readPeerSessionInfo(projectDir)
+    expect(info.lifecycle).toBe('resetting')
+    expect(info.context_used_percent).toBe(null)
+  })
+
+  test('lifecycle unknown + id MISMATCH → telemetry nulled', () => {
+    writeState(projectDir, { session_id: 'fresh', session_name: 'foo', lifecycle: 'unknown', seq: 1, updated_at_ms: 1 })
+    writeFileSync(
+      join(projectDir, '.claude', 'channels', 'telegram', 'last-status.json'),
+      JSON.stringify({ payload: { session_id: 'old', context_window: { used_percentage: 99 } } }),
+    )
+    const info = readPeerSessionInfo(projectDir)
+    expect(info.current_session_id).toBe('fresh')
+    expect(info.context_used_percent).toBe(null)
+  })
+
+  test('no state.json → legacy behavior (lifecycle null)', () => {
+    writeFileSync(
+      join(projectDir, '.claude', 'channels', 'pty-controller', 'wrapper.current_session_id'),
+      'abc-123',
+    )
+    const info = readPeerSessionInfo(projectDir)
+    expect(info.current_session_id).toBe('abc-123')
+    expect(info.lifecycle).toBe(null)
+  })
+})
