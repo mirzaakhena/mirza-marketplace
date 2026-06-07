@@ -161,7 +161,22 @@ bot force-pushed a squashed history from an older base and the plugin
 updater recloned the directory. Full post-mortem + rationale:
 `docs/SOP-git-multi-agent.md` in the mirza-marketplace repo.
 
-The rules, in priority order:
+**Three-copy doctrine (user decision, MANDATORY).** The marketplace repo
+lives in three places with rigid roles:
+
+- **(a) `workspace/mirza-marketplace`** — the CANONICAL working repo, the
+  ONLY place to edit and commit (parallel work via worktrees, Rule 1).
+- **(b) `~/.claude/plugins/marketplaces/**`** — Claude Code's internal
+  updater copy. **READ-ONLY** — it can be deleted + recloned at any time
+  without warning. NEVER edit or commit there; sync only with
+  `git pull --ff-only`.
+- **(c) `~/.claude/plugins/cache/**`** — per-version builds. Never edit.
+
+**Mechanical enforcement:** before ANY commit, run
+`git rev-parse --show-toplevel` — if the path is under
+`~/.claude/plugins/`, STOP and move to `workspace/mirza-marketplace`.
+
+The remaining rules, in priority order:
 
 1. **Push to origin IMMEDIATELY after every release commit** in a shared
    repo. Verify mechanically: `git status -sb` shows
@@ -170,18 +185,14 @@ The rules, in priority order:
    without ALL of: `git log origin/main..main` checked in EVERY clone
    that might exist, explicit user confirmation, and cross-bot
    coordination.
-3. **`~/.claude/plugins/marketplaces/<x>` belongs to the updater** — it
-   can be recloned wholesale at any time. Treat it as push-through:
-   commit → push → done. Never stockpile commits or untracked files there.
-4. **`~/.claude/plugins/cache/` is the release-recovery source.** Cache
+3. **`~/.claude/plugins/cache/` is the release-recovery source.** Cache
    holding a version HIGHER than the workspace plugin.json is a red flag
    of unpushed releases — investigate before bumping past it. Dirs
    stamped `.orphaned_at` are GC candidates; copy them to safety before
    recovering from them.
-5. **Worktrees for parallel work in the same repo** (Rule 1 still
-   applies). For long-running work, prefer a separate clone in your
-   workspace — a worktree of the marketplaces dir dies with its parent
-   on reclone.
+4. **Worktrees for parallel work in the same repo** (Rule 1 still
+   applies) — created from the canonical workspace repo, never from the
+   marketplaces copy (it dies with its parent on reclone).
 
 ## Quick checklist (per substantive task)
 
@@ -189,6 +200,7 @@ The rules, in priority order:
 - [ ] Isolation needed? → worktree, not branch-switch
 - [ ] Heavy steps delegated to subagents; main loop kept responsive
 - [ ] Commits carry `Agent: <bot-name>` trailer
+- [ ] Before any commit: `git rev-parse --show-toplevel` NOT under `~/.claude/plugins/` (else STOP → workspace/mirza-marketplace)
 - [ ] Shared repo? → every release commit pushed (`git status -sb` not ahead)
 - [ ] Triggered from a channel? → final answer went through `reply`
 - [ ] New durable lesson learned? → append to the playbook

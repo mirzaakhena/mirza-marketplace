@@ -1,5 +1,17 @@
 # mirza-marketplace — Notes for AI assistants
 
+## 🛑 STOP — check WHERE you are before editing anything
+
+Run `git rev-parse --show-toplevel` first. If the path is under
+`~/.claude/plugins/` (e.g. `~/.claude/plugins/marketplaces/mirza-marketplace`),
+you are in **Claude Code's internal updater copy** — it is **READ-ONLY** and
+can be deleted + recloned at any moment without warning (this wiped ~25
+unpushed commits on 2026-06-07). **DO NOT edit or commit here.** Move to the
+canonical working repo `C:\Users\Mirza\workspace\mirza-marketplace` (parallel
+work via git worktrees), and sync this copy only with `git pull --ff-only`.
+The third copy, `~/.claude/plugins/cache/**`, holds per-version builds — never
+edit it either. Full doctrine: `docs/SOP-git-multi-agent.md`.
+
 This repo is Mirza's personal [Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/plugins). Plugins live under `plugins/<name>/`; the catalog is `.claude-plugin/marketplace.json`.
 
 ## ⚠️ MANDATORY pre-commit checklist — run this for EVERY plugin change

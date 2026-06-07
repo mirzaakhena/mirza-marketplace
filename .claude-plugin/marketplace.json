@@ -50,7 +50,7 @@
     },
     {
       "name": "bot-conduct",
-      "description": "Behavioral skill encoding working rules for agent bots: git worktrees instead of branch-switching, commits signed with the bot's identity (Agent: <bot-name> trailer), subagent-first delegation so the main loop stays responsive, channel discipline (answer where the question came from — Telegram question means reply tool, never transcript-only), a shared cross-bot playbook at ~/.claude/agent-playbook/PLAYBOOK.md for proven practices and past mistakes, and shared-repo git discipline (push release commits immediately, no uncoordinated force-push; see docs/SOP-git-multi-agent.md).",
+      "description": "Behavioral skill encoding working rules for agent bots: git worktrees instead of branch-switching, commits signed with the bot's identity (Agent: <bot-name> trailer), subagent-first delegation so the main loop stays responsive, channel discipline (answer where the question came from — Telegram question means reply tool, never transcript-only), a shared cross-bot playbook at ~/.claude/agent-playbook/PLAYBOOK.md for proven practices and past mistakes, and shared-repo git discipline (three-copy doctrine: edit/commit only in the canonical workspace repo, never under ~/.claude/plugins/; push release commits immediately; no uncoordinated force-push; see docs/SOP-git-multi-agent.md).",
       "category": "productivity",
       "source": "./plugins/bot-conduct"
     },

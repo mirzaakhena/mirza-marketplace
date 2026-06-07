@@ -36,6 +36,31 @@ Akar masalah ganda: (a) commit rilis ditimbun di direktori yang bisa
 di-reclone kapan saja, dan (b) history rewrite dilakukan tanpa memeriksa
 clone lain / tanpa koordinasi.
 
+## Doktrin tiga salinan (keputusan user, 2026-06-07 — WAJIB)
+
+Repo marketplace hidup di tiga tempat dengan peran KAKU:
+
+- **(a) `C:\Users\Mirza\workspace\mirza-marketplace` — repo kerja
+  KANONIK.** Satu-satunya tempat edit dan commit. Kerja paralel antar bot
+  di repo ini memakai worktree (bot-conduct Rule 1).
+- **(b) `~/.claude/plugins/marketplaces/**` — salinan internal updater
+  Claude Code. READ-ONLY.** Bisa dihapus + di-reclone kapan saja tanpa
+  peringatan. **DILARANG KERAS edit/commit di sana.** Sinkronisasi satu
+  arah saja: `git pull --ff-only`.
+- **(c) `~/.claude/plugins/cache/**` — build per-versi.** Jangan diedit;
+  hanya berperan sebagai artefak rilis + sumber pemulihan.
+
+**Enforcement mekanis:** sebelum commit APA PUN, jalankan
+`git rev-parse --show-toplevel` — jika path-nya di bawah
+`~/.claude/plugins/`, **STOP**, pindah kerja ke
+`workspace/mirza-marketplace`.
+
+> Catatan historis: rilisan 2026-06-07 (pty-controller 0.0.25, agent-bus
+> 0.0.10, handoff 0.0.13, bot-conduct 0.0.3) ter-commit di salinan (b)
+> SEBELUM doktrin ini ditetapkan — disiplin push-segera melindunginya.
+> Konsekuensi: salinan kanonik (a) tertinggal dan butuh
+> `git pull --ff-only` satu kali.
+
 ## Aturan operasional
 
 1. **Push ke origin SEGERA setelah setiap release commit di repo bersama.**
@@ -45,13 +70,13 @@ clone lain / tanpa koordinasi.
 2. **DILARANG force-push / history-rewrite** pada repo yang disentuh
    banyak agent, kecuali SEMUA terpenuhi:
    - `git log origin/main..main` diperiksa di SEMUA clone yang mungkin
-     (marketplaces dir tiap bot, worktree, clone kerja manapun);
+     (workspace kanonik, worktree-nya, marketplaces dir tiap bot);
    - konfirmasi eksplisit dari user;
    - koordinasi antar bot (umumkan via user / agent-bus sebelum eksekusi).
-3. **`~/.claude/plugins/marketplaces/<x>` adalah milik updater.** Ia bisa
-   di-reclone wholesale kapan saja tanpa peringatan. Perlakukan sebagai
-   *push-through*: commit → push → selesai. JANGAN menimbun commit,
-   stash, atau file untracked penting di sana.
+3. **`~/.claude/plugins/marketplaces/<x>` adalah milik updater — READ-ONLY
+   per doktrin tiga salinan.** Ia bisa di-reclone wholesale kapan saja
+   tanpa peringatan. Jangan edit, jangan commit, jangan menimbun stash
+   atau file untracked penting di sana; sinkron hanya `git pull --ff-only`.
 4. **Cache `~/.claude/plugins/cache/` adalah sumber pemulihan rilisan.**
    - Cache memuat versi LEBIH TINGGI daripada plugin.json workspace =
      RED FLAG rilisan unpushed — selidiki asalnya SEBELUM "bump melewati"
@@ -59,13 +84,17 @@ clone lain / tanpa koordinasi.
    - Folder cache ber-`.orphaned_at` = kandidat garbage-collection;
      salin ke tempat aman DULU sebelum dipakai untuk recovery.
 5. **Worktree wajib untuk kerja paralel di repo yang sama** (bot-conduct
-   Rule 1 tetap berlaku): worktree pribadi memberi isolasi tanpa
-   mengganggu working tree agent lain. Catatan: worktree dari repo
-   marketplaces ikut mati bila induknya di-reclone — untuk pekerjaan
-   panjang, pakai clone terpisah di workspace dan push lewat sana.
+   Rule 1 tetap berlaku): worktree pribadi dari repo kanonik
+   `workspace/mirza-marketplace` memberi isolasi tanpa mengganggu working
+   tree agent lain. JANGAN membuat worktree dari salinan marketplaces —
+   selain dilarang doktrin, worktree itu ikut mati bila induknya
+   di-reclone.
 
 ## Checklist mekanis sebelum meninggalkan repo bersama
 
+- [ ] SEBELUM commit: `git rev-parse --show-toplevel` BUKAN di bawah
+      `~/.claude/plugins/` (kalau iya → STOP, pindah ke
+      `workspace/mirza-marketplace`)
 - [ ] `git status -sb` → `## main...origin/main` (tidak ahead, tidak ada
       perubahan tersisa yang seharusnya ikut rilis)
 - [ ] Tidak ada file untracked penting yang tertinggal di marketplaces dir

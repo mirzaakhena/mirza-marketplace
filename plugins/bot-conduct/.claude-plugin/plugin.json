@@ -1,7 +1,7 @@
 {
   "name": "bot-conduct",
-  "description": "Working rules for agent bots: use git worktrees instead of branching the main working tree, sign every commit with the bot's identity, delegate heavy work to subagents so the main loop stays responsive to the user, answer in the channel the question came from, maintain a shared cross-bot playbook of proven practices and past mistakes, and follow shared-repo git discipline (push every release commit immediately; no force-push without cross-clone checks + user confirmation).",
-  "version": "0.0.3",
+  "description": "Working rules for agent bots: use git worktrees instead of branching the main working tree, sign every commit with the bot's identity, delegate heavy work to subagents so the main loop stays responsive to the user, answer in the channel the question came from, maintain a shared cross-bot playbook of proven practices and past mistakes, and follow shared-repo git discipline (three-copy doctrine: edit/commit only in the canonical workspace repo, never under ~/.claude/plugins/; push every release commit immediately; no force-push without cross-clone checks + user confirmation).",
+  "version": "0.0.4",
   "author": {
     "name": "Mirza"
   },
