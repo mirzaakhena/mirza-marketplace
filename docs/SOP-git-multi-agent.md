@@ -38,11 +38,14 @@ clone lain / tanpa koordinasi.
 
 ## Doktrin tiga salinan (keputusan user, 2026-06-07 — WAJIB)
 
-Repo marketplace hidup di tiga tempat dengan peran KAKU:
+Doktrin ini GENERIK: berlaku untuk repo APA PUN yang terdaftar sebagai
+marketplace Claude Code. Setiap repo semacam itu hidup di tiga tempat
+dengan peran KAKU:
 
-- **(a) `C:\Users\Mirza\workspace\mirza-marketplace` — repo kerja
-  KANONIK.** Satu-satunya tempat edit dan commit. Kerja paralel antar bot
-  di repo ini memakai worktree (bot-conduct Rule 1).
+- **(a) Salinan workspace (`workspace/<nama-repo>`) — kanonik UNTUK REPO
+  ITU.** Satu-satunya tempat edit dan commit. Kerja paralel antar bot
+  di repo yang sama memakai worktree (bot-conduct Rule 1). Untuk repo
+  ini: `C:\Users\Mirza\workspace\mirza-marketplace`.
 - **(b) `~/.claude/plugins/marketplaces/**` — salinan internal updater
   Claude Code. READ-ONLY.** Bisa dihapus + di-reclone kapan saja tanpa
   peringatan. **DILARANG KERAS edit/commit di sana.** Sinkronisasi satu
@@ -52,8 +55,8 @@ Repo marketplace hidup di tiga tempat dengan peran KAKU:
 
 **Enforcement mekanis:** sebelum commit APA PUN, jalankan
 `git rev-parse --show-toplevel` — jika path-nya di bawah
-`~/.claude/plugins/`, **STOP**, pindah kerja ke
-`workspace/mirza-marketplace`.
+`~/.claude/plugins/`, **STOP**, pindah kerja ke salinan workspace repo
+yang bersangkutan.
 
 > Catatan historis: rilisan 2026-06-07 (pty-controller 0.0.25, agent-bus
 > 0.0.10, handoff 0.0.13, bot-conduct 0.0.3) ter-commit di salinan (b)
