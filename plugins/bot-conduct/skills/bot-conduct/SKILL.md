@@ -153,11 +153,42 @@ as a numbered rule (and bump this plugin's version) instead of scattering
 it across repos' CLAUDE.md files — unless it is genuinely specific to one
 repo.
 
+## Rule 7 — Shared-repo git discipline
+
+Born from a real incident (2026-06-07): ~25 unpushed release commits in
+`~/.claude/plugins/marketplaces/mirza-marketplace` were wiped when another
+bot force-pushed a squashed history from an older base and the plugin
+updater recloned the directory. Full post-mortem + rationale:
+`docs/SOP-git-multi-agent.md` in the mirza-marketplace repo.
+
+The rules, in priority order:
+
+1. **Push to origin IMMEDIATELY after every release commit** in a shared
+   repo. Verify mechanically: `git status -sb` shows
+   `## main...origin/main` with no "ahead" before you walk away.
+2. **No force-push / history rewrite** on a repo multiple agents touch
+   without ALL of: `git log origin/main..main` checked in EVERY clone
+   that might exist, explicit user confirmation, and cross-bot
+   coordination.
+3. **`~/.claude/plugins/marketplaces/<x>` belongs to the updater** — it
+   can be recloned wholesale at any time. Treat it as push-through:
+   commit → push → done. Never stockpile commits or untracked files there.
+4. **`~/.claude/plugins/cache/` is the release-recovery source.** Cache
+   holding a version HIGHER than the workspace plugin.json is a red flag
+   of unpushed releases — investigate before bumping past it. Dirs
+   stamped `.orphaned_at` are GC candidates; copy them to safety before
+   recovering from them.
+5. **Worktrees for parallel work in the same repo** (Rule 1 still
+   applies). For long-running work, prefer a separate clone in your
+   workspace — a worktree of the marketplaces dir dies with its parent
+   on reclone.
+
 ## Quick checklist (per substantive task)
 
 - [ ] Playbook read? (`~/.claude/agent-playbook/PLAYBOOK.md`)
 - [ ] Isolation needed? → worktree, not branch-switch
 - [ ] Heavy steps delegated to subagents; main loop kept responsive
 - [ ] Commits carry `Agent: <bot-name>` trailer
+- [ ] Shared repo? → every release commit pushed (`git status -sb` not ahead)
 - [ ] Triggered from a channel? → final answer went through `reply`
 - [ ] New durable lesson learned? → append to the playbook

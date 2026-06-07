@@ -14,6 +14,7 @@ Bot identity = the basename of the project directory (e.g. `C:\Users\Mirza\works
 | 4 | **Cross-bot playbook** | The shared file `~/.claude/agent-playbook/PLAYBOOK.md`: proven best practices + mistakes that must not be repeated + machine gotchas. Read at the start of a substantial task, updated whenever there's a durable lesson. Entry format + template + hygiene rules live in SKILL.md. |
 | 5 | **Channel discipline** | Answer in the channel the question came from: a Telegram question → the final answer MUST go through the `reply` tool (the transcript isn't the user!); a question in the CC terminal → answer in the transcript. Cross over only on explicit request. Mechanical self-check at the end of the turn: "did my final answer go through the reply tool?" |
 | 6 | **A home for new rules** | A new working rule from the user gets added as a numbered rule in this skill (then bump the version), not scattered across per-repo CLAUDE.md files — unless it really is specific to one repo. |
+| 7 | **Shared-repo git discipline** | Push every release commit to origin immediately (`git status -sb` must not be "ahead" when you walk away); no force-push/history-rewrite without checking `git log origin/main..main` in every clone + user confirmation + cross-bot coordination; `~/.claude/plugins/marketplaces/<x>` belongs to the updater (push-through, never stockpile commits); the plugin cache is the release-recovery source. Born from the 2026-06-07 reclone incident — details in the marketplace repo's `docs/SOP-git-multi-agent.md`. |
 
 ## Why a playbook?
 
