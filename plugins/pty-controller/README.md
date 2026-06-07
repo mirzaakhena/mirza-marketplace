@@ -79,7 +79,7 @@ What's different vs. plain `claude`:
 
 5. **Signal handling**. `SIGINT` (Ctrl+C) in the wrapper terminal is forwarded to the PTY so it cancels the running AI operation, rather than killing the wrapper. `SIGTERM` kills the PTY.
 
-6. **Side effects for the `telegram` plugin**. The wrapper writes a `session-change` event to `<project>/.claude/channels/telegram/system-outbox/` every time the session changes (initial spawn, post-`/clear`, post-`/resume`). It also writes a "main session" label to `<telegram-state>/session-names.json` on first run, if that label isn't already taken. This coupling is intentional — the wrapper and the telegram plugin are maintained by the same maintainer.
+6. **Side effects for the `telegram` plugin**. The wrapper writes a `session-change` event to `<project>/.claude/channels/telegram/system-outbox/` every time the session changes (initial spawn, post-`/clear`, post-`/resume`). It also writes an "idle" label to `<telegram-state>/session-names.json` on first run, if that label isn't already taken — "idle" so a freshly booted bot is born READY per the handoff-v2 session-name convention. This coupling is intentional — the wrapper and the telegram plugin are maintained by the same maintainer.
 
 7. **Registration into the global agent registry.** At boot, the wrapper registers itself (name = basename of the project dir) into `~/.claude/agent-registry.json` — heartbeat every 5 seconds, unregister on shutdown. This registry is what `pty_list_agents` and the `agent-bus` plugin read for bot-to-bot communication. Writes are serialized with a file-lock + atomic rename (with retries for the EPERM/EBUSY races typical of Windows antivirus).
 

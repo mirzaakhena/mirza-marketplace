@@ -721,8 +721,12 @@ if (!startupMode.isFirstRun && startupMode.latestSessionId) {
 // /delete to exclude the active session from the picker. Mirrors the
 // post-/clear poll above but clears itself on first detection.
 //
-// On first-run, this also claims the label "main session" for the brand-new
+// On first-run, this also claims the label "idle" for the brand-new
 // session — provided that name isn't already taken in the telegram registry.
+// "idle" (not "main session") because the handoff-v2 session-name convention
+// treats `idle` as the READY-to-receive state, while any manual-looking name
+// counts as unknown — a freshly booted bot should be born READY, not need a
+// manual rename after every fleet reset.
 // On resume, the loop never fires (no new jsonl appears); the resume block
 // above has already handled current_session_id + outbox emission.
 const initialSessionsBefore = listSessions()
@@ -736,7 +740,7 @@ const initialSessionPoll = setInterval(() => {
     clearInterval(initialSessionPoll)
 
     if (startupMode.isFirstRun) {
-      // First-run path: try to claim "main session" if free in the registry.
+      // First-run path: try to claim "idle" if free in the registry.
       const stateDir = resolveTelegramStateDir()
       let canRename = true
       if (stateDir) {
@@ -747,7 +751,7 @@ const initialSessionPoll = setInterval(() => {
             { name: string }
           >
           for (const entry of Object.values(obj)) {
-            if (entry.name === 'main session') {
+            if (entry.name === 'idle') {
               canRename = false
               break
             }
@@ -757,21 +761,21 @@ const initialSessionPoll = setInterval(() => {
         }
       }
       if (canRename) {
-        writeTelegramRegistryName(sid, 'main session')
-        writeCurrentSessionName('main session')
-        injectSlashCommand(`/rename main session`)
+        writeTelegramRegistryName(sid, 'idle')
+        writeCurrentSessionName('idle')
+        injectSlashCommand(`/rename idle`)
         setTimeout(
           () =>
             writeSystemOutbox({
               type: 'session-change',
               sessionId: sid,
-              sessionName: 'main session',
+              sessionName: 'idle',
             }),
           POST_INJECTION_DELAY_MS,
         )
       } else {
         log(
-          `"main session" already taken in registry — leaving new session unnamed`,
+          `"idle" already taken in registry — leaving new session unnamed`,
         )
         writeCurrentSessionName(null)
         writeSystemOutbox({
