@@ -160,6 +160,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
           wrapper_pid: entry.wrapper_pid,
           current_session_id: sess.current_session_id,
           current_session_name: sess.current_session_name,
+          lifecycle: sess.lifecycle,
           context_used_percent: sess.context_used_percent,
           context_window_size: sess.context_window_size,
           model: sess.model,
