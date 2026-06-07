@@ -56,7 +56,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'agent_status',
       description:
-        "Read a peer's current-session details: session id, session name, context usage %, model display name, and effort level. Sources from the peer's telegram plugin last-status.json when present, otherwise falls back to the pty-controller wrapper.current_session_id file. Safe to call autonomously.",
+        "Read a peer's current-session details: session id, session name, context usage % (context_used_percent), total context window in tokens (context_window_size, e.g. 200000 or 1000000 — use this for threshold math instead of parsing the model string), model display name, and effort level. Sources from the peer's telegram plugin last-status.json when it describes the live session; when that snapshot is stale (its session_id differs from the pty-controller wrapper.current_session_id) or absent, falls back to the wrapper's current_session_id/current_session_name files. NOTE: context_used_percent (and context_window_size/model) = null means the session is fresh / not yet active — treat null as ~0% used, NOT as an error. Safe to call autonomously.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -161,6 +161,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
           current_session_id: sess.current_session_id,
           current_session_name: sess.current_session_name,
           context_used_percent: sess.context_used_percent,
+          context_window_size: sess.context_window_size,
           model: sess.model,
           effort_level: sess.effort_level,
         }
