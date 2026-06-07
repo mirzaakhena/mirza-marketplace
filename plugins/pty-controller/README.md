@@ -146,6 +146,16 @@ The "fresh session ready" notification is **not the AI's responsibility** — th
 
 Payloads carrying a `from` field (inter-agent messages sent via the `agent-bus` plugin) are subject to a **hop limit**: `hop_count > 5` is dropped — a loop guard between bots. Local messages (no `from`) pass without this check.
 
+### Injection serialization (BUG #3 fix, wrapper ≥ 0.0.4)
+
+Consumed payloads are **not** dispatched the moment their file is read — they enter a FIFO queue drained by a single processor behind an `InjectionGate` ([`src/injection-gate.ts`](./wrapper/src/injection-gate.ts)):
+
+- **Min-gap:** every injection holds the gate for its own duration (the chunked typing window for prompts) plus `MIN_INJECTION_GAP_MS = 1500`, so two payloads can never interleave their keystrokes (each injection writes its text and the submitting `\r` 250ms apart — back-to-back dispatches used to splice into each other).
+- **Post-/clear barrier:** injecting `/clear` arms a hard barrier; nothing else is injected until the fresh session jsonl is detected (CC may not process the keystroke until the current AI turn ends, so this can take minutes — that's correct, anything injected earlier would be silently dropped by the rebuilding TUI), plus a settle window covering the `/rename` chain (`CLEAR_SETTLE_MS = 1500`). A 10-minute safety timeout force-releases the barrier (with a WARNING log) if the fresh session never materialises, so a lost `/clear` can't deadlock the queue.
+- Because `/rename` now only dispatches when the gate is open, the `wrapper.current_session_name` record written at dispatch time reflects an injection that actually landed.
+
+Live symptoms this fixes (2026-06-07): an agent-bus handoff prompt swallowed while the target was mid-`/clear`; a `/rename idle` following a `/clear` eaten → CC session left unnamed while the fleet state said `idle` (diverging sources of truth); a `/clear` itself eaten → session id never changed across tasks (idle-creep).
+
 The `pty-controller` plugin itself has no path to emit a `switch` or `prompt` payload — `switch` is emitted by the telegram plugin (when the user picks a session in the picker), `prompt` is emitted by the agent-bus plugin (a natural-language instruction from a peer bot). Any slash command valid per the regex can be injected via `pty_send_slash`. Examples verified to work: `/clear`, `/compact`, `/resume <id>`, `/rename <name>`, `/notify-user <msg>` (namespaced: `/telegram:notify-user`), `/exit`. The rest depend on whether CC recognizes that slash command in the session currently running.
 
 ### Post-`/clear` chain
@@ -156,7 +166,7 @@ If the command just injected is exactly `/clear`, the wrapper enters a special s
 2. Poll every 500ms until a new file appears (= the fresh session is live).
 3. As soon as it's found: write `wrapper.current_session_id` + `wrapper.current_session_name` (the payload's `sessionName`, or empty when the `/clear` came without a name — never the previous session's name), optionally inject `/rename <sessionName>` if the payload carries a name, then emit a `session-change` event to the telegram system-outbox (the Telegram message is sent by the telegram plugin, with no AI roundtrip).
 
-Pacing between injections: the constants `POST_INJECTION_DELAY_MS = 1000` and `SUBMIT_DELAY_MS = 250`. The second one separates the text write from the trailing `\r` — needed because for namespaced commands (`/telegram:foo`), if the `\r` lands in the same chunk, CC's autocomplete picker swallows it instead of submitting.
+Pacing between injections: the constants `POST_INJECTION_DELAY_MS = 1000` and `SUBMIT_DELAY_MS = 250`. The second one separates the text write from the trailing `\r` — needed because for namespaced commands (`/telegram:foo`), if the `\r` lands in the same chunk, CC's autocomplete picker swallows it instead of submitting. While this state machine is waiting for the fresh session, the pending queue is held by the injection barrier (see above) — queued payloads resume only after step 3 completes plus the settle window.
 
 ## IPC mechanism
 

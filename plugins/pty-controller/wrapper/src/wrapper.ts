@@ -7,7 +7,10 @@
  * Responsibilities:
  *   1. Spawn `claude` in a PTY, bidirectional-pipe with the user's terminal.
  *   2. Resolve a per-project state dir and create the inbox layout.
- *   3. Watch <state>/pending/ for command files; consume each one. Payload
+ *   3. Watch <state>/pending/ for command files; consume each one into a
+ *      FIFO queue drained one item at a time behind an injection gate
+ *      (min-gap between injections; hard barrier while CC rebuilds a
+ *      session post-/clear — see InjectionGate / BUG #3). Payload
  *      shape (tagged union):
  *        { command: "/clear" }                    — inject a slash command
  *        { type: "slash", command: "/clear" }     — explicit form, same thing
@@ -61,6 +64,7 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { promptTextFromPayload, chunkPromptText } from './prompt-inject'
 import { renameArgFromCommand } from './session-name'
+import { InjectionGate } from './injection-gate'
 
 // Portable equivalent of __dirname under ES modules. `import.meta.dir` only
 // exists on Bun; the wrapper actually runs under tsx (Node), where we need
@@ -161,6 +165,27 @@ function writeCurrentSessionName(name: string | null): void {
 // before the next write lands. Used by the post-/clear chain (/rename +
 // /notify-user) and by the post-/switch outbox event.
 const POST_INJECTION_DELAY_MS = 1000
+
+// Injection serialization (BUG #3, 2026-06-07). Pending payloads used to be
+// dispatched the instant their file was consumed; two back-to-back payloads
+// could interleave their keystrokes (each injection writes its text and the
+// submitting \r ~250ms apart), and anything injected while CC was rebuilding
+// a session post-/clear was silently dropped (a swallowed `/rename idle`
+// left bot-02's session unnamed; bot-03's own /clear vanished → idle-creep;
+// an agent-bus handoff prompt was eaten mid-/clear). Now a FIFO queue +
+// InjectionGate serialize everything:
+//   • MIN_INJECTION_GAP_MS  — minimum quiet time after every injection
+//     before the next one may start.
+//   • CLEAR_SETTLE_MS       — extra hold after the fresh session is
+//     detected, so the post-/clear chain (/rename + outbox) lands first.
+//   • CLEAR_BARRIER_TIMEOUT_MS — safety valve: if the fresh session never
+//     materialises (e.g. the /clear keystroke itself was lost), force-release
+//     the barrier instead of deadlocking the queue forever.
+//   • QUEUE_POLL_MS         — how often the drainer re-checks the gate.
+const MIN_INJECTION_GAP_MS = 1_500
+const CLEAR_SETTLE_MS = 1_500
+const CLEAR_BARRIER_TIMEOUT_MS = 10 * 60_000
+const QUEUE_POLL_MS = 200
 
 // Delay between writing a slash-command's text and the trailing Enter.
 // Empirically, writing `text + \r` as one PTY chunk lets CC's autocomplete
@@ -526,7 +551,7 @@ function injectSlashCommand(cmd: string): void {
  * so the full body lands. The submitting \r goes out SUBMIT_DELAY_MS after the
  * last chunk so it lands once the text has settled.
  */
-function injectText(text: string): void {
+function injectText(text: string): number {
   const chunks = chunkPromptText(text, CHUNK_SIZE)
   let elapsed = 0
   for (const chunk of chunks) {
@@ -534,6 +559,9 @@ function injectText(text: string): void {
     elapsed += CHUNK_DELAY_MS
   }
   setTimeout(() => currentPty.write('\r'), elapsed + SUBMIT_DELAY_MS)
+  // Total time until the submitting \r goes out — the caller uses this to
+  // hold the injection gate for the whole typing window.
+  return elapsed + SUBMIT_DELAY_MS
 }
 
 /**
@@ -567,6 +595,71 @@ function writeSystemOutbox(payload: Record<string, unknown>): void {
 let awaitingClearReady:
   | { sessionsBefore: Set<string>; sessionName?: string }
   | null = null
+
+// Shape of a pending/<uuid>.json payload (tagged union; `type`/`kind` are
+// synonyms, default "slash").
+type PendingPayload = {
+  id?: string
+  type?: string
+  /** Phase 1 alternate type field — synonymous with type:"slash" when "slash". */
+  kind?: string
+  command?: string
+  sessionId?: string
+  sessionName?: string
+  confirmAfterMs?: number
+  /** Agent-bus extension: name of sending agent. Required when from agent-bus. */
+  from?: string
+  /** Agent-bus extension: loop-prevention counter. */
+  hop_count?: number
+  /** Agent-bus extension: correlation id, opaque to wrapper in Phase 1. */
+  correlation_id?: string
+  /** Agent-bus prompt: the already-composed text to type into the PTY. */
+  text?: string
+}
+
+// Injection barrier + FIFO queue (BUG #3). Consumed payloads are queued and
+// drained by a single processor that waits out the gate between items, so an
+// injection can never start while the previous one is still typing or while
+// CC is rebuilding a session post-/clear. See the constants block above for
+// the failure modes this prevents.
+const injectionGate = new InjectionGate(CLEAR_BARRIER_TIMEOUT_MS)
+const injectionQueue: Array<{ filename: string; payload: PendingPayload }> = []
+let drainingQueue = false
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function drainInjectionQueue(): Promise<void> {
+  if (drainingQueue) return
+  drainingQueue = true
+  try {
+    while (injectionQueue.length > 0) {
+      if (injectionGate.isBlocked(Date.now())) {
+        await sleepMs(QUEUE_POLL_MS)
+        continue
+      }
+      // The gate just transitioned to unblocked. If the clear barrier was
+      // force-released by its safety timeout, surface that — it means a
+      // /clear never produced a fresh session (likely lost upstream).
+      if (awaitingClearReady && !injectionGate.clearBarrierActive(Date.now())) {
+        log(
+          `WARNING: clear barrier timed out after ${CLEAR_BARRIER_TIMEOUT_MS}ms ` +
+            `without a fresh session — draining queue anyway`,
+        )
+        awaitingClearReady = null
+      }
+      const item = injectionQueue.shift()!
+      try {
+        dispatchPayload(item.filename, item.payload)
+      } catch (err) {
+        log(`dispatch failed for ${item.filename}: ${err}`)
+      }
+    }
+  } finally {
+    drainingQueue = false
+  }
+}
 
 // PTY handlers: forward output to our stdout and shut the wrapper down
 // when claude exits.
@@ -669,6 +762,14 @@ const sessionPollInterval = setInterval(() => {
       // never see the old session's name attached to the new session.
       writeCurrentSessionName(sessionName ?? null)
       awaitingClearReady = null
+      // Release the injection barrier — but keep the queue held until the
+      // post-/clear chain below (/rename, when present) has had time to
+      // land, plus a settle margin, so a queued payload can never splice
+      // into the fresh session's first keystrokes.
+      injectionGate.releaseClearBarrier(
+        (sessionName ? POST_INJECTION_DELAY_MS : 0) + CLEAR_SETTLE_MS,
+        Date.now(),
+      )
       // Pace /rename so CC has time to process it before the system-outbox
       // event fires — the event triggers a Telegram-side "switch to session"
       // message, and we want it to land AFTER /rename has settled so the
@@ -764,6 +865,9 @@ const initialSessionPoll = setInterval(() => {
         writeTelegramRegistryName(sid, 'idle')
         writeCurrentSessionName('idle')
         injectSlashCommand(`/rename idle`)
+        // Keep queued payloads (if any arrived during boot) out of this
+        // injection's keystroke window.
+        injectionGate.holdFor(SUBMIT_DELAY_MS + MIN_INJECTION_GAP_MS, Date.now())
         setTimeout(
           () =>
             writeSystemOutbox({
@@ -792,7 +896,9 @@ const initialSessionPoll = setInterval(() => {
   }
 }, 500)
 
-// Consume one pending command file: parse, delete, dispatch.
+// Consume one pending command file: parse, delete, enqueue. Actual PTY
+// dispatch happens in drainInjectionQueue → dispatchPayload, serialized
+// behind the injection gate.
 async function consumePending(filename: string): Promise<void> {
   const path = join(PENDING_DIR, filename)
   let raw: string
@@ -809,24 +915,7 @@ async function consumePending(filename: string): Promise<void> {
     /* swallow — already gone is fine */
   }
 
-  let payload: {
-    id?: string
-    type?: string
-    /** Phase 1 alternate type field — synonymous with type:"slash" when "slash". */
-    kind?: string
-    command?: string
-    sessionId?: string
-    sessionName?: string
-    confirmAfterMs?: number
-    /** Agent-bus extension: name of sending agent. Required when from agent-bus. */
-    from?: string
-    /** Agent-bus extension: loop-prevention counter. */
-    hop_count?: number
-    /** Agent-bus extension: correlation id, opaque to wrapper in Phase 1. */
-    correlation_id?: string
-    /** Agent-bus prompt: the already-composed text to type into the PTY. */
-    text?: string
-  }
+  let payload: PendingPayload
   try {
     payload = JSON.parse(raw)
   } catch (err) {
@@ -849,6 +938,17 @@ async function consumePending(filename: string): Promise<void> {
     )
   }
 
+  // BUG #3: never dispatch straight from here — enqueue, and let the single
+  // drainer inject items one at a time behind the gate.
+  injectionQueue.push({ filename, payload })
+  void drainInjectionQueue()
+}
+
+// Dispatch one queued payload into the PTY. Called exclusively by
+// drainInjectionQueue, only when the injection gate is open. Every branch
+// holds the gate for its own injection duration + MIN_INJECTION_GAP_MS so
+// the next item cannot splice into this one's keystroke window.
+function dispatchPayload(filename: string, payload: PendingPayload): void {
   // Phase 1 contract: `type` (legacy) and `kind` (new) are synonyms. Default
   // to "slash" when neither is set (backward compat for the original
   // single-string-command payload shape).
@@ -861,8 +961,10 @@ async function consumePending(filename: string): Promise<void> {
     }
     log(`injecting "${command}" (id: ${payload.id ?? '?'})`)
     injectSlashCommand(command)
-    // /rename — the wrapper just learned the current session's new name;
-    // mirror it into wrapper.current_session_name for peer-status readers.
+    injectionGate.holdFor(SUBMIT_DELAY_MS + MIN_INJECTION_GAP_MS, Date.now())
+    // /rename — the dispatch happened with the gate open (so post-/clear it
+    // runs only after the fresh session was detected ready); recording the
+    // name here therefore reflects an injection that actually landed.
     const renamedTo = renameArgFromCommand(command)
     if (renamedTo) writeCurrentSessionName(renamedTo)
     // Optional confirm-after: some CC slash commands (e.g. /effort) pop up a
@@ -872,6 +974,7 @@ async function consumePending(filename: string): Promise<void> {
     // the caller side can't stall the wrapper.
     if (typeof payload.confirmAfterMs === 'number' && payload.confirmAfterMs > 0) {
       const delay = Math.min(Math.max(payload.confirmAfterMs, 50), 5_000)
+      injectionGate.holdFor(delay + MIN_INJECTION_GAP_MS, Date.now())
       setTimeout(() => {
         log(`sending confirm \\r after ${delay}ms (for "${command}")`)
         currentPty.write('\r')
@@ -890,10 +993,13 @@ async function consumePending(filename: string): Promise<void> {
           ? ((payload as { sessionName: string }).sessionName as string)
           : undefined
       awaitingClearReady = { sessionsBefore: listSessions(), sessionName }
+      // Arm the injection barrier: nothing else gets injected until the
+      // fresh session jsonl shows up (sessionPollInterval releases it).
+      injectionGate.beginClearBarrier(Date.now())
       log(
         `awaiting fresh session after /clear${
           sessionName ? ` (will rename to "${sessionName}")` : ''
-        }`,
+        } — injection queue held`,
       )
     }
     return
@@ -906,7 +1012,10 @@ async function consumePending(filename: string): Promise<void> {
       return
     }
     log(`injecting prompt text (${text.length} chars, id: ${payload.id ?? '?'}, from: ${payload.from ?? '?'})`)
-    injectText(text)
+    const typingMs = injectText(text)
+    // Hold for the whole chunked typing window — a long prompt keeps the
+    // PTY busy far longer than a slash command.
+    injectionGate.holdFor(typingMs + MIN_INJECTION_GAP_MS, Date.now())
     return
   }
 
@@ -930,6 +1039,12 @@ async function consumePending(filename: string): Promise<void> {
     // registry (the payload's sessionName is informational and may be null).
     writeCurrentSessionName(sessionName ?? readTelegramRegistryName(sid))
     injectSlashCommand(`/resume ${sid}`)
+    // /resume swaps the session inside CC — hold a little longer than a
+    // plain slash so the next payload lands after the swap settles.
+    injectionGate.holdFor(
+      SUBMIT_DELAY_MS + POST_INJECTION_DELAY_MS + MIN_INJECTION_GAP_MS,
+      Date.now(),
+    )
     // Delay matches the post-/clear path so the plugin's session-change
     // handler sees a consistent rhythm and CC has time to fully swap before
     // the user-facing transition message lands.
