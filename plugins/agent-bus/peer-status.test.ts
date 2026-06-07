@@ -219,6 +219,28 @@ describe('peer-status: wrapper.state.json precedence', () => {
     expect(info.context_used_percent).toBe(null)
   })
 
+  test('lifecycle transitioning + id match → telemetry nulled', () => {
+    writeState(projectDir, { session_id: 's1', session_name: 'done-x-1', lifecycle: 'transitioning', seq: 4, updated_at_ms: 1 })
+    writeFileSync(
+      join(projectDir, '.claude', 'channels', 'telegram', 'last-status.json'),
+      JSON.stringify({ payload: { session_id: 's1', context_window: { used_percentage: 55 } } }),
+    )
+    const info = readPeerSessionInfo(projectDir)
+    expect(info.lifecycle).toBe('transitioning')
+    expect(info.context_used_percent).toBe(null)
+  })
+
+  test('lifecycle unknown + id match → telemetry trusted', () => {
+    writeState(projectDir, { session_id: 's1', session_name: 'manual name', lifecycle: 'unknown', seq: 2, updated_at_ms: 1 })
+    writeFileSync(
+      join(projectDir, '.claude', 'channels', 'telegram', 'last-status.json'),
+      JSON.stringify({ payload: { session_id: 's1', context_window: { used_percentage: 33 } } }),
+    )
+    const info = readPeerSessionInfo(projectDir)
+    expect(info.lifecycle).toBe('unknown')
+    expect(info.context_used_percent).toBe(33)
+  })
+
   test('no state.json → legacy behavior (lifecycle null)', () => {
     writeFileSync(
       join(projectDir, '.claude', 'channels', 'pty-controller', 'wrapper.current_session_id'),
