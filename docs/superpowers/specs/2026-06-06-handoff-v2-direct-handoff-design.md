@@ -35,7 +35,7 @@ TIDAK PERNAH bekerja di workspace-nya sendiri** — selalu di repo proyek lain
 | # | Pertanyaan | Keputusan |
 |---|---|---|
 | 1 | Deteksi context sendiri | **Hybrid**: skill-instruction sekarang (cek `agent_status(self)` tiap selesai task substansial); hook harness = fase 2 hardening |
-| 2 | Reset session pengirim | **Self-reset aman**: `/rename done-…` → `/new idle` oleh bot pengirim sendiri via `pty_send_slash` (self-target). `/delete hard all` TETAP manual oleh user |
+| 2 | Reset session pengirim | **Self-reset aman**: `/rename done-…` → `/clear` → `/rename idle` oleh bot pengirim sendiri via `pty_send_slash` (self-target). `/delete hard all` TETAP manual oleh user. *(Koreksi 2026-06-07: semula tertulis `/new idle` — `/new` ternyata meta-command lapisan telegram, bukan command Claude Code; ketahuan saat uji kasus #3)* |
 | 3 | Konvensi nama session | 4 kondisi: `idle` / `task-<slug>` / `done-<slug>-<yyyymmddhhmm>` / nama manual (lihat §4) |
 | 4 | Perilaku penerima | **Gate adaptif**: langsung eksekusi, KECUALI section Blocker ≠ `—` → tanya user dulu |
 | 5 | Permukaan command | `/handoff` bare-only, selalu lewat inline buttons 2 step. Semua bentuk argumen (`/handoff <bot>`, `/handoff next <bot>`, `/handoff pair <bot>`, free-form notes) **di-drop** |
@@ -68,7 +68,7 @@ Tidak berubah: plugin `agent-bus`, `bot-conduct`, `inline-buttons`,
 
 | Nama session | Arti | Transisi |
 |---|---|---|
-| `idle` | Standby, siap menerima handoff | Kondisi awal; dibuat via `/new idle` |
+| `idle` | Standby, siap menerima handoff | Kondisi awal; dibuat via `/clear` + `/rename idle` (bot) atau `/new idle` (user dari telegram) |
 | `task-<task-slug>` | Sedang mengerjakan task | Saat mulai kerja / menerima estafet: `/rename task-<slug>` |
 | `done-<task-slug>-<yyyymmddhhmm>` | Arsip session yang sudah di-handoff | Sebelum self-reset: `/rename done-<slug>-<ts>` |
 | `<nama-manual>` | Di-rename user sendiri → status **unknown** | Tetap tampil di daftar pilihan bot, TIDAK dianggap ready, tidak pernah dipilih otomatis |
@@ -265,7 +265,7 @@ Aktor: **S** = bot pengirim, **R** = bot penerima, **U** = user (Telegram).
       fire ke session baru yang kosong dan membingungkan);
    2. **Lapor U**: "ACK diterima dari R, estafet resmi berpindah; saya reset";
    3. Self-reset via `pty_send_slash` (self-target): `/rename
-      done-<slug>-<yyyymmddhhmm>` → `/new idle`.
+      done-<slug>-<yyyymmddhhmm>` → `/clear` → `/rename idle`.
 8. **Timeout** (10 menit tanpa ACK) → S **lapor U** + buttons:
    `[Kirim ulang] [Pilih bot lain] [Batal]`. TIDAK self-reset — estafet
    belum berpindah.
@@ -363,3 +363,11 @@ sendiri tercapai) lanjutkan estafet sesuai header Pair atau tawarkan ke U.
   wrapper menulis session name saat `/new`/`/rename`. Juga:
   `context_used_percent` bisa `null` pada session fresh — perlakukan null
   sebagai fresh/lolos threshold READY.
+- **Temuan uji 2026-06-07 #2 (BUG skill, FIXED di 0.0.12):** langkah
+  self-reset semula memakai `/new idle` — tidak valid: `/new` adalah
+  meta-command lapisan telegram (handler-nya menulis payload wrapper
+  `/clear`+sessionName), bukan command Claude Code; injeksi PTY-nya gagal.
+  Urutan benar: `/rename done-…` → `/clear` → `/rename idle`. Uji kasus #3
+  juga berjalan dalam kondisi abnormal (MCP agent-bus sender mati →
+  fallback baca `last-status.json` manual + tulis pending-inbox manual) —
+  user meminta re-test dalam kondisi normal.

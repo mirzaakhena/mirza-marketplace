@@ -35,7 +35,7 @@ task masih berjalan). Lewat threshold → bot menawarkan `[🤝 Handoff]
 ## Konvensi nama session
 
 `idle` (standby, READY bila ctx <10%) → `task-<slug>` (sedang kerja) →
-`done-<slug>-<yyyymmddhhmm>` (arsip) → `/new idle`. Nama manual oleh user =
+`done-<slug>-<yyyymmddhhmm>` (arsip) → `/clear` + `/rename idle`. Nama manual oleh user =
 unknown (tidak pernah dipilih otomatis). Konvensi ini sekaligus menjadi
 detektor idle antar bot via `agent_status`.
 
@@ -43,7 +43,7 @@ detektor idle antar bot via `agent_status`.
 
 1. Sender: clarity check → **update README repo kerja** → tulis file `<repo-kerja>/.handoff/<yyyymmddhhmm>-prompt-<slug>.md` → lapor user.
 2. Sender → receiver via `agent_send`: path file **eksplisit** (bukan "latest"), repo kerja, instruksi ACK dua arah + gate adaptif.
-3. Timeout ACK 10 menit (one-shot cron). ACK masuk → cancel cron → lapor user → self-reset (`/rename done-…` → `/new idle`). Timeout → tawarkan `[Kirim ulang] [Pilih bot lain] [❌ Cancel]`.
+3. Timeout ACK 10 menit (one-shot cron). ACK masuk → cancel cron → lapor user → self-reset (`/rename done-…` → `/clear` → `/rename idle`; `/new` hanya ada di lapisan telegram, bukan command Claude Code). Timeout → tawarkan `[Kirim ulang] [Pilih bot lain] [❌ Cancel]`.
 4. Receiver: baca file → `/rename task-<slug>` → ACK ke sender + lapor user → eksekusi (kalau section Blocker terisi → tanya user dulu). Sibuk → tolak dengan penjelasan.
 
 `/delete hard all` (bersih-bersih arsip session) tetap manual oleh user.

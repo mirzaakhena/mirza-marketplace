@@ -186,7 +186,12 @@ Setelah file tertulis → **lapor user (laporan #1):** "file handoff selesai:
 4. **ACK diterima** → urutan WAJIB, jangan dibalik:
    1. Cancel cron timeout (CronDelete) — kalau tidak, cron akan fire ke session baru yang kosong dan membingungkan;
    2. **Lapor user (laporan #3):** "ACK diterima dari `<R>`, estafet resmi berpindah — saya reset";
-   3. Self-reset via `pty_send_slash` TANPA target: `/rename done-<slug>-<yyyymmddhhmm>` lalu `/new idle`.
+   3. Self-reset via `pty_send_slash` TANPA target — TIGA injeksi berurutan:
+      `/rename done-<slug>-<yyyymmddhhmm>` → `/clear` → `/rename idle`.
+      PERINGATAN: JANGAN pakai `/new` — itu meta-command lapisan telegram
+      (handler-nya menulis payload wrapper `/clear`+sessionName), TIDAK
+      dikenal Claude Code; injeksi PTY `/new idle` gagal sebagai command
+      invalid.
 5. **Timeout fire tanpa ACK** → lapor user + buttons `[Kirim ulang] [Pilih bot lain] [❌ Cancel]`. JANGAN self-reset — estafet belum berpindah.
 6. **R menolak (sibuk)** → lapor user penjelasan R + kembali ke §3.
 7. **ACK datang terlambat** (setelah timeout): belum ada keputusan user → lanjutkan langkah 4 normal. User sudah memindahkan estafet ke bot lain → laporkan konflik ke user, JANGAN kirim apa pun ke R.

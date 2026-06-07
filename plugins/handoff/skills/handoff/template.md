@@ -58,5 +58,6 @@ deadline, catatan user dari percakapan.
 ```
 
 Konvensi nama session yang menyertai protokol ini: `idle` →
-`task-<slug>` → `done-<slug>-<yyyymmddhhmm>` → `/new idle`; READY =
-session `idle` + context < 10%. Detail penuh di `skills/handoff/SKILL.md`.
+`task-<slug>` → `done-<slug>-<yyyymmddhhmm>` → `/clear` + `/rename idle`;
+READY = session `idle` + context < 10%. Detail penuh di
+`skills/handoff/SKILL.md`.
