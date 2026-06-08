@@ -89,19 +89,16 @@ Quit with `/exit` inside Claude or Ctrl+C in the wrapper terminal.
 
 The server in [`server.ts`](./server.ts) exposes three tools. Called over the stdio MCP transport.
 
-### `pty_send_slash({ command, target? })`
+### `pty_send_slash({ command? , commands? })`
 
-Queue a slash command for the wrapper to inject into the PTY. Can target itself (default) or one/more peer agents.
+Queue a slash command — or an atomic **batch** of them — for the wrapper to inject into the **current (self) CC session's** PTY. **Self-only by design** (neighbor-autonomy decision 2026-06-07): there is no `target` parameter. Bots never inject keystrokes into a peer; to have another bot do something, send it an `agent-bus` `kind:"prompt"` and let its own AI act (and refuse, if it wants). Passing `target` now returns a teaching error.
 
-- **Input**:
-  - `command: string` — starts with `/`. Must match the regex `/^\/[a-z][a-z0-9_:-]{0,63}(\s[\s\S]{0,256})?$/`. Supports bare commands (`/clear`) and namespaced plugin commands (`/telegram:notify-user brief`). The tool **rejects raw text injection** by design — if it's not a structurally valid slash command, it errors. It also **rejects telegram-layer commands** (`/new`, `/switch`, `/delete`, `/effort`) — those only exist in the telegram plugin / wrapper layer, so injecting them wedges CC's TUI on an unknown command; the error message names the correct alternative (e.g. `/new` → inject `/clear` then `/rename <name>`, `/switch` → inject `/resume <sessionId>`). See [`slash-guards.ts`](./slash-guards.ts).
-  - `target?: string | string[]` — optional. Omitted = target self (current CC session), safe to call autonomously. A single name = a single peer, requires the user to explicitly ask. An array = broadcast to several peers; the **destructive `/clear` is rejected** for array targets as a blast-radius guard.
-- **Behavior**:
-  - **Self path**: check the local wrapper heartbeat → write to `<state>/pending/<uuid>.json` atomically (tmp + rename).
-  - **Peer path**: resolve each name in `~/.claude/agent-registry.json`, validate alive (heartbeat <30s), then writeCommand per peer state_dir. Validate all names first before writing a single file — if any name is unknown or offline, fail upfront (no partial dispatch).
-- **Return**: text with `id`, `path`, and the agent name (for the peer path). Multi-target: per-peer results separated by a separator.
-- **Self use case**: `/clear`, `/compact`, `/notify-user` in your own session.
-- **Peer use case**: `target: "bot-03"` for a single peer, or `target: ["bot-02", "bot-03"]` for a broadcast. Call `pty_list_agents` first to discover valid names.
+- **Input** (exactly one of):
+  - `command: string` — a single slash command, starts with `/`. Must match the regex `/^\/[a-z][a-z0-9_:-]{0,63}(\s[\s\S]{0,256})?$/`. Supports bare commands (`/clear`) and namespaced plugin commands (`/telegram:notify-user brief`). The tool **rejects raw text injection** by design — if it's not a structurally valid slash command, it errors. It also **rejects telegram-layer commands** (`/new`, `/switch`, `/delete`, `/effort`) — those only exist in the telegram plugin / wrapper layer, so injecting them wedges CC's TUI on an unknown command; the error message names the correct alternative (e.g. `/new` → `commands:["/clear", "/rename <name>"]`, `/switch` → inject `/resume <sessionId>`). See [`slash-guards.ts`](./slash-guards.ts).
+  - `commands: string[]` — an ordered batch (max 8), each validated like `command`. Written as **ONE** pending file (a JSON array root); the wrapper enqueues all items contiguously, so no foreign payload can interleave between them. Use it for sequences that must stay together — the canonical case is a handoff self-reset `["/rename done-<slug>-<ts>", "/clear", "/rename idle"]`. When the batch contains `/clear`, the wrapper defers the `session-change` notification to the **end of the batch** so it carries the final session name instead of "(unnamed)". Batch needs a **running wrapper ≥ 0.0.7** — the tool reads `wrapper.version` and errors on older wrappers, telling the caller to fall back to sequential single-command calls and restart `mirza-cc`.
+- **Behavior**: check the local wrapper heartbeat → write to `<state>/pending/<uuid>.json` atomically (tmp + rename). A single command writes the original object shape; a batch writes an array root.
+- **Return**: text with `id` and `path` (batch: also the item count and the ordered command list).
+- **Use cases**: `/clear`, `/compact`, `/telegram:notify-user` in your own session; an atomic multi-step reset via `commands`.
 
 ### `pty_status()`
 
@@ -113,7 +110,7 @@ Probe whether the wrapper is running.
 
 ### `pty_list_agents({ only_alive?: boolean })`
 
-List all peer agents (other Claude Code sessions) registered in the shared agent registry `~/.claude/agent-registry.json`. That registry is written by every `mirza-cc` wrapper at startup + on each heartbeat tick.
+List all peer agents (other Claude Code sessions) registered in the shared agent registry `~/.claude/agent-registry.json`. That registry is written by every `mirza-cc` wrapper at startup + on each heartbeat tick. **Read-only discovery** — since `pty_send_slash` is self-only, this tool no longer feeds a `target`; to actually interact with a peer, use the `agent-bus` tools (`kind:"prompt"`).
 
 - **Input**: optional `only_alive: boolean` — if `true`, filters out entries whose heartbeat is stale (>30 seconds).
 - **Behavior**: read the registry file (or use the `AGENT_REGISTRY_PATH` env var), project each entry into `{name, project_dir, state_dir, last_heartbeat, last_heartbeat_age_s, alive, wrapper_pid}`.
@@ -136,15 +133,18 @@ The "fresh session ready" notification is **not the AI's responsibility** — th
 
 ## Payloads the wrapper accepts
 
-`server.ts` only knows how to write `{ type: "slash", command }`, but the wrapper ([`src/wrapper.ts`](./wrapper/src/wrapper.ts)) actually accepts three payload shapes (tagged union; the `type` and `kind` fields are synonyms, default `slash`):
+`server.ts` writes either `{ type: "slash", command }` (single) or a JSON **array** root (batch), but the wrapper ([`src/wrapper.ts`](./wrapper/src/wrapper.ts)) accepts these shapes (tagged union; the `type` and `kind` fields are synonyms, default `slash`):
 
 | `type`    | Extra fields                       | Wrapper action                                                                                |
 |-----------|--------------------------------------|---------------------------------------------------------------------------------------------|
 | `slash` (default if `type`/`kind` is absent) | `command: string`, optional `sessionName` (for `/clear`), optional `confirmAfterMs` | Write `command` then `\r` (separated by 250ms) to PTY stdin. `confirmAfterMs` (clamped 50–5000ms) sends one extra `\r` after the delay — to commit the confirmation picker of commands like `/effort`. |
 | `prompt`  | `text: string` (already composed by the sender, including the anti-bounce marker) | Type `text` into the PTY as a normal user turn, then submit. Written **in chunks of 100 code points with a 30ms gap** — a single big write on Windows ConPTY overflows the input buffer and the head of the message silently goes missing (only the tail survives). Chunking on code points (not UTF-16 units) so emoji surrogate pairs don't get split. |
 | `switch`  | `sessionId: string`, optional `sessionName` | Inject `/resume <sessionId>` into the PTY, write `current_session_id` + `current_session_name`, and emit a `session-change` event to the telegram system-outbox after 1 second. |
+| **array** (batch) | `[{command, sessionName?, confirmAfterMs?}, …]` (max 8) | Validated by [`src/batch.ts`](./wrapper/src/batch.ts), then **all items pushed onto the injection queue in one synchronous block** — Node's single thread guarantees no other consumed payload can splice between them (the atomicity three separate pending files could never provide). Each item then flows through the gate/barrier exactly like a standalone slash. A `/clear` mid-batch **defers** its `session-change` notification to the final item so the event carries the final session name. |
 
 Payloads carrying a `from` field (inter-agent messages sent via the `agent-bus` plugin) are subject to a **hop limit**: `hop_count > 5` is dropped — a loop guard between bots. Local messages (no `from`) pass without this check.
+
+The compound `{command:"/clear", sessionName}` form (a `/clear` that chains a `/rename`) is still accepted for the transition — the telegram `/new` handler emits it. New self-reset sequences should prefer the batch form (`commands:["/clear", "/rename <name>"]`).
 
 ### Injection serialization (BUG #3 fix, wrapper ≥ 0.0.4)
 
@@ -153,10 +153,11 @@ Consumed payloads are **not** dispatched the moment their file is read — they 
 - **Min-gap:** every injection holds the gate for its own duration (the chunked typing window for prompts) plus `MIN_INJECTION_GAP_MS = 1500`, so two payloads can never interleave their keystrokes (each injection writes its text and the submitting `\r` 250ms apart — back-to-back dispatches used to splice into each other).
 - **Post-/clear barrier:** injecting `/clear` arms a hard barrier; nothing else is injected until the fresh session jsonl is detected (CC may not process the keystroke until the current AI turn ends, so this can take minutes — that's correct, anything injected earlier would be silently dropped by the rebuilding TUI), plus a settle window covering the `/rename` chain (`CLEAR_SETTLE_MS = 1500`). A 10-minute safety timeout force-releases the barrier (with a WARNING log) if the fresh session never materialises, so a lost `/clear` can't deadlock the queue.
 - Because `/rename` now only dispatches when the gate is open, the `wrapper.current_session_name` record written at dispatch time reflects an injection that actually landed.
+- **Batch atomicity (wrapper ≥ 0.0.7):** the items of a batch payload are enqueued as one contiguous block, so the barrier serializes the *whole* sequence. This is what makes a handoff self-reset (`/rename done-…` → `/clear` → `/rename idle`) immune to a foreign payload splicing in mid-reset — the failure mode that previously corrupted a bot's session state when a handoff arrived between the `/clear` and the trailing `/rename idle`.
 
-Live symptoms this fixes (2026-06-07): an agent-bus handoff prompt swallowed while the target was mid-`/clear`; a `/rename idle` following a `/clear` eaten → CC session left unnamed while the fleet state said `idle` (diverging sources of truth); a `/clear` itself eaten → session id never changed across tasks (idle-creep).
+Live symptoms this fixes (2026-06-07): an agent-bus handoff prompt swallowed while the target was mid-`/clear`; a `/rename idle` following a `/clear` eaten → CC session left unnamed while the fleet state said `idle` (diverging sources of truth); a `/clear` itself eaten → session id never changed across tasks (idle-creep); and (post-batch) a foreign payload interleaving between the steps of a multi-command self-reset.
 
-The `pty-controller` plugin itself has no path to emit a `switch` or `prompt` payload — `switch` is emitted by the telegram plugin (when the user picks a session in the picker), `prompt` is emitted by the agent-bus plugin (a natural-language instruction from a peer bot). Any slash command valid per the regex can be injected via `pty_send_slash`. Examples verified to work: `/clear`, `/compact`, `/resume <id>`, `/rename <name>`, `/notify-user <msg>` (namespaced: `/telegram:notify-user`), `/exit`. The rest depend on whether CC recognizes that slash command in the session currently running.
+The `pty-controller` plugin emits `slash` payloads (single or batch) via `pty_send_slash`; it has no path to emit a `switch` or `prompt` payload — `switch` is emitted by the telegram plugin (when the user picks a session in the picker), `prompt` is emitted by the agent-bus plugin (a natural-language instruction from a peer bot). Any slash command valid per the regex can be injected. Examples verified to work: `/clear`, `/compact`, `/resume <id>`, `/rename <name>`, `/notify-user <msg>` (namespaced: `/telegram:notify-user`), `/exit`. The rest depend on whether CC recognizes that slash command in the session currently running.
 
 ### Post-`/clear` chain
 
@@ -164,7 +165,7 @@ If the command just injected is exactly `/clear`, the wrapper enters a special s
 
 1. Snapshot the current list of `.jsonl` sessions in `~/.claude/projects/<encoded-cwd>/`.
 2. Poll every 500ms until a new file appears (= the fresh session is live).
-3. As soon as it's found: write `wrapper.current_session_id` + `wrapper.current_session_name` (the payload's `sessionName`, or empty when the `/clear` came without a name — never the previous session's name), optionally inject `/rename <sessionName>` if the payload carries a name, then emit a `session-change` event to the telegram system-outbox (the Telegram message is sent by the telegram plugin, with no AI roundtrip).
+3. As soon as it's found: write `wrapper.current_session_id` + `wrapper.current_session_name` (the payload's `sessionName`, or empty when the `/clear` came without a name — never the previous session's name), optionally inject `/rename <sessionName>` if the payload carries a name, then emit a `session-change` event to the telegram system-outbox (the Telegram message is sent by the telegram plugin, with no AI roundtrip). **Exception — batch:** when this `/clear` is part of a batch with later items (e.g. a trailing `/rename idle`), the notification here is suppressed; the batch's final item emits it instead, so the event reports the real final name rather than "(unnamed)". The user is always notified — only the timing shifts.
 
 Pacing between injections: the constants `POST_INJECTION_DELAY_MS = 1000` and `SUBMIT_DELAY_MS = 250`. The second one separates the text write from the trailing `\r` — needed because for namespaced commands (`/telegram:foo`), if the `\r` lands in the same chunk, CC's autocomplete picker swallows it instead of submitting. While this state machine is waiting for the fresh session, the pending queue is held by the injection barrier (see above) — queued payloads resume only after step 3 completes plus the settle window.
 
@@ -191,7 +192,7 @@ Per-project state layout:
 └── wrapper.log                    # wrapper log (best-effort)
 ```
 
-Format of the `pending/<uuid>.json` file:
+Format of the `pending/<uuid>.json` file — a single command:
 
 ```json
 {
@@ -201,6 +202,16 @@ Format of the `pending/<uuid>.json` file:
 }
 ```
 
+…or a **batch** (JSON array root), injected as one contiguous block:
+
+```json
+[
+  { "command": "/rename done-task-202606071500" },
+  { "command": "/clear" },
+  { "command": "/rename idle" }
+]
+```
+
 Atomic writes are used on all sides: write to `<final>.tmp.<pid>`, then `rename` to the final name. The wrapper skips files still named `.tmp.*` in its fallback sweep. The wrapper reads the file (via `fs.watch` + a 2-second interval sweep as belt-and-suspenders), deletes the file immediately (before dispatch) so it won't double-process if it crashes mid-handle.
 
 `wrapperLikelyRunning()` uses a **two-signal check**: (1) the heartbeat file — its timestamp must be less than 30 seconds old; (2) PID liveness — if `wrapper.pid` exists, probe with `process.kill(pid, 0)`; `ESRCH` (process gone) → false, catching the "wrapper just crashed but the heartbeat still looks fresh" case. The PID check is best-effort: if the PID file is absent (older wrapper build) or can't be probed → trust the heartbeat alone. The plugin uses this metric to gate `pty_send_slash` and for the `pty_status` answer.
@@ -208,6 +219,8 @@ Atomic writes are used on all sides: write to `<final>.tmp.<pid>`, then `rename`
 ## Limitations / caveats
 
 - **Without the wrapper, the plugin is a no-op.** The plugin loads fine into CC but `pty_send_slash` will always error until the wrapper is running. `pty_status` is the safest way to check.
+- **`pty_send_slash` is self-only.** Cross-agent control was removed (neighbor autonomy, 2026-06-07); a peer is reached only via an `agent-bus` `kind:"prompt"`, which its own AI chooses to act on. Rescuing a wedged bot is the user's job, via that bot's own Telegram chat.
+- **Batch needs a fresh wrapper.** `commands:[…]` requires the *running* wrapper ≥ 0.0.7. The wrapper keeps executing old code until `mirza-cc` is restarted, so right after an upgrade the tool errors on batch sends until the restart — callers fall back to sequential single-command calls.
 - **Single CC per project.** The wrapper assumes one Claude session per project at a time. Run two wrappers against the same project → the inbox files can get double-processed and downstream channels (the Telegram bot) conflict.
 - **Windows quirks.** `fs.watch` on Windows has historically been flaky for fast create+delete, which is why the wrapper has a 2-second interval sweep as a backup. `node-pty` is spawned via `cmd.exe /c` on Windows vs. `$SHELL -l -i -c` on Unix.
 - **First-run timing isn't relevant for the production wrapper.** The `auto-clear` diagnostic has a `READY_DELAY_MS` env; the production wrapper doesn't need it because requests only arrive once CC is idle.
