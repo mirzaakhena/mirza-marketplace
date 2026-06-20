@@ -18,7 +18,7 @@ Consists of one MCP server (3 tools) + one skill (`using-agent-bus`) that carrie
 | Tool | Nature | Function |
 |---|---|---|
 | `agent_list()` | read-only, may be called autonomously | List peers from the global registry: name, online status, last heartbeat, project_dir. Entries with no heartbeat in > 24 hours are filtered out. |
-| `agent_status(name)` | read-only, may be called autonomously | Peer session details: session id + session name, context usage % (`context_used_percent`), total context window in tokens (`context_window_size`, e.g. `200000` / `1000000`), model, effort level, wrapper PID. Null context/window/model means the session is fresh / not yet active — not an error. |
+| `agent_status(name)` | read-only, may be called autonomously | Peer session details: session id + session name, `lifecycle` (e.g. `idle` / `busy` / `resetting` / `unknown` — from the peer's `wrapper.state.json`), context usage % (`context_used_percent`), total context window in tokens (`context_window_size`, e.g. `200000` / `1000000`), model, effort level, wrapper PID. Null context/window/model means the session is fresh / not yet active (or its telemetry is being withheld as stale — see _Architecture & state_) — not an error. |
 | `agent_send(target, payload)` | mutating — **only on explicit user request** | Send a one-way message to a single peer or an array of peers (broadcast/fan-out). |
 
 A peer is considered **online** if its last heartbeat is < 30 seconds.
@@ -55,13 +55,16 @@ Triggers when the user asks for inter-bot coordination ("tell bot-02 to run /dai
 - **Global registry:** `~/.claude/agent-registry.json` (override via env `AGENT_REGISTRY_PATH`). Schema v1: map of agent name → `{project_dir, state_dir, registered_at, last_heartbeat, wrapper_pid}`.
 - **Registry writer:** the pty-controller wrapper (`mirza-cc`) — registers on boot, heartbeats periodically, unregisters on shutdown. agent-bus is purely a registry reader + inbox writer.
 - **Concurrency:** registry writes are serialized with a file-lock (`.lock`, O_EXCL, 2-second timeout) with atomic visibility via tmp + rename.
-- **`agent_status` source:** primarily the peer's telegram plugin `last-status.json` (rich: session name, context % + window size, model, effort) — but only when its `session_id` matches pty-controller's `wrapper.current_session_id`. On a mismatch the telegram snapshot is **stale** (it only updates while the statusline bridge fires, so a freshly reset session would otherwise report the previous session's data) and the reader falls back to the wrapper files `wrapper.current_session_id` + `wrapper.current_session_name` (written by wrapper ≥ 0.0.2), leaving the per-session fields `null` (= fresh, not yet active).
+- **`agent_status` source (two-tier, identity vs. telemetry):**
+  - **Identity + lifecycle** come from the peer's pty-controller `wrapper.state.json` (`session_id`, `session_name`, `lifecycle`) — the authoritative "which session is live" record, written by wrapper ≥ 0.0.4 (pty-controller ≥ 0.0.27).
+  - **Rich telemetry** (context % + window size, model, effort) comes from the peer's telegram plugin `last-status.json`. That file only refreshes while the statusline bridge fires, so it lags reset/idle sessions. The reader therefore **trusts it only when** (a) its `session_id` matches `wrapper.state.json`'s **and** (b) the lifecycle is genuinely active (`busy` or `unknown`). Otherwise the per-session fields are returned `null` (= fresh / not yet active / telemetry withheld as stale) — null is never an error.
+  - **Legacy fallback:** for a peer on an older wrapper without `wrapper.state.json`, the reader uses the previous 0.0.10 scheme — telegram snapshot if its `session_id` matches the `wrapper.current_session_id` file, else the wrapper files `wrapper.current_session_id` + `wrapper.current_session_name` (written by wrapper ≥ 0.0.2), with `lifecycle` left `null`.
 - **Agent name** = the basename of the peer's `CLAUDE_PROJECT_DIR` (e.g. `bot-02`).
 
 ## Dependencies
 
 - The **`pty-controller`** plugin must be installed on both the sending & receiving bot, running under the `mirza-cc` wrapper — it's the wrapper that registers the bot into the registry and consumes the inbox.
-- The rich fields in `agent_status` require the **`telegram`** plugin on the peer side (optional — degrades to session id + name only if absent). The session-name fallback needs the peer's wrapper ≥ 0.0.2 (pty-controller ≥ 0.0.25).
+- The rich fields in `agent_status` require the **`telegram`** plugin on the peer side (optional — degrades to session id + name only if absent). The authoritative identity + `lifecycle` (via `wrapper.state.json`) needs the peer's wrapper ≥ 0.0.4 (pty-controller ≥ 0.0.27); on an older wrapper the reader uses the legacy session-name fallback, which needs wrapper ≥ 0.0.2 (pty-controller ≥ 0.0.25) and leaves `lifecycle` null.
 
 ## Testing
 

@@ -39,11 +39,20 @@ If unsure, ask the user first.
 ## Sending prompts (kind="prompt")
 
 `agent_send` with `kind:"prompt"` delivers a natural-language instruction to a
-peer. The peer's AI receives it as an inbound `<channel source="agent-bus" from="...">` message
-and acts on it automatically — treat it like the peer's user typed it. (The exact `source` string
-is derived from the MCP server name by the harness — confirm via a live two-bot smoke test. The
-message also carries a `from` field naming the sender bot; the anti-bounce rule keys on "an
-inbound message from the agent-bus channel" regardless of the exact label.)
+peer. It is typed into the peer's session as a normal user turn (via the
+`mirza-cc` wrapper), prefixed with an attribution marker the agent-bus sender
+prepends:
+
+> `[Message from agent <sender> via agent-bus (hop N). This is an inter-agent
+>  instruction, not from the user. Treat per the using-agent-bus skill —
+>  anti-bounce: do not auto-reply unless the message explicitly asks for it. If
+>  asked to report back via agent_send, set payload.hop_count = N+1.] <body>`
+
+So the peer's AI sees a plain prompt that opens with `[Message from agent … via
+agent-bus (hop N)…]` — there is **no** `<channel>` XML wrapper around it (that
+form is used by the telegram inbound, not agent-bus). The anti-bounce rule keys
+on that bracketed marker: treat any inbound prompt opening with `Message from
+agent … via agent-bus` as an inter-agent instruction.
 
 This is **one-way**. There is no reply channel. If the leader needs a result
 back, the leader must say so *inside the prompt body*:
@@ -65,9 +74,10 @@ misbehaves, a relay loop dies after 5 hops.
 
 ## Anti-bounce rule (prevents infinite loops)
 
-An incoming `<channel source="agent-bus">` message is **terminal context**, not a
-trigger to send more agent messages. You MUST NOT call `agent_send` in response
-to an agent-bus message UNLESS:
+An incoming agent-bus prompt (one opening with the `[Message from agent … via
+agent-bus (hop N)…]` marker) is **terminal context**, not a trigger to send more
+agent messages. You MUST NOT call `agent_send` in response to an agent-bus
+message UNLESS:
 
 1. the user explicitly asks you to, OR
 2. the incoming prompt body explicitly tells you to report back to a named bot.
