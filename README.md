@@ -25,7 +25,7 @@ The official catalog lives in [`.claude-plugin/marketplace.json`](.claude-plugin
 | [`teach-me`](plugins/teach-me/) | 0.0.2 | Teaching mode: build a mental model step by step when the user wants to understand a concept — 10 style elements + an anti-pattern list. |
 | [`handoff`](plugins/handoff/) | 0.0.16 | `/handoff` (buttons: Now / After this task / Ping pong / File only) — direct bot-to-bot work relay via agent-bus: handoff file → two-way ACK → sender self-reset to an `idle` session as ONE atomic `pty_send_slash` batch (sequential fallback on wrapper < 0.0.7); receiver busy-guard runs first (explicit user pick of a busy bot → defer, not reject); ping-pong pair ends when the goal is done or the user cancels; proactive context-threshold trigger via `agent_status` `context_window_size` (≥1M tokens→35%, else→75%; model-string fallback), READY accepts null context (fresh session). `/handoff-resume` removed. |
 | [`daily-report`](plugins/daily-report/) | 0.0.4 | `/daily-report` assembles a paste-ready plain-text daily work report for any chat app from git activity, with a locked Yesterday/Today template and anti-fabrication rules. |
-| [`bot-conduct`](plugins/bot-conduct/) | 0.0.5 | Working rules for agent bots: git worktree (not branch-switching), commits with an `Agent: <bot-name>` trailer, subagent-first so the main loop stays responsive, channel discipline (answer in the channel the question came from), a cross-bot playbook at `~/.claude/agent-playbook/PLAYBOOK.md`, and shared-repo git discipline (three-copy doctrine for any marketplace-registered repo: edit/commit only in its canonical workspace clone, never under `~/.claude/plugins/`; push release commits immediately; no uncoordinated force-push — see [`docs/SOP-git-multi-agent.md`](docs/SOP-git-multi-agent.md)). |
+| [`bot-conduct`](plugins/bot-conduct/) | 0.0.6 | Working rules for agent bots: git worktree (not branch-switching), commits with an `Agent: <bot-name>` trailer, subagent-first so the main loop stays responsive, channel discipline (answer in the channel the question came from), and shared-repo git discipline (three-copy doctrine for any marketplace-registered repo: edit/commit only in its canonical workspace clone, never under `~/.claude/plugins/`; push release commits immediately; no uncoordinated force-push — see [`docs/SOP-git-multi-agent.md`](docs/SOP-git-multi-agent.md)). |
 
 ### How it all fits together
 
@@ -43,7 +43,7 @@ Telegram (user's phone)
 
 immediate-reply / inline-buttons / teach-me  → govern the AI's response STYLE on Telegram
 handoff / daily-report                            → end-of-session & end-of-day rituals
-bot-conduct                                       → WORKING rules for agent bots (worktree, commit identity, subagent, playbook)
+bot-conduct                                       → WORKING rules for agent bots (worktree, commit identity, subagent, git discipline)
 ```
 
 ---
