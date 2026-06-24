@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-24
 **Affects:** `plugins/telegram/commands-registry.ts` (+1 entry), a new **goal skill** (recommended: `plugins/goal/skills/goal/SKILL.md`, parallel to the handoff plugin), and a per-session state file `goal-state.json`. No changes to `server.ts` / `meta-commands.ts` forwarding.
-**Status:** Draft — pending user review
+**Status:** Approved (brainstorm 2026-06-24). Implemented Tasks 1–4 on branch `feat/telegram-goal-command` (registry entry, plugin scaffold + marketplace registration, goal skill; spike confirmed). Task 5 (live scenario verification) pending — needs the plugin installed + an interactive session. Not pushed/merged; awaiting user review.
 
 ## Motivation
 
