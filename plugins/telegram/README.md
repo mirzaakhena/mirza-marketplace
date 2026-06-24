@@ -4,7 +4,7 @@
 >
 > **Main changes from upstream:**
 > - **Per-project state** — token, database, pairing, etc. are stored in `<project>/.claude/channels/telegram/`, not the global `~/.claude/channels/telegram/`. Multiple folders run in parallel with different tokens.
-> - **Registry-driven bot commands** — `/context`, `/version`, `/new`, `/switch`, `/delete` (soft/hard/all), `/rename`, `/effort`, `/help`, `/start` are defined in `commands-registry.ts`; the Telegram slash-menu is scoped per-audience (unpaired vs paired) via `setMyCommands`.
+> - **Registry-driven bot commands** — `/context`, `/version`, `/new`, `/switch`, `/delete` (soft/hard/all), `/rename`, `/effort`, `/handoff`, `/goal`, `/help`, `/start` are defined in `commands-registry.ts`; the Telegram slash-menu is scoped per-audience (unpaired vs paired) via `setMyCommands`. `/handoff` and `/goal` are forwarded to the AI (their skills); the rest are meta-commands handled by the plugin.
 > - **Unified `/context`** — context window %, 5-hour & 7-day rate limit, model, session, cost. The statusLine bridge is written in TypeScript (`scripts/context-bridge.ts`) so it's cross-platform, auto-installed on the first `/context`. Plugin/wrapper versions are split out into `/version` (telegram + pty-controller + mirza-cc + agent-bus, all resolved dynamically — nothing hardcoded).
 > - **Conversation logging** — every inbound/outbound/edit is recorded to `messages.db` (SQLite via `bun:sqlite`); recall via the MCP tool `get_message_by_id`.
 > - **Quoted-message support** — a user reply carries `quote_text` + `quote_is_manual` in the `<channel>` meta, so the AI knows which message is being referenced.
@@ -220,7 +220,8 @@ Commands the user types **in the Telegram chat** (not in CC). DM-only — silent
 | `/delete all` / `/delete hard all` | Bulk version: a single confirm button shows the session count; the active session is always excluded. |
 | `/rename <name>` | Rename the active session. The name must be unique; renaming to its own name = no-op. |
 | `/effort [level]` | No argument: a 6-level picker (low/medium/high/xhigh/max/auto, the active level marked with `→`). With an argument: apply directly. Session-scoped — `/new` resets it to the CC default. |
-| `/handoff` | **Not a meta-command** — the only menu entry forwarded to the AI: the text `/handoff` enters the CC session and the AI runs the handoff v2 skill (mode buttons Now / After this task / Ping pong / File only → pick the target bot → relay via agent-bus + two-way ACK). Requires the `handoff` plugin ≥ 0.0.9 loaded in the session. |
+| `/handoff` | **Not a meta-command** — a menu entry forwarded to the AI: the text `/handoff` enters the CC session and the AI runs the handoff v2 skill (mode buttons Now / After this task / Ping pong / File only → pick the target bot → relay via agent-bus + two-way ACK). Requires the `handoff` plugin ≥ 0.0.9 loaded in the session. |
+| `/goal` | **Not a meta-command** — forwarded to the AI, which runs the `goal` skill: the AI discusses the objective (interviewing if unclear; cancellable), drafts a precise, verifiable condition, confirms it with `[Ya]/[Tidak]/[Jelaskan manual]` buttons, then sets Claude Code's built-in `/goal` (injected via `pty_send_slash`) to work autonomously until an independent evaluator confirms it. Send `/goal` again while one runs to see/stop it. Requires the `goal` plugin loaded + the `mirza-cc` wrapper. |
 
 `/new`/`/switch`/`/delete`/`/rename`/`/effort` require the `pty-controller` wrapper to be running (heartbeat at `<project>/.claude/channels/pty-controller/wrapper.heartbeat` < 30s). Without the wrapper, the command is replied to with an error explanation — not forwarded to the AI.
 
