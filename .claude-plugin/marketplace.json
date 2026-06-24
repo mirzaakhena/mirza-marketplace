@@ -43,6 +43,12 @@
       "source": "./plugins/handoff"
     },
     {
+      "name": "goal",
+      "description": "AI-authored Claude Code goals from Telegram. /goal is forwarded to the AI, which discusses the objective, drafts a verifiable condition, confirms via [Ya]/[Tidak]/[Jelaskan manual] inline buttons, then injects CC's built-in /goal via pty_send_slash to run the autonomous evaluator loop. Shows + stops a running goal. Best-effort per-session goal-state.json. No custom /goal command (shadowed by the built-in); the skill triggers via its description. Depends on telegram + pty-controller + the mirza-cc wrapper.",
+      "category": "productivity",
+      "source": "./plugins/goal"
+    },
+    {
       "name": "pty-controller",
       "description": "Programmatically inject slash commands into a running Claude Code session by going through a companion wrapper process (mirza-cc) that hosts CC inside a node-pty pseudo-terminal. Provides the pty_send_slash / pty_status / pty_list_agents MCP tools; pty_send_slash is SELF-ONLY (neighbor-autonomy decision 2026-06-07 — target param removed), supports atomic batch sequences via `commands` (one pending file, contiguous enqueue, session-change notification deferred to end of batch; wrapper >= 0.0.7), and rejects telegram-layer commands (/new, /switch, /delete, /effort) with an error naming the correct alternative. The wrapper serializes all injections (FIFO queue + gate, hard barrier while CC rebuilds post-/clear so keystrokes are never silently dropped) and tracks the live session's id + name in state files for peer plugins. Requires the mirza-cc wrapper running — see plugin README. Pairs well with the telegram plugin (the wrapper drops a session-change event into telegram's outbox so the user gets a post-/clear ping; the telegram plugin owns the /notify-user command itself).",
       "category": "productivity",

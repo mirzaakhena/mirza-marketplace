@@ -1,0 +1,15 @@
+{
+  "name": "goal",
+  "description": "AI-authored Claude Code goals, driven from Telegram. /goal is forwarded to the AI, which discusses the objective with the user (interviewing if needed; cancellable), drafts a precise, transcript-verifiable condition (<=~240 chars, bounded), confirms it with [Ya]/[Tidak]/[Jelaskan manual] inline buttons, then injects CC's built-in /goal via pty_send_slash to run the autonomous evaluator loop. Sending /goal while a goal runs shows it and offers to stop it. Best-effort goal-state.json per session. No custom /goal command (shadowed by the built-in); the skill triggers via its description.",
+  "version": "0.0.1",
+  "author": {
+    "name": "Mirza"
+  },
+  "keywords": [
+    "goal",
+    "telegram",
+    "autonomous",
+    "evaluator",
+    "skill"
+  ]
+}
