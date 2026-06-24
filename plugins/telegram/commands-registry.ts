@@ -107,6 +107,14 @@ export const COMMANDS: CommandSpec[] = [
       'Direct bot-to-bot handoff (plugin handoff >= 0.0.9). Unlike /new or /switch, this is NOT a meta-command: the text "/handoff" is forwarded to the Claude session, where the AI runs the handoff skill. The skill walks you through two button steps: mode (🚀 Now / ⏭️ After this task / 🏓 Ping pong / 📄 File only / ❌ Cancel), then the target bot (with idle/busy status). It then writes a handoff file in the work repo, relays it to the target via agent-bus with a two-way ACK, and self-resets this bot\'s session to "idle". Requires: a session where the handoff skill is loaded, the agent-bus plugin, and the mirza-cc wrapper running on both bots.',
   },
   {
+    name: 'goal',
+    audience: 'paired',
+    menuHint: 'Set an AI-authored goal to chase',
+    helpSummary: 'Let the AI author & track a goal until done',
+    helpDetail:
+      'Sets a goal the AI works toward autonomously. Unlike /new or /switch, this is NOT a meta-command: the text "/goal" is forwarded to the Claude session, where the AI runs the goal skill. The AI discusses what you want to achieve (interviewing you if context is unclear; you can cancel anytime), drafts a precise, verifiable condition, and shows it for approval with [Ya]/[Tidak]/[Jelaskan manual] buttons. On approval it sets the goal (Claude Code\'s built-in /goal engine) and keeps working until an independent evaluator confirms the condition is met. Send /goal again while one is running to see it and stop it. Requires the mirza-cc wrapper.',
+  },
+  {
     name: 'help',
     audience: 'both',
     menuHint: 'Bot intro and command list',
