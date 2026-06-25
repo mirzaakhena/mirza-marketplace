@@ -31,3 +31,5 @@ desktop.ini
 2027-*-*.txt
 
 _notes/
+# SDD orchestration scratch (subagent-driven-development)
+.superpowers/
