@@ -357,6 +357,27 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     expect(payload.command).toBe('/rename omar')
   })
 
+  test('/rename reply shows from "old" to "new" when an old name is registered', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    const sid = 'sess-abc123'
+    writeFileSync(join(stateDir, 'wrapper.current_session_id'), sid)
+    const tgDir = join(projectDir, '.claude', 'channels', 'telegram')
+    mkdirSync(tgDir, { recursive: true })
+    registrySetName(tgDir, sid, 'old-name')
+    const consumed = await tryRouteMetaCommandT('/rename new-name', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    expect(replies[0].text).toBe('✏️ Renaming session from "old-name" to "new-name".')
+  })
+
+  test('/rename falls back to "to <new>" form when no old name is registered', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    const consumed = await tryRouteMetaCommandT('/rename solo-name', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    expect(replies[0].text).toBe('✏️ Renaming session to "solo-name".')
+  })
+
   test('/new succeeds when name is free', async () => {
     const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())

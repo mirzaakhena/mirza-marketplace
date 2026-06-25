@@ -38,6 +38,7 @@ import {
 import { resolveStateDir as resolveTelegramStateDir } from './state-path.ts'
 import { renderPickerPage } from './paginated-picker.ts'
 import { addArchived } from './archive-store.ts'
+import { resolveCurrentSessionName } from './current-session-info.ts'
 
 const HEARTBEAT_FRESH_MS = 30_000
 const SHORT_ID_RE = /^[0-9a-f]{8}$/
@@ -468,10 +469,20 @@ async function handleRename(
   // in the next picker render even if CC's pid file gets overwritten by a
   // later /switch before we get a chance to read it. Re-uses `currentSid`
   // and `telegramStateDir` resolved above for the uniqueness check.
+  // Resolve the OLD name BEFORE overwriting it in the registry, so the
+  // confirmation can read "from <old> to <new>".
+  const oldName =
+    currentSid && telegramStateDir
+      ? resolveCurrentSessionName(currentSid, telegramStateDir)
+      : null
   if (currentSid && telegramStateDir) {
     registrySetName(telegramStateDir, currentSid, newName)
   }
-  await handlers.reply(`✏️ Renaming session to "${newName}".`)
+  await handlers.reply(
+    oldName
+      ? `✏️ Renaming session from "${oldName}" to "${newName}".`
+      : `✏️ Renaming session to "${newName}".`,
+  )
   return true
 }
 
