@@ -236,23 +236,22 @@ describe('meta-commands: tryRouteMetaCommand', () => {
   test('writes /rename <name> command to wrapper when fresh', async () => {
     const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
-    const consumed = await tryRouteMetaCommandT('/rename discuss MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/rename discuss-mcp', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(replies[0].text).toMatch(/Renaming/i)
     const pending = listPending(stateDir)
     expect(pending.length).toBe(1)
     const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
-    expect(payload.command).toBe('/rename discuss MCP')
+    expect(payload.command).toBe('/rename discuss-mcp')
   })
 
-  test('strips newlines from /rename name (PTY injection safety)', async () => {
-    const { handler } = makeHandler()
+  test('rejects /rename name with a newline (collapses to a space, then rejected)', async () => {
+    const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
     const consumed = await tryRouteMetaCommandT('/rename discuss\nMCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
-    const pending = listPending(stateDir)
-    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
-    expect(payload.command).toBe('/rename discuss MCP')
+    expect(replies[0].text).toMatch(/spasi/i)
+    expect(listPending(stateDir).length).toBe(0)
   })
 
   test('truncates /rename name longer than 64 chars', async () => {
@@ -269,7 +268,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
   test('/rename warns when wrapper heartbeat is stale', async () => {
     const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date(Date.now() - 5 * 60_000).toISOString())
-    const consumed = await tryRouteMetaCommandT('/rename discuss MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/rename discuss-mcp', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(replies[0].text).toMatch(/wrapper not detected/)
     expect(listPending(stateDir).length).toBe(0)
@@ -376,6 +375,15 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     const consumed = await tryRouteMetaCommandT('/rename solo-name', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(replies[0].text).toBe('✏️ Renaming session to "solo-name".')
+  })
+
+  test('rejects /rename name containing a space', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    const consumed = await tryRouteMetaCommandT('/rename discuss mcp', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    expect(replies[0].text).toMatch(/spasi/i)
+    expect(listPending(stateDir).length).toBe(0)
   })
 
   test('/new succeeds when name is free', async () => {

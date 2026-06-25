@@ -424,7 +424,13 @@ async function handleRename(
   const sanitised = rawName.replace(/[\r\n]+/g, ' ').trim()
   if (sanitised.length === 0) {
     await handlers.reply(
-      '⚠️ /rename needs a new name. Example: /rename discuss MCP',
+      '⚠️ /rename needs a new name. Example: /rename discuss-mcp',
+    )
+    return true
+  }
+  if (/\s/.test(sanitised)) {
+    await handlers.reply(
+      '⚠️ Nama session tidak boleh mengandung spasi. Pakai tanda hubung, mis. /rename discuss-mcp.',
     )
     return true
   }
