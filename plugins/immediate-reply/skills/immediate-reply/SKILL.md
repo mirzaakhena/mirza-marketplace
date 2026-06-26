@@ -9,6 +9,12 @@ User reads Telegram from a phone and notices any delay over a couple of
 seconds. This skill keeps you visible from the moment the message arrives
 until the final answer lands.
 
+**One rule for delivery: every message is a NEW `reply`. Never
+`edit_message`.** Ack is a new message, progress updates are new messages,
+the final answer is a new message. This is deliberate — new messages always
+fire a push notification, so the user always sees a sign of life. No edit
+strategies, no message-id juggling, no 15-second threshold to remember.
+
 ## THE PRE-FLIGHT CHECK (do this BEFORE every Telegram reply)
 
 When a Telegram `<channel>` message arrives, **before composing your
@@ -26,7 +32,7 @@ This is a mechanical check. You are not deciding "is this important?" or
 judgement.
 
 If all four are "no" (you are about to produce a pure-text reply with no
-tools) → ack optional, just send the answer.
+tools) → no ack, just send the answer.
 
 ## Why mechanical, not judgement-based
 
@@ -41,12 +47,12 @@ on judgement and drifted in practice. Common failure modes:
 Counting tool calls eliminates all three. If you wrote a plan with even one
 `Read` or `Bash`, the ack is mandatory — no debate.
 
-## The Two Responsibilities (still applies)
+## The Two Responsibilities
 
 1. **Instant ack** — within ~1 second of the inbound message, send a short
-   reply so the user sees a sign of life.
-2. **Ongoing progress** — for tasks >15s wall clock, narrate at stage
-   transitions so the user never sits in silence after the ack.
+   `reply` so the user sees a sign of life.
+2. **Ongoing progress** — for tasks >15s wall clock, send a NEW `reply` at
+   stage transitions so the user never sits in silence after the ack.
 
 Silence after an ack is almost as bad as no ack.
 
@@ -62,25 +68,21 @@ Run pre-flight check (4 questions above)
   All "no"   Any "yes"
    │         │
    ▼         ▼
-Reply with   reply tool: send short ack
-final        capture bot's message_id
-answer.      │
-Done.        ▼
-             Do the work (tool calls, reads, etc.)
+reply with   reply: send short ack (new message)
+final        │
+answer.      ▼
+Done.        Do the work (tool calls, reads, etc.)
              │
              ▼
-             Estimate total elapsed time
+             Task >15s? → reply with progress at each
+             stage transition (each one a new message)
              │
-        ┌────┴────┐
-    < 15 sec   ≥ 15 sec
-        │         │
-        ▼         ▼
-   edit_message   Decide per situation:
-   with final     (a) multi-edit progress on ack, then NEW reply with final
-                  (b) leave ack as-is, send progress as NEW messages
-                  (c) mix
-                  (final answer ALWAYS a NEW reply for push notification)
+             ▼
+             reply with final answer (new message)
 ```
+
+Every arrow that sends something to the user is a `reply`. There is no
+other delivery path.
 
 ## Ack Phrasing — Mix and Surprise
 
@@ -115,64 +117,60 @@ per task.
 the user writes in another language, mirror it — e.g. an Indonesian user
 gets a casual Indonesian ack like "🔍 Bentar, cek dulu yaa...".
 
-## Update Strategies (pick ONE per task)
+## Progress Narration (for tasks >15s)
 
-### Strategy A — Edit-to-final (best for 5-15s tasks)
-1. Ack: "🔍 Hang on, checking..."
-2. Do the work.
-3. `edit_message` with final answer.
+When work runs long, send progress as **new messages** at real stage
+transitions — not on a timer. Each one is a normal `reply`.
 
-### Strategy B — Multi-edit progress (best for 15-60s tasks with clear stages)
+Example flow for a long task:
 1. Ack: "🔍 Checking..."
-2. After stage 1: edit to "✅ Check done, now researching..."
-3. After stage 2: edit to "✅ Research done, drafting the answer..."
-4. Final answer: NEW reply (not edit) — push notification fires.
+2. After stage 1: "✅ Check done, now researching..."
+3. After stage 2: "✅ Got the data, drafting the answer..."
+4. Final answer: full reply.
 
-### Strategy C — Progressive new messages
-1. Ack: "👌 On it..."
-2. As work progresses, NEW messages narrating: "hmm let me read first...", "oh turns out X..."
-3. Final answer also NEW message.
-
-Use when narration is itself useful or user wants thinking visible.
-
-### Strategy D — Mix
-Switch mid-task if stages run longer than expected. Final answer ALWAYS
-NEW reply if total >15s.
+Keep each progress line short. Narrate when the *situation* changes ("oh,
+turns out X"), not just to fill silence. One useful update beats three
+empty "still working" pings.
 
 ## Hard Rules (Telegram constraints — non-negotiable)
 
-1. **No push notification on edit.** Task >15s → final must be NEW reply.
-2. **Don't edit faster than 1x per second per chat.** Rate limit.
-3. **Edits don't change message type.** Image must be a new message.
-4. **Don't ack-spam.** One ack per user message; if user sends 3 in 5s, ack
-   the latest only.
-5. **No ack for pure-text replies with zero tools.** Pre-flight all-no path.
+1. **Every message is a new `reply`.** Never `edit_message` in this skill.
+   This guarantees the user gets a push notification for ack, progress, and
+   final alike.
+2. **One ack per inbound.** If the user sends 3 messages in 5s, ack the
+   latest only — don't ack-spam.
+3. **No ack for pure-text replies with zero tools.** Pre-flight all-no path.
+4. **Progress narration is for stage transitions, not a heartbeat.** Don't
+   send filler pings; send updates when something actually changed.
 
 ## Implementation pointers
 
 Via `plugin:telegram:telegram` MCP:
 
 1. Receive Telegram message → has `chat_id`, `message_id` of user.
-2. Pre-flight check (4 questions). If any "yes": call `reply` with ack →
-   capture bot's `message_id`.
-3. Save that `message_id` in working memory for this turn.
-4. Do the tool calls.
-5. Call `edit_message` (chat_id + saved message_id + new text) for edit
-   strategy, OR `reply` again for new-message strategy.
-6. Long tasks: final answer ALWAYS via `reply`, never just `edit_message`.
+2. Pre-flight check (4 questions). If any "yes": call `reply` with a short
+   ack.
+3. Do the tool calls.
+4. For long tasks, call `reply` again at each stage transition.
+5. Call `reply` with the final answer.
 
-## Anti-patterns (carry forward)
+Always `reply`. You never need to capture or reuse a bot `message_id`,
+because nothing is ever edited.
 
+## Anti-patterns
+
+- ❌ Using `edit_message` — this skill is new-messages-only now.
 - ❌ Judgement-based threshold ("feels fast", "trivial") — drifts.
 - ❌ "I'll just type the answer now while Read is running" — Read is a
   tool call. Ack first.
 - ❌ Multiple acks for one inbound message.
 - ❌ Multi-paragraph ack. One line, one emoji max, under 50 chars.
-- ❌ Final answer as edit when task >15s — no push notification, user
-  thinks you ghosted.
+- ❌ Filler progress pings ("still working...") with no new information —
+  every message buzzes the phone, so make each one earn its notification.
 - ✅ Pre-flight check is mechanical. Count tools, don't judge difficulty.
 - ✅ Ack BEFORE the first non-reply tool fires, not after.
 - ✅ Stage-transition narration for long tasks. Silence kills trust.
 
 That's it. The point: user sees a sign of life within ~1 second from
-EVERY non-trivial inbound, and stays informed throughout.
+EVERY non-trivial inbound, and stays informed throughout — all through
+plain new messages.

@@ -2,6 +2,8 @@
 
 A **skill-only** plugin that tells Claude to send a short acknowledgement to the Telegram user within ~1 second before the first tool call runs. No MCP server, no commands — just a single behavior skill that gets audited every time a Telegram message comes in.
 
+> **Delivery model:** every message is a **new `reply`** — ack, progress, and final answer alike. The skill never uses `edit_message`. This keeps the rules dead simple and guarantees a push notification at every step. The trade-off (accepted on purpose) is that the user's phone buzzes for each message instead of one message quietly updating in place.
+
 ## Why this plugin exists
 
 Telegram users read from their phones. A 5-second delay with no sign of life feels like the bot is ghosting. An instant acknowledgement ("hang on, checking...") before the work starts reassures the user that their message landed and Claude is working, even though the final answer only shows up 30 seconds later. The ack mirrors the language the user writes in — casual and in their register.
@@ -26,22 +28,25 @@ This check is deliberately mechanical, not judgement-based — the old version (
 
 The full skill lives in [`skills/immediate-reply/SKILL.md`](skills/immediate-reply/SKILL.md). That's the source of truth — it has the flow diagram, example ack phrasing per situation (research/file read/thinking/writing), the rule to mirror the user's language, and an anti-pattern list.
 
-## Update strategies
+## Delivery — new messages only
 
-Once the ack is sent, pick ONE strategy per task (don't switch mid-way):
+There are no edit strategies to choose between anymore. The flow is always
+the same:
 
-- **A — Edit-to-final.** Good for 5–15 second tasks. Ack → work → `edit_message` into the final answer. One clean message in the chat.
-- **B — Multi-edit progress + new final reply.** Good for 15–60 second tasks with clear stages. The ack gets edited a few times as progress ("✅ research done, drafting the answer..."), and the final answer is sent as a **new reply** so the phone's push notification fires.
-- **C — Progressive new messages.** Good for a "thinking out loud" feel. A short ack, then the process narration sent as successive new messages.
-- **D — Mix.** Start with edits, switch to new messages if it turns out to take longer than expected. That's fine, as long as the final answer is always a new message when the total is > ~15 seconds.
+1. **Ack** — a new `reply` sent before the first tool runs.
+2. **Progress** (tasks > 15s) — a new `reply` at each real stage transition.
+3. **Final answer** — a new `reply`.
 
-## Telegram constraints you must obey
+No `edit_message`, no message-id juggling, no 15-second threshold to decide
+edit-vs-new. Every message buzzes the phone, which is exactly the point: the
+user always sees a sign of life.
 
-1. **Edits don't trigger a push notification.** If a task takes > ~15 seconds, the final output MUST be a new message, not just an edit — otherwise the user's phone won't ping and they'll think Claude vanished.
-2. **Don't edit faster than 1x per second per chat.** That's Telegram rate limit territory.
-3. **Edits can't change the message type.** A text ack can't be edited into an image — an image has to be a new message.
-4. **One ack per user message.** If the user sends 3 messages within 5 seconds, ack the last one — don't send 3 acks.
-5. **Skip the ack only for pure-text responses with no tools.** The "all no" path of the pre-flight check — greetings, a quick fact from memory — answer directly. The moment there's a single Read/Bash/other tool, an ack is mandatory.
+## Telegram rules you must obey
+
+1. **Every message is a new `reply`.** Never `edit_message`.
+2. **One ack per user message.** If the user sends 3 messages within 5 seconds, ack the last one — don't send 3 acks.
+3. **Skip the ack only for pure-text responses with no tools.** The "all no" path of the pre-flight check — greetings, a quick fact from memory — answer directly. The moment there's a single Read/Bash/other tool, an ack is mandatory.
+4. **Progress is for stage transitions, not a heartbeat.** Since every message buzzes, don't send filler pings — make each update carry new information.
 
 ## Plugin pairing
 
