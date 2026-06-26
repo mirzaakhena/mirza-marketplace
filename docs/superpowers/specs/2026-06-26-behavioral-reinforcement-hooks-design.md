@@ -38,6 +38,12 @@ When it is a Telegram inbound, it injects a compact reminder block as `additiona
   send a short ack via the reply tool BEFORE that first tool call."
 - inline-buttons: "If your reply asks a question / offers options, attach `buttons`
   (min Yes/No + a manual-fallback)."
+- channel discipline (AFK): "This conversation came from Telegram — the user is AFK and
+  does NOT see your transcript. Answering via the reply tool is MANDATORY: send the final
+  answer through reply when the task concludes, not only at the start." This is the
+  per-turn backstop for the hardest forgetting case (acked early, forgot the final reply
+  after long/background work), which Component 3 cannot catch mechanically without false
+  positives.
 - name-session (conditional): resolve the **current** session name (Component 2's
   authoritative read). If it is still `idle`, append: "Session still 'idle' — if the
   topic is now clear, offer a hyphenated name via buttons THIS turn (name-session step-2)."
@@ -73,22 +79,34 @@ does not exist.
 
 ---
 
-### Component 3 — Channel-discipline Stop hook (telegram, warn-with-teeth)
+### Component 3 — Mandatory-reply Stop hook (telegram, block-once)
 
-A `Stop` hook in the `telegram` plugin. On stop it reads the transcript (`transcript_path`
-from the hook stdin JSON) and inspects the **current turn**:
+**Why this matters most:** when a question arrives via Telegram, the user is AFK and does
+NOT see the transcript. Replying via the reply tool is mandatory. The most common failure
+is forgetting the FINAL reply at the **end** of a task (often the turn that fires from a
+subagent `task-notification`, not from the original inbound).
 
-- Was this turn triggered by a Telegram inbound? (the triggering user message carries the
-  `<channel source="...telegram...">` marker)
-- Did the assistant make a `reply` tool call in this turn?
+A `Stop` hook in the `telegram` plugin. The Stop event fires at a **concluding** stop —
+the agent has no live background children (still-running subagents keep the turn alive, so
+mid-task waits do not trip it). On that concluding stop the hook reads the transcript
+(`transcript_path` from the hook stdin JSON) and decides:
 
-If triggered-by-telegram AND no `reply` call → the hook **blocks the stop once** with a
-reason: "You were triggered by a Telegram inbound but did not call the reply tool. If you
-intended to answer the user, send the reply now." Guard against loops using the
-`stop_hook_active` flag in the hook input — if it is already set, do NOT block again
-(allow the stop). So at most one re-nudge per stop chain.
+- Is this a **Telegram-driven** conversation? (the transcript contains at least one
+  `<channel source="...telegram...">` inbound)
+- Find the latest Telegram inbound and the latest `reply` tool call. If **no `reply` call
+  has occurred since the latest Telegram inbound**, the user is owed an answer.
 
-This is "warn with teeth": it does not silently log (useless), but it also cannot loop.
+If Telegram-driven AND a reply is owed → the hook **blocks the stop once** with a reason:
+"This conversation is from Telegram and the user is AFK. You have not sent a reply since
+their last message — send your answer via the reply tool now." Guard against loops with
+the `stop_hook_active` flag: if it is already set, do NOT block again (allow the stop). So
+at most one re-nudge per stop chain.
+
+**Honest limitation:** if the AI sent an early **ack** reply after the inbound and then
+forgot the final answer, the "reply since last inbound" test sees the ack and will NOT
+block — that ack-but-no-final case is covered (softly) by Component 1's per-turn
+channel-discipline reminder, not by this hook. This hook reliably catches the "inbound got
+NO reply at all" case, which is the clean, false-positive-free signal.
 
 ---
 
@@ -133,8 +151,10 @@ Each hook's pure decision logic is extracted into a testable function and unit-t
 
 - Telegram-inbound detection (true for `<channel source=...telegram...>`, false otherwise).
 - `readAuthoritativeSessionName` (reads the file; null when absent) + idle check.
-- Stop-hook decision: given a transcript-shaped input (telegram-triggered, reply present
-  / absent, `stop_hook_active` true/false) → block vs allow.
+- Stop-hook decision: given a transcript-shaped input → block vs allow, across cases:
+  Telegram-driven with no reply since the latest inbound (block); a reply exists after the
+  latest inbound (allow); not Telegram-driven (allow); and `stop_hook_active` already set
+  (allow, no second block).
 - Commit-trailer detection: `git commit` with/without an `Agent:` trailer, and non-commit
   commands → allow.
 
