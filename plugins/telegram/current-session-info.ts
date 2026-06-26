@@ -47,6 +47,27 @@ export function readCurrentSessionId(
 }
 
 /**
+ * Reads the wrapper's authoritative current session name from
+ * <ptyStateDir>/wrapper.current_session_name. This file is maintained by the
+ * mirza-cc wrapper and reflects the live name even right after a rename,
+ * unlike the sid->registry mapping which can lag. Null if absent/empty.
+ */
+export function readAuthoritativeSessionName(
+  env: Record<string, string | undefined>,
+): string | null {
+  const dir = resolvePtyStateDir(env)
+  if (!dir) return null
+  const file = join(dir, 'wrapper.current_session_name')
+  if (!existsSync(file)) return null
+  try {
+    const raw = readFileSync(file, 'utf8').trim()
+    return raw.length > 0 ? raw : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Looks up `sessionId` in the persistent name registry under `telegramStateDir`.
  * Returns the registered name, or null if none.
  */

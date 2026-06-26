@@ -5,12 +5,19 @@
  * session is still called "idle". Degrades silently when no pty/telegram
  * state exists — emits nothing rather than erroring.
  */
-import { readCurrentSessionId, resolveCurrentSessionName } from '../current-session-info.ts'
+import {
+  readCurrentSessionId,
+  resolveCurrentSessionName,
+  readAuthoritativeSessionName,
+} from '../current-session-info.ts'
 import { resolveStateDir } from '../state-path.ts'
 
 export function resolveSessionNameForContext(
   env: Record<string, string | undefined>,
 ): string | null {
+  const authoritative = readAuthoritativeSessionName(env)
+  if (authoritative) return authoritative
+  // Fallback for non-wrapper setups: sid -> telegram name registry.
   const sid = readCurrentSessionId(env)
   const telegramStateDir = resolveStateDir(env)
   if (!sid || !telegramStateDir) return null
