@@ -39,6 +39,7 @@ import { resolveStateDir as resolveTelegramStateDir } from './state-path.ts'
 import { renderPickerPage } from './paginated-picker.ts'
 import { addArchived } from './archive-store.ts'
 import { resolveCurrentSessionName } from './current-session-info.ts'
+import { validateSessionName } from './session-name-rules.ts'
 
 const HEARTBEAT_FRESH_MS = 30_000
 const SHORT_ID_RE = /^[0-9a-f]{8}$/
@@ -364,15 +365,12 @@ async function handleNew(
   handlers: MetaCommandHandlers,
   rawName: string,
 ): Promise<boolean> {
-  // Strip newlines/CRs that would corrupt the PTY-injected `/rename <name>\r`.
-  const sanitised = rawName.replace(/[\r\n]+/g, ' ').trim()
-  if (sanitised.length === 0) {
-    await handlers.reply(
-      '⚠️ /new needs a session name. Example: /new discuss MCP',
-    )
+  const validation = validateSessionName(rawName, '/new')
+  if (!validation.ok) {
+    await handlers.reply(validation.message)
     return true
   }
-  const sessionName = sanitised.slice(0, 64)
+  const sessionName = validation.name
 
   const stateDir = resolvePtyStateDir(env)
   if (!stateDir) {
@@ -419,22 +417,12 @@ async function handleRename(
   handlers: MetaCommandHandlers,
   rawName: string,
 ): Promise<boolean> {
-  // Same sanitisation as /new — CR/LF in the name would corrupt the PTY-injected
-  // `/rename <name>\r` keystroke. Collapse to single spaces, trim, cap at 64.
-  const sanitised = rawName.replace(/[\r\n]+/g, ' ').trim()
-  if (sanitised.length === 0) {
-    await handlers.reply(
-      '⚠️ /rename needs a new name. Example: /rename discuss-mcp',
-    )
+  const validation = validateSessionName(rawName, '/rename')
+  if (!validation.ok) {
+    await handlers.reply(validation.message)
     return true
   }
-  if (/\s/.test(sanitised)) {
-    await handlers.reply(
-      '⚠️ Nama session tidak boleh mengandung spasi. Pakai tanda hubung, mis. /rename discuss-mcp.',
-    )
-    return true
-  }
-  const newName = sanitised.slice(0, 64)
+  const newName = validation.name
 
   const stateDir = resolvePtyStateDir(env)
   if (!stateDir) {

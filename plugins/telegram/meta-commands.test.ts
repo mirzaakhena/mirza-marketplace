@@ -95,7 +95,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
 
   test('consumes /new but warns when CLAUDE_PROJECT_DIR is missing', async () => {
     const { handler, replies } = makeHandler()
-    const consumed = await tryRouteMetaCommandT('/new discuss MCP', {}, handler)
+    const consumed = await tryRouteMetaCommandT('/new discuss-mcp', {}, handler)
     expect(consumed).toBe(true)
     expect(replies.length).toBe(1)
     expect(replies[0].text).toMatch(/CLAUDE_PROJECT_DIR/)
@@ -103,7 +103,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
 
   test('consumes /new but warns when wrapper heartbeat is missing', async () => {
     const { handler, replies } = makeHandler()
-    const consumed = await tryRouteMetaCommandT('/new discuss MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/new discuss-mcp', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(replies.length).toBe(1)
     expect(replies[0].text).toMatch(/wrapper not detected/)
@@ -113,7 +113,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
   test('consumes /new but warns when heartbeat is stale', async () => {
     const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date(Date.now() - 5 * 60_000).toISOString())
-    const consumed = await tryRouteMetaCommandT('/new discuss MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/new discuss-mcp', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(replies[0].text).toMatch(/wrapper not detected/)
     expect(listPending(stateDir).length).toBe(0)
@@ -122,7 +122,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
   test('writes /clear command file with sessionName and no intermediate ack when wrapper is fresh', async () => {
     const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
-    const consumed = await tryRouteMetaCommandT('/new discuss MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/new discuss-mcp', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     // No ack on the happy path — the transition message arrives later via
     // the system-outbox event the wrapper writes after the fresh session
@@ -132,39 +132,48 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     expect(pending.length).toBe(1)
     const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
     expect(payload.command).toBe('/clear')
-    expect(payload.sessionName).toBe('discuss MCP')
+    expect(payload.sessionName).toBe('discuss-mcp')
     expect(typeof payload.id).toBe('string')
     expect(typeof payload.ts).toBe('string')
+  })
+
+  test('/new rejects name containing a space', async () => {
+    const { handler, replies } = makeHandler()
+    setHeartbeat(stateDir, new Date().toISOString())
+    const consumed = await tryRouteMetaCommandT('/new discuss MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    expect(consumed).toBe(true)
+    expect(replies[0].text).toMatch(/spasi/i)
+    expect(listPending(stateDir).length).toBe(0)
   })
 
   test('uppercase /NEW also matches (case-insensitive); name preserves case', async () => {
     const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
-    const consumed = await tryRouteMetaCommandT('/NEW Discuss MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('/NEW Discuss-MCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     expect(replies.length).toBe(0)
     const pending = listPending(stateDir)
     expect(pending.length).toBe(1)
     const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
-    expect(payload.sessionName).toBe('Discuss MCP')
+    expect(payload.sessionName).toBe('Discuss-MCP')
   })
 
   test('whitespace around /new <name> is tolerated', async () => {
     const { handler } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
-    const consumed = await tryRouteMetaCommandT('  /new discuss MCP  ', { CLAUDE_PROJECT_DIR: projectDir }, handler)
+    const consumed = await tryRouteMetaCommandT('  /new discuss-mcp  ', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
     const pending = listPending(stateDir)
     expect(pending.length).toBe(1)
     const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
-    expect(payload.sessionName).toBe('discuss MCP')
+    expect(payload.sessionName).toBe('discuss-mcp')
   })
 
   test('honors PTY_CONTROLLER_STATE_DIR override over CLAUDE_PROJECT_DIR', async () => {
     const { handler } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
     const consumed = await tryRouteMetaCommandT(
-      '/new discuss MCP',
+      '/new discuss-mcp',
       { PTY_CONTROLLER_STATE_DIR: stateDir, CLAUDE_PROJECT_DIR: '/nowhere/that/exists' },
       handler,
     )
@@ -191,15 +200,14 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     expect(listPending(stateDir).length).toBe(0)
   })
 
-  test('strips newlines from /new name (PTY injection safety)', async () => {
-    const { handler } = makeHandler()
+  test('rejects /new name with a newline (collapses to a space, then rejected)', async () => {
+    const { handler, replies } = makeHandler()
     setHeartbeat(stateDir, new Date().toISOString())
     const consumed = await tryRouteMetaCommandT('/new discuss\nMCP', { CLAUDE_PROJECT_DIR: projectDir }, handler)
     expect(consumed).toBe(true)
-    const pending = listPending(stateDir)
-    const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
-    // Newlines are replaced with single spaces — never embedded in the name.
-    expect(payload.sessionName).toBe('discuss MCP')
+    // Newlines collapse to spaces, then the space check rejects the name.
+    expect(replies[0].text).toMatch(/spasi/i)
+    expect(listPending(stateDir).length).toBe(0)
   })
 
   test('truncates /new name longer than 64 chars', async () => {
@@ -281,10 +289,10 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     // <CLAUDE_PROJECT_DIR>/.claude/channels/telegram
     const telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
     mkdirSync(telegramStateDir, { recursive: true })
-    registrySetName(telegramStateDir, 'existing-session-id', 'discuss MCP')
+    registrySetName(telegramStateDir, 'existing-session-id', 'discuss-mcp')
 
     const consumed = await tryRouteMetaCommandT(
-      '/new discuss MCP',
+      '/new discuss-mcp',
       { CLAUDE_PROJECT_DIR: projectDir },
       handler,
     )
@@ -392,10 +400,10 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     // Registry exists but does NOT contain the requested name.
     const telegramStateDir = join(projectDir, '.claude', 'channels', 'telegram')
     mkdirSync(telegramStateDir, { recursive: true })
-    registrySetName(telegramStateDir, 'other-session', 'some other name')
+    registrySetName(telegramStateDir, 'other-session', 'some-other-name')
 
     const consumed = await tryRouteMetaCommandT(
-      '/new discuss MCP',
+      '/new discuss-mcp',
       { CLAUDE_PROJECT_DIR: projectDir },
       handler,
     )
@@ -405,7 +413,7 @@ describe('meta-commands: tryRouteMetaCommand', () => {
     expect(pending.length).toBe(1)
     const payload = JSON.parse(readFileSync(join(stateDir, 'pending', pending[0]), 'utf8'))
     expect(payload.command).toBe('/clear')
-    expect(payload.sessionName).toBe('discuss MCP')
+    expect(payload.sessionName).toBe('discuss-mcp')
   })
 })
 
