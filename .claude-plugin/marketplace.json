@@ -65,6 +65,12 @@
       "description": "Bot-to-bot messaging for Claude Code. Lets one registered agent send another a one-way natural-language prompt (broadcast-capable to many peers at once) via a per-peer filesystem inbox, coordinated through the shared ~/.claude/agent-registry.json. kind:\"slash\" was removed (neighbor-autonomy decision 2026-06-07): the peer's own AI decides and executes commands itself. Provides the agent_list / agent_status / agent_send MCP tools; agent_status reports session id/name, context % and window size in tokens, with stale-snapshot detection (falls back to the wrapper's session id+name files when telegram's last-status is from a previous session; null context = fresh session). Prompts arrive at the peer as a normal user turn prefixed with an agent-bus attribution marker and are acted on automatically; there is no reply protocol (loops are prevented by an anti-bounce skill rule plus a hop-count cap). Builds on pty-controller's registry and the mirza-cc wrapper; pairs with the telegram plugin for richer peer status.",
       "category": "productivity",
       "source": "./plugins/agent-bus"
+    },
+    {
+      "name": "knowledge-vault",
+      "description": "Behavioral skill routing every bot to the shared Obsidian knowledge vault (mirza-vault) and its conventions — durable/disposable split (Projects/ vs a flat Knowledge/ pool), 6 atomic note types (lesson, decision, concept, pattern, reference, open-question), and a capture→distillation pipeline — so team knowledge is captured reusably and interlinked instead of dying in per-session logs. The vault's _meta/Conventions.md stays the single source of truth; the skill is the pointer + trigger. Complements, does not duplicate, daily-report (external/ephemeral) and Plane (transactional).",
+      "category": "productivity",
+      "source": "./plugins/knowledge-vault"
     }
   ]
 }

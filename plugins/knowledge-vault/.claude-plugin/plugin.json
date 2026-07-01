@@ -1,0 +1,16 @@
+{
+  "name": "knowledge-vault",
+  "description": "Points every bot to the shared Obsidian team knowledge vault (mirza-vault) and its conventions, so lessons, decisions, concepts, patterns, references, and open questions are captured as reusable, interlinked atomic notes instead of being lost in per-session logs. Behavioral skill that activates when a bot produces or needs durable team knowledge; the vault's _meta/Conventions.md remains the single source of truth.",
+  "version": "0.0.1",
+  "author": {
+    "name": "Mirza"
+  },
+  "keywords": [
+    "knowledge",
+    "vault",
+    "obsidian",
+    "second-brain",
+    "notes",
+    "skill"
+  ]
+}
