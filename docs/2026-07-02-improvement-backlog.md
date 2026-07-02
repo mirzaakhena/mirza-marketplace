@@ -14,6 +14,7 @@
 4. **Disiplin git repo bersama** (`docs/SOP-git-multi-agent.md` + skill `bot-conduct`): edit/commit HANYA di `C:\Users\Mirza\workspace\mirza-marketplace` (canonical clone), pakai worktree untuk kerja paralel, trailer `Agent: <bot-name>` di tiap commit, push segera setelah commit rilis.
 5. **Tulis test dulu bila memungkinkan** (repo pakai Bun + `bun:test`) — banyak temuan di bawah ada justru karena area itu tak ter-cover test.
 6. Tandai item selesai dengan mengubah `[ ]` → `[x]` + tulis SHA commit di sampingnya, supaya bot berikutnya tahu progres.
+7. **Sebelum mengerjakan item P2/P3, baca bagian "Arah arsitektur target" di akhir dokumen.** Bentuk akhir beberapa fix (terutama INFRA-* dan CONS-1/3, serta IDEA-1/2/3) ditentukan oleh arah itu — kerjakan fix taktis dengan bentuk yang konvergen ke sana, bukan menjauh.
 
 ---
 
@@ -369,3 +370,49 @@ Ini bukan bug — ini arah pengembangan. **Jangan langsung implementasi**; matan
 ## Sumber & catatan integritas
 
 Temuan ✓ di-spot-check langsung terhadap kode saat audit ini: LOSS-1 (encodeProjectDir vs binary CC v2.1.198), LOSS-4 (append tak ada), VER-1 (versi hardcoded), FUNC-4 (matcher Bash), FUNC-5 (bypass/false-positive live), CONS-3 (overlap registry), CONS-5 (dead scripts), INFRA-3 (no .gitattributes), CONS-2 (edit_message masih tereskpos). Sisanya dari 4 subagent auditor yang membaca source penuh + menjalankan test; konfirmasi ulang sebelum fix besar, terutama `[UNCERTAIN]` (LOSS-3).
+
+---
+
+# Arah arsitektur target — keputusan diskusi 2026-07-02 (Mirza × Fable 5, sesi `harness-redesign` @ bot-02)
+
+> Bagian ini ditambahkan setelah backlog di atas ditulis, dari diskusi arsitektur menyeluruh (4 subagent membedah seluruh source + docs). **Backlog di atas TETAP BERLAKU** sebagai perbaikan taktis pada sistem yang berjalan. Bagian ini menetapkan ARAH jangka panjang supaya setiap fix dikerjakan dengan bentuk akhir yang sama. Bila ragu bentuk sebuah fix, rujuk ke sini.
+
+## Konstrain yang mengikat (keputusan user — JANGAN dilanggar)
+
+- **Tidak memakai Claude Agent SDK / `claude -p` sama sekali.** Alasan: ketidakpastian billing — email Anthropic 14 Mei 2026 mengumumkan usage Agent SDK/`claude -p` (termasuk aplikasi pihak ketiga di atas SDK) akan pindah ke kredit bulanan $100 terpisah efektif 15 Juni; email 16 Juni 2026 menangguhkan rencana itu ("we're not making this change today… we'll share it with advance notice"). Satu-satunya permukaan yang PASTI tetap dihitung sebagai penggunaan subscription = **penggunaan interaktif Claude Code (TUI)**. PTY wrapper (`mirza-cc`) dengan demikian adalah keputusan billing yang rasional dan **DIPERTAHANKAN** — jangan usulkan lagi migrasi ke SDK selama kebijakan belum final.
+- **Prinsip lama yang dipertahankan:** AI decides, machine executes; neighbor autonomy (prompt-only antar bot, keputusan 2026-06-07); state per-project; handoff via file markdown chain.
+
+## Prinsip pengganti
+
+**"PTY untuk input; hooks untuk output."** Keystroke injection hanya untuk kontrol masuk (slash lifecycle). Kebenaran tentang sesi TIDAK PERNAH lagi di-scrape/ditebak dari luar (polling jsonl, meniru encoding internal CC, timing empiris) — ia dilaporkan dari DALAM Claude Code lewat hooks: SessionStart/SessionEnd/Stop berjalan penuh di mode interaktif dan tahu `session_id` resmi. Jangan pernah menebak apa yang bisa dilaporkan CC sendiri dari dalam.
+
+## Tujuh poin arsitektur target
+
+1. **PTY tetap; scraping mati.** SessionStart hook menulis state sesi (id/nama/lifecycle) ke tempat otoritatif → wrapper berhenti polling folder jsonl dan berhenti meniru `encodeProjectDir` (menghapus AKAR LOSS-1). Clear-barrier 10-menit diganti event deterministik: `/clear` diinjeksi → SessionStart sesi baru mengumumkan dirinya. Injeksi jadi ber-ACK: keystroke → konfirmasi dari dalam CC → baru dianggap terkirim (IDEA-2 terpenuhi struktural).
+2. **Satu daemon supervisor per mesin** menampung & mengawasi 6 wrapper PTY sebagai child process: restart otomatis, health nyata, registry in-memory milik daemon (menggantikan `agent-registry.json` + lockfile → akar LOSS-2/LOSS-8 hilang). Wrapper menyusut jadi pemegang PTY tipis yang dikendalikan daemon.
+3. **Message bus ber-ACK** (in-process di daemon; antar proses via named pipe/socket lokal): idempotency key, antrean offline yang terlihat, dead-letter. Prompt antar-bot masuk ke sesi CC lewat **MCP channel notification** (jalur yang sudah terbukti dipakai pesan Telegram → `<channel>` turn) — BUKAN diketik ke PTY; chunking 100-char & masalah ConPTY input-buffer hilang. Keystroke tersisa hanya untuk slash lifecycle.
+4. **Satu SQLite (WAL) untuk semua state:** sesi/nama/lifecycle, registry, message log, goal, handoff — menggantikan ~10 file JSON tersebar + ≥6 varian tmp+rename hand-rolled. Transaksi menggantikan lockfile; `/context` (telegram) vs `agent_status` (agent-bus) tak bisa lagi beda pendapat tentang bot yang sama.
+5. **Channel = adapter hexagonal.** Telegram adapter hanya menerjemahkan update ↔ bus. `server.ts` 2195-baris pecah natural jadi gateway (grammy) / router / state; menambah channel baru (WhatsApp/Discord/web) = menulis adapter baru saja. Kode grammy handling, chunking, access-control yang sudah well-tested DIANGKUT, bukan ditulis ulang.
+6. **Invarian protokol pindah dari teks skill ke kode.** Saat ini hanya 1 dari 9 plugin behavioral yang punya hook mekanis; sisanya "dimohon" via SKILL.md dan lapse model = protokol bocor senyap. Target: reply-guard yang benar-benar memverifikasi jawaban substantif (memperbaiki FUNC-3 secara struktural), state machine handoff/goal dijalankan mesin (ACK-before-reset, confirmation gate), AI hanya mengisi konten. Hooks CC adalah mekanisme enforcement yang tersedia penuh di mode interaktif.
+7. **Monorepo packages** (`@harness/bus`, `/state`, `/registry`, `/telegram`): satu implementasi per konsep, skema Zod di tiap boundary — mengakhiri konvensi yang tertriplikasi (state machine nama sesi di 3 tempat; registry writer yang drift dari dead code-nya, CONS-4). Permukaan plugin CC dikecilkan jadi **satu stub tipis yang stabil** (MCP bridge + hooks, jarang berubah); semua logika hidup di daemon yang deploy-nya `git pull` + restart → frekuensi terkena checklist rilis 5-poin & masalah 3-copy turun drastis (tidak hilang total — stub tetap plugin).
+
+## Dampak ke item backlog di atas
+
+- **Tetap berlaku tanpa perubahan:** semua SEC, LOSS-3/5/6/7/9, semua FUNC kecuali catatan FUNC-3 di bawah, VER-1/2, CONS-2/5/6, INFRA-3.
+- **Tetap dikerjakan, dengan bentuk akhir baru:**
+  - **LOSS-1:** fix taktis (samakan encoding + truncation) sah untuk sistem berjalan, tapi fix durable = poin 1 — SessionStart hook melaporkan `session_id`, wrapper tak perlu tahu encoding CC sama sekali. Jangan investasi berlebihan di penebak encoding.
+  - **LOSS-2 / LOSS-8 / CONS-4 / INFRA-1:** INFRA-1 (paket registry bersama) tetap langkah pertama yang benar DAN sekaligus fase 1 strangler; end-state-nya registry pindah ke daemon (poin 2) / SQLite (poin 4).
+  - **INFRA-2 / INFRA-5 / INFRA-6:** kerjakan versi murahnya sekarang; menjadi obsolet saat poin 4 selesai — jangan bangun berlebihan.
+  - **FUNC-3 + CONS-1:** desain merger `reply-discipline` harus mengikuti poin 6 — hook yang meng-enforce (verifikasi reply substantif setelah tool-use terakhir), skill menipis jadi konten/gaya. Dua item ini satu paket desain.
+  - **CONS-3:** end-state = daemon/bus jadi satu-satunya permukaan peer-discovery.
+  - **IDEA-1 (`/doctor`):** makin penting — jadikan alat verifikasi kesehatan SELAMA migrasi (cek per fase: hook menulis state? ACK jalan? shim kompatibel?).
+  - **IDEA-2:** terpenuhi struktural oleh poin 1+3; bila dikerjakan taktis duluan, buat seminimal mungkin (ack-file per id) karena akan diganti.
+  - **IDEA-3 (`search_messages`):** gabungkan dengan poin 4 — FTS5 di atas SQLite terkonsolidasi, bukan fitur tempelan di `messages.db` lama.
+
+## Jalur migrasi (strangler — BUKAN big-bang)
+
+1. **Fase 1 — shared packages + konsolidasi state:** INFRA-3, INFRA-1/2, mulai poin 4 & 7. Membunuh separuh kelas bug LOSS tanpa menyentuh arsitektur proses.
+2. **Fase 2 — satu bot pilot** pindah ke daemon + hook-inversion (poin 1/2/3/6) dengan **shim kompatibilitas** ke format file lama, supaya fleet campuran (pilot + 5 bot lama) tetap saling melihat.
+3. **Fase 3 — migrasi fleet penuh:** pensiunkan polling jsonl, lockfile, file JSON tersebar; hapus shim.
+
+**Status:** arah disetujui user 2026-07-02. Design doc terperinci (diagram, skema modul, kontrak shim) menyusul SEBELUM eksekusi fase mana pun; fase 2/3 wajib spec + plan (superpowers) dan konfirmasi user per fase.
