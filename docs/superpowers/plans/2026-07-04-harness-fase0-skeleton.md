@@ -769,6 +769,18 @@ Ringkas: fase 0 selesai per definisi §9, link/artefak, next = fase 1 (butuh tok
 
 ---
 
+## Hasil eksekusi (2026-07-04) — FASE 0 SELESAI
+
+Dieksekusi bot-03 via subagent-driven development. Repo: https://github.com/mirzaakhena/mirza-harness — commits `7837e10..6a8a038` (semua pushed). Verifikasi live: hostd boot di `\\.\pipe\mirza-hostd`, `cli.ts doctor` membalas `ok:true`; suite 11 pass; typecheck clean; final whole-branch review = READY.
+
+**Catatan minor → input Fase 1** (semua non-blocking, triase final reviewer):
+1. `PRAGMA foreign_keys=ON` wajib diset saat manajemen koneksi DB lahir (fase 1).
+2. `messages_fts` external-content belum punya trigger sinkronisasi insert/update/delete — susun saat skema final.
+3. `server.ts` handleLine: valid-JSON-salah-bentuk dibalas `-32700`, semestinya `-32600` (fidelity kode error); validasi zod outbound belum ada (baru inbound).
+4. `cli.ts` tidak menangani respons `error` (cetak `undefined`, exit 0) — alat dev.
+5. Test hostd: multi-chunk NDJSON split & wrong-shape `-32600` belum di-assert suite (perilaku sudah diverifikasi manual); `afterAll` server.close belum di-await (flaky laten).
+6. Run GitHub Actions pertama belum diverifikasi dari mesin ini (repo private, tanpa `gh`) — cek tab Actions.
+
 ## Self-Review (sudah dijalankan)
 
 - **Spec coverage §9 fase 0:** repo ✅(T1) skeleton ✅(T1) `.gitattributes` ✅(T1) CI ✅(T5) skema SQLite ✅(T3) protokol IPC zod ✅(T2) hostd boot + `/doctor` jawab ✅(T4, T6).
