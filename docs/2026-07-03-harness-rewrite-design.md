@@ -1,7 +1,7 @@
 # Design Doc — Rewrite Harness Bot (Rakit Ulang)
 
 - **Tanggal:** 2026-07-03
-- **Status:** DRAFT — menunggu keputusan user pada "Keputusan terbuka" (§10) sebelum eksekusi fase mana pun.
+- **Status:** DISETUJUI — kelima keputusan §10 final per 2026-07-04. Eksekusi per fase tetap butuh konfirmasi user sebelum fase dimulai (§9).
 - **Konteks:** keputusan rewrite disepakati 2026-07-02 (sesi `harness-redesign`, bot-02). Dokumen pendamping yang WAJIB dibaca eksekutor:
   - `docs/2026-07-02-improvement-backlog.md` — bagian **"Arah arsitektur target"** (konstrain no-SDK + 7 poin + strangler 3 fase).
   - `docs/2026-07-02-capability-inventory/` — **kontrak penerimaan 529 item**; definisi "tidak ada fitur hilang".
@@ -163,9 +163,9 @@ Tiap fase: worktree + spec/plan superpowers + konfirmasi user sebelum mulai; pus
 
 1. **Nama monorepo/daemon: `mirza-harness` / `hostd`** — ✅ FINAL (disetujui user).
 2. **Runtime: Bun + TypeScript** — ✅ FINAL (disetujui user).
-3. **Adapter Telegram: 6 poller grammy dalam 1 hostd** (satu per token, di-supervisi) — ⏳ menunggu konfirmasi user setelah penjelasan (user minta teach-me).
+3. **Adapter Telegram: 6 poller grammy dalam 1 hostd** (satu per token, di-supervisi) — ✅ FINAL (disetujui user 2026-07-04 setelah penjelasan; trade-off single-point-of-failure diterima dengan mitigasi supervisi hostd).
 4. **Fase 1 pakai bot uji ke-7 (token Telegram baru)** — ✅ FINAL; user menyediakan token saat fase 1 dimulai (minta saat dibutuhkan).
-5. **`edit_message` (CONS-2): rekomendasi HAPUS dari permukaan tool** — ⏳ menunggu konfirmasi user. Alasan: (a) immediate-reply 0.0.7 sudah pindah ke new-messages-only karena edit tidak memicu push notification (update progress via edit tak terlihat di HP); (b) panduan saat ini kontradiktif (skill melarang, instruksi MCP menganjurkan) = kebingungan model; (c) FUNC-8: jalurnya lebih rapuh dari `reply`; (d) user mengonfirmasi tidak pernah melihat kebutuhannya. Bisa dihidupkan lagi dengan use-case sempit bila kebutuhan nyata muncul.
+5. **`edit_message` (CONS-2): HAPUS dari permukaan tool** — ✅ FINAL (disetujui user 2026-07-04). Alasan: (a) immediate-reply 0.0.7 sudah pindah ke new-messages-only karena edit tidak memicu push notification (update progress via edit tak terlihat di HP); (b) panduan saat ini kontradiktif (skill melarang, instruksi MCP menganjurkan) = kebingungan model; (c) FUNC-8: jalurnya lebih rapuh dari `reply`; (d) user mengonfirmasi tidak pernah melihat kebutuhannya. Bisa dihidupkan lagi dengan use-case sempit bila kebutuhan nyata muncul.
 
 ## 11. Cara kerja pengembangan (arahan user, 2026-07-04)
 
