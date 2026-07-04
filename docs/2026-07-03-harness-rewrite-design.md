@@ -159,13 +159,21 @@ Shim = modul terpisah ber-tanggal-pensiun; dihapus di fase 3.
 
 Tiap fase: worktree + spec/plan superpowers + konfirmasi user sebelum mulai; push setiap milestone (doktrin git multi-agent tetap berlaku).
 
-## 10. Keputusan terbuka (menunggu user)
+## 10. Keputusan (status per 2026-07-04)
 
-1. **Nama monorepo/daemon** — usulan: `mirza-harness` / perintah `hostd`. (Nama lain?)
-2. **Bahasa/runtime tetap Bun+TS?** — asumsi ya (semua kode & test yang diangkut sudah Bun+TS). Alternatif (Go dsb.) berarti kehilangan porting-utuh modul teruji — tidak direkomendasikan.
-3. **Adapter Telegram: 6 proses grammy dalam 1 hostd** (satu per token, di-supervisi) — ada preferensi lain (mis. tetap terpisah per bot)?
-4. **Fase 1 pakai bot uji ke-7** (token baru, tidak mengganggu fleet) — setuju?
-5. **`edit_message`** (CONS-2): dipertahankan dengan use-case sempit, atau dihapus dari permukaan tool? (Harus diputuskan saat mendesain skema tool cc-stub.)
+1. **Nama monorepo/daemon: `mirza-harness` / `hostd`** — ✅ FINAL (disetujui user).
+2. **Runtime: Bun + TypeScript** — ✅ FINAL (disetujui user).
+3. **Adapter Telegram: 6 poller grammy dalam 1 hostd** (satu per token, di-supervisi) — ⏳ menunggu konfirmasi user setelah penjelasan (user minta teach-me).
+4. **Fase 1 pakai bot uji ke-7 (token Telegram baru)** — ✅ FINAL; user menyediakan token saat fase 1 dimulai (minta saat dibutuhkan).
+5. **`edit_message` (CONS-2): rekomendasi HAPUS dari permukaan tool** — ⏳ menunggu konfirmasi user. Alasan: (a) immediate-reply 0.0.7 sudah pindah ke new-messages-only karena edit tidak memicu push notification (update progress via edit tak terlihat di HP); (b) panduan saat ini kontradiktif (skill melarang, instruksi MCP menganjurkan) = kebingungan model; (c) FUNC-8: jalurnya lebih rapuh dari `reply`; (d) user mengonfirmasi tidak pernah melihat kebutuhannya. Bisa dihidupkan lagi dengan use-case sempit bila kebutuhan nyata muncul.
+
+## 11. Cara kerja pengembangan (arahan user, 2026-07-04)
+
+1. **Model mandor-orkestrator:** sesi utama (lead) mengorkestrasi subagent; pekerjaan yang independen dikerjakan PARALEL. Sebelum tiap fase, lead menyusun **peta dependensi** (mana standalone, mana depend-on) dan baru fan-out.
+2. **Bertanya aktif:** setiap keputusan desain yang muncul selama development DIANGKAT ke user (gaya teach-me), terutama: eliminasi/perubahan fitur dari inventaris (aturan `DIHAPUS/DIGANTI` di README inventaris memerlukan persetujuan user), ide alternatif yang lebih baik, dan trade-off arsitektural.
+3. **Perbaiki bug existing saat porting:** temuan backlog (`2026-07-02-improvement-backlog.md`) diperbaiki di kode BARU saat modulnya diangkut; jangan port bug-nya ikut.
+4. **Audit skill:** selama rewrite, tandai skill yang bertele-tele, tidak konsisten, atau konflik dengan skill/tool lain (contoh yang sudah ketahuan: immediate-reply vs instruksi MCP soal edit_message; template handoff vs SKILL.md soal READY-heuristic) → usulkan perampingan ke user.
+5. **Integrasi Obsidian second-brain (requirement baru):** semua bot harus bisa MEMANFAATKAN vault Obsidian milik user (`knowledge-vault` sudah menunjuk `C:\Users\Mirza\mirza-vault`, Conventions.md = source of truth) sebagai memori lintas-bot: belajar dari kesalahan & best-practice sebelumnya sebelum mengerjakan tugas, dan menyetor pelajaran sesudahnya. Desain detailnya (kapan baca, kapan tulis, format nota, kaitannya dengan playbook-split yang dulu di-defer) disusun bersama user di fase 1 — jangan implementasi diam-diam.
 
 ---
 *Disusun oleh Claude Fable 5 (bot-02, sesi `harness-redesign`), dari audit 4-subagent 2026-07-02, inventaris 529 item, dan diskusi arsitektur dengan Mirza.*
