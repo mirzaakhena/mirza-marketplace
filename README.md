@@ -150,6 +150,8 @@ cd mirza-marketplace
 
 Design specs & plans are committed alongside the code: repo-level in `docs/superpowers/{specs,plans}/`, per-plugin in `plugins/<name>/docs/`.
 
+> **⚠️ Rewrite in progress (2026-07):** an approved plan exists to supersede this plugin ecosystem with a new harness (`mirza-harness`: hostd daemon + hook-inversion). The plugins here remain the live production system until the phased migration completes. Read `docs/2026-07-03-harness-rewrite-design.md` (approved design), `docs/2026-07-02-capability-inventory/` (529-item acceptance contract), and the "Arah arsitektur target" section of `docs/2026-07-02-improvement-backlog.md` before making large changes to plugins.
+
 ### Syncing with upstream (telegram)
 
 The `claude-plugins-official` repo is updated by Anthropic periodically. To merge upstream changes into the telegram fork:
