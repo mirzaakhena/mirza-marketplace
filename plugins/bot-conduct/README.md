@@ -1,19 +1,28 @@
 # bot-conduct
 
-A skill-only plugin containing **working rules for agent bots** (bot-01, bot-02, ...) that work on the same machine on behalf of the user. No MCP server, no commands — just one skill: `bot-conduct`.
+A skill-only plugin containing the **living checklist + working rules for agent bots** (bot-01, bot-02, ...) that work on the same machine on behalf of the user. No MCP server, no commands — one skill (`bot-conduct`) plus one enforcement hook.
 
 Bot identity = the basename of the project directory (e.g. `C:\Users\Mirza\workspace\bot-06` → `bot-06`).
 
-## Rules encoded here
+## Structure (since 0.0.8)
 
-| # | Rule | Gist |
-|---|---|---|
-| 1 | **Git worktree, not branch-switch** | Work that needs isolation is done in a worktree (`EnterWorktree` / `git worktree add`), not by switching branches in the main working tree — another bot or the user might be using that same tree. |
-| 2 | **Identity-stamped commits** | Every commit carries an `Agent: <bot-name>` trailer (before `Co-Authored-By:`), so the user can trace which bot did what. `git config user.name` is left untouched. |
-| 3 | **Subagent-first** | Heavy work (broad search, multi-file refactor, test runs, research) is delegated to a subagent so the main loop stays responsive to the user. Heuristic: >~1 minute of tool calls + the user might chat mid-task → subagent. |
-| 4 | **Channel discipline** | Answer in the channel the question came from: a Telegram question → the final answer MUST go through the `reply` tool (the transcript isn't the user!); a question in the CC terminal → answer in the transcript. Cross over only on explicit request. Mechanical self-check at the end of the turn: "did my final answer go through the reply tool?" |
-| 5 | **A home for new rules** | A new working rule from the user gets added as a numbered rule in this skill (then bump the version), not scattered across per-repo CLAUDE.md files — unless it really is specific to one repo. |
-| 6 | **Shared-repo git discipline** | Three-copy doctrine for ANY marketplace-registered repo: its `workspace/<repo-name>` clone is the canonical copy and the only place to edit/commit; `~/.claude/plugins/marketplaces/**` is the updater's READ-ONLY copy (sync via `git pull --ff-only` only); `~/.claude/plugins/cache/**` is builds. Mechanical check before any commit: `git rev-parse --show-toplevel` must not be under `~/.claude/plugins/`. Plus: push every release commit immediately; no force-push without cross-clone checks + user confirmation + bot coordination. Born from the 2026-06-07 mirza-marketplace reclone incident — details in that repo's `docs/SOP-git-multi-agent.md`. |
+The skill is organized as a **checklist per lifecycle moment** — terse condition → action items, cheap to re-read on every task. Rationale and history live in `references/`, read only when the *why* is needed.
+
+| Moment | Checklist covers |
+|---|---|
+| **1 — Starting a substantive task** | git worktree (never branch-switch in a shared tree) · Plane task set in-progress with week · session renamed from "idle" |
+| **2 — During work** | subagent-first for heavy steps · `Agent: <bot-name>` commit trailer · three-copy doctrine check before any commit · push release commits immediately · answer via the originating channel's reply tool |
+| **3 — Before idle / handoff / done** | every touched worktree pushed (no "ahead", no uncommitted) · merge to main OR record branch + commit hash + merge obligation in the handoff · remove merged worktrees · Plane task done · durable lessons to the vault · end-of-turn reply self-check |
+
+References:
+
+- `skills/bot-conduct/references/rules-rationale.md` — why each rule exists, failure modes, the [PROMPT] / [INJECTED] / [ENFORCED] enforcement ladder.
+- `skills/bot-conduct/references/git-shared-repo.md` — full shared-repo git discipline (three-copy doctrine, force-push rules, the 2026-06-07 reclone incident).
+
+## Enforcement
+
+- `Agent:` commit trailer — **ENFORCED** by a PreToolUse hook (`commit-trailer-guard`): inspectable `git commit` commands without the trailer are denied with an explanation.
+- Other checklist items are currently [PROMPT]-tier; items that logs show being skipped get promoted to [INJECTED] (hook-injected reminder) or [ENFORCED] per the enforcement ladder.
 
 ## Installation
 

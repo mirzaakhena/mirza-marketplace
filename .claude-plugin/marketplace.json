@@ -56,7 +56,7 @@
     },
     {
       "name": "bot-conduct",
-      "description": "Behavioral skill encoding working rules for agent bots: git worktrees instead of branch-switching, commits signed with the bot's identity (Agent: <bot-name> trailer), subagent-first delegation so the main loop stays responsive, channel discipline (answer where the question came from — Telegram question means reply tool, never transcript-only), and shared-repo git discipline (three-copy doctrine for any marketplace-registered repo: edit/commit only in its canonical workspace clone, never under ~/.claude/plugins/; push release commits immediately; no uncoordinated force-push; see docs/SOP-git-multi-agent.md). A PreToolUse hook mechanically enforces the Agent: commit trailer — Bash git commit commands that carry an inspectable message without the trailer are denied with an explanatory message, so the requirement cannot be quietly forgotten.",
+      "description": "Living checklist + working rules for agent bots, organized by lifecycle moment (starting a task / during work / before idle-handoff-done): git worktrees instead of branch-switching, Plane task in-progress with week number, Agent: <bot-name> commit trailer (mechanically enforced by a PreToolUse hook), subagent-first delegation, channel discipline (Telegram question means reply tool, never transcript-only), shared-repo three-copy doctrine with push-immediately, everything-pushed + merge-or-record-in-handoff before going idle, and durable lessons captured to the vault. Rationale and full git discipline live in the skill's references/.",
       "category": "productivity",
       "source": "./plugins/bot-conduct"
     },

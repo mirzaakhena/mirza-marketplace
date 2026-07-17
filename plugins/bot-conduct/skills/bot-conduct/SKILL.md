@@ -1,153 +1,67 @@
 ---
 name: bot-conduct
-description: Working rules for agent bots - apply whenever doing substantive work (code changes, multi-step tasks, anything that commits). Use git worktrees instead of branches in the main tree, sign commits with the bot's identity, prefer subagents for heavy work so the main loop stays responsive, and answer in the channel the question came from (Telegram question = reply tool, never transcript-only).
+description: Living checklist + working rules for agent bots. Invoke at MECHANICAL moments, not by feel - (1) STARTING substantive work (code changes, multi-step task, anything that commits), (2) DURING work at every commit/push, (3) BEFORE going idle, handing off, or declaring a task done. Covers - git worktrees, Agent commit trailer, subagent-first, channel discipline, shared-repo three-copy doctrine, Plane task tracking, push-before-idle, merge-or-record-in-handoff, vault lessons.
 ---
 
-# Bot Conduct — Working Rules for Agent Bots
+# Bot Conduct — Living Checklist for Agent Bots
 
-Every bot on this machine (bot-01, bot-02, ...) is an agent working on the
-user's behalf, often several at once, often unattended. These rules keep
-their work isolated, attributable, and responsive.
+Your **bot name** = basename of `CLAUDE_PROJECT_DIR`
+(`C:\Users\Mirza\workspace\bot-06` → `bot-06`). Use it wherever identity is
+called for. Every checklist item below is condition → action; rationale and
+history live in `references/` — read those when you need the *why*, not on
+every pass.
 
-Your **bot name** is the basename of your project directory
-(`CLAUDE_PROJECT_DIR`, e.g. `C:\Users\Mirza\workspace\bot-06` → `bot-06`).
-Use it everywhere identity is called for below.
+## 📍 Moment 1 — STARTING a substantive task
 
-## Rule 1 — Git worktree, not branches in the main tree
+- [ ] Needs isolation (feature work, experiment, anything riskier than a
+      trivial edit)? → **git worktree**, never branch-switch in a shared tree.
+      Native `EnterWorktree` first; fallback
+      `git worktree add ../<repo>-<botname>-<topic> -b <topic>`.
+- [ ] **Plane**: create/set the task **in-progress**, include the **week**
+      (ISO week, e.g. `W29-2026` — provisional convention). Project unclear?
+      Ask the user once; never skip silently.
+- [ ] Session still named "idle"? → rename to the topic.
 
-When work needs isolation (feature work, experiments, anything riskier
-than a trivial edit), create a **git worktree** instead of switching
-branches in the main working tree:
+## 📍 Moment 2 — DURING work
 
-- Native tooling first: `EnterWorktree` (or `isolation: "worktree"` on a
-  subagent) when the harness provides it.
-- Fallback: `git worktree add ../<repo>-<botname>-<topic> -b <topic>`.
+- [ ] Heavy step (>~1 min of tool calls, user may message meanwhile) →
+      **subagent**; the main loop's first duty is staying responsive.
+- [ ] Every commit carries the **`Agent: <bot-name>`** trailer (before any
+      `Co-Authored-By:`; a PreToolUse hook enforces this; never change
+      `git config user.name`).
+- [ ] Before any commit: `git rev-parse --show-toplevel` — under
+      `~/.claude/plugins/`? → STOP, move to the repo's workspace clone
+      (three-copy doctrine, `references/git-shared-repo.md`).
+- [ ] Shared repo: **push IMMEDIATELY after every release commit** —
+      `git status -sb` must show no "ahead" before you walk away.
+- [ ] Question arrived via a channel (Telegram etc.)? → answer through that
+      channel's **reply tool**, never transcript-only.
 
-Why worktrees and not branches: another bot (or the user) may have the
-same repo open. Switching branches in a shared working tree yanks files
-out from under them; a worktree gives you a private copy with shared
-history. Clean up (`git worktree remove`) after merging.
+## 📍 Moment 3 — BEFORE idle / handoff / declaring done
 
-## Rule 2 — Sign commits with your bot identity
+- [ ] Every worktree you touched: `git status -sb` → no uncommitted changes,
+      no "ahead" (everything pushed to origin).
+- [ ] Branch finished & validated → **merge to main + push**. Not ready to
+      merge → **record in the handoff file: branch name, commit hash, and the
+      merge obligation**.
+- [ ] Worktree whose branch is merged → `git worktree remove` it.
+- [ ] **Plane** task → done (or note the blocker on it).
+- [ ] Durable lesson/decision from this task → **vault** `Knowledge/`
+      (follow the vault's `_meta/Conventions.md`).
+- [ ] Turn triggered by a channel message? → self-check: did the final answer
+      go out through the reply tool?
 
-Every commit an agent bot makes MUST carry the bot's name so the user can
-trace which bot did what. Append a trailer to the commit message:
+## Adding new rules
 
-```
-Agent: <bot-name>
-```
+A new working rule from the user ("from now on always X") → add it as a
+checklist item under the right Moment here + bump the plugin version. Long
+rationale goes to `references/`, never here. An item the logs show being
+skipped repeatedly → propose promoting it to a hook (INJECTED reminder or
+ENFORCED guard), per the living-checklist enforcement ladder.
 
-Example final block of a commit message:
+## References
 
-```
-fix(parser): handle empty frontmatter
-
-Agent: bot-06
-Co-Authored-By: Claude <noreply@anthropic.com>
-```
-
-The `Agent:` trailer comes before any `Co-Authored-By:` lines. Don't
-change `git config user.name` — that belongs to the user; the trailer is
-the bot's signature.
-
-## Rule 3 — Subagent-first for heavy work
-
-The main loop's first duty is **staying responsive to the user**. Long
-searches, broad refactors, test runs, research sweeps — delegate to
-subagents (Agent tool / Task tool) whenever possible, with
-`run_in_background` when you don't need the result immediately:
-
-- Main loop: receive instructions, answer questions, send progress
-  updates, make decisions.
-- Subagents: explore codebases, execute multi-file changes, run
-  long-running commands, draft documents.
-
-Heuristic: if a step will keep you busy for more than ~a minute of tool
-calls and the user might message you meanwhile, it belongs in a subagent.
-Combine with the `immediate-reply` ack pattern so the user always sees
-sign-of-life.
-
-## Rule 4 — Channel discipline: answer where you were asked
-
-The transcript is NOT the user. When a message arrives via a channel
-(e.g. a Telegram `<channel>` block), the user is reading that channel —
-anything you write outside the channel's `reply` tool NEVER reaches them.
-
-- Question from **Telegram** → the final answer MUST be a `reply` tool
-  call. Transcript text is only your internal workspace/log.
-- Question typed in the **Claude Code terminal** → answer in the
-  transcript; don't ping Telegram.
-- Cross over only on explicit request ("kirim hasilnya ke telegram",
-  "tulis di terminal saja").
-
-**End-of-turn self-check (mechanical):** if this turn was triggered by a
-channel message, ask "did my final answer go out through the reply tool?"
-If the answer is no, you have NOT answered the user yet — send it before
-ending the turn. A finished task with a beautiful transcript summary and
-no reply call is a silent failure: the user sees nothing.
-
-This failure mode is most common (a) at the end of long multi-step tasks,
-(b) right after a subagent returns and you summarize its result, and
-(c) after context compaction. The self-check exists precisely for those
-moments.
-
-## Rule 5 — Future rules land here
-
-This skill is the designated home for new working rules. When the user
-declares a new rule ("mulai sekarang selalu X"), add it to this SKILL.md
-as a numbered rule (and bump this plugin's version) instead of scattering
-it across repos' CLAUDE.md files — unless it is genuinely specific to one
-repo.
-
-## Rule 6 — Shared-repo git discipline
-
-**Three-copy doctrine (user decision, MANDATORY).** ANY repo registered
-as a Claude Code plugin marketplace lives in three places with rigid
-roles:
-
-- **(a) the workspace clone** (`workspace/<repo-name>`) — the CANONICAL
-  copy *for that repo*, the ONLY place to edit and commit (parallel work
-  via worktrees, Rule 1).
-- **(b) `~/.claude/plugins/marketplaces/**`** — Claude Code's internal
-  updater copy. **READ-ONLY** — it can be deleted + recloned at any time
-  without warning. NEVER edit or commit there; sync only with
-  `git pull --ff-only`.
-- **(c) `~/.claude/plugins/cache/**`** — per-version builds. Never edit.
-
-**Mechanical enforcement:** before ANY commit, run
-`git rev-parse --show-toplevel` — if the path is under
-`~/.claude/plugins/`, STOP and move to that repo's workspace clone.
-
-Incident that bred the doctrine (2026-06-07, mirza-marketplace as the
-example): ~25 unpushed release commits in
-`~/.claude/plugins/marketplaces/mirza-marketplace` were wiped when
-another bot force-pushed a squashed history from an older base and the
-plugin updater recloned the directory. Full post-mortem + rationale:
-`docs/SOP-git-multi-agent.md` in the mirza-marketplace repo.
-
-The remaining rules, in priority order:
-
-1. **Push to origin IMMEDIATELY after every release commit** in a shared
-   repo. Verify mechanically: `git status -sb` shows
-   `## main...origin/main` with no "ahead" before you walk away.
-2. **No force-push / history rewrite** on a repo multiple agents touch
-   without ALL of: `git log origin/main..main` checked in EVERY clone
-   that might exist, explicit user confirmation, and cross-bot
-   coordination.
-3. **`~/.claude/plugins/cache/` is the release-recovery source.** Cache
-   holding a version HIGHER than the workspace plugin.json is a red flag
-   of unpushed releases — investigate before bumping past it. Dirs
-   stamped `.orphaned_at` are GC candidates; copy them to safety before
-   recovering from them.
-4. **Worktrees for parallel work in the same repo** (Rule 1 still
-   applies) — created from the repo's canonical workspace clone, never
-   from the marketplaces copy (it dies with its parent on reclone).
-
-## Quick checklist (per substantive task)
-
-- [ ] Isolation needed? → worktree, not branch-switch
-- [ ] Heavy steps delegated to subagents; main loop kept responsive
-- [ ] Commits carry `Agent: <bot-name>` trailer
-- [ ] Before any commit: `git rev-parse --show-toplevel` NOT under `~/.claude/plugins/` (else STOP → the repo's workspace clone)
-- [ ] Shared repo? → every release commit pushed (`git status -sb` not ahead)
-- [ ] Triggered from a channel? → final answer went through `reply`
+- `references/rules-rationale.md` — why each rule exists, self-check failure
+  modes, enforcement-ladder background.
+- `references/git-shared-repo.md` — full shared-repo git discipline: three-copy
+  doctrine, force-push rules, the 2026-06-07 incident.
