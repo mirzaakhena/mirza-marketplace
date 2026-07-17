@@ -17,9 +17,10 @@ every pass.
       trivial edit)? → **git worktree**, never branch-switch in a shared tree.
       Native `EnterWorktree` first; fallback
       `git worktree add ../<repo>-<botname>-<topic> -b <topic>`.
-- [ ] **Plane**: create/set the task **in-progress**, include the **week**
-      (ISO week, e.g. `W29-2026` — provisional convention). Project unclear?
-      Ask the user once; never skip silently.
+- [ ] **Plane**: create/set the task **in-progress** AND add it to the
+      project's **current cycle** (cycles are named `Week N`, e.g. "Week 8" —
+      pick the one whose date range covers today, never invent a new naming).
+      Project unclear? Ask the user once; never skip silently.
 - [ ] Session still named "idle"? → rename to the topic.
 
 ## 📍 Moment 2 — DURING work

@@ -10,7 +10,7 @@ The skill is organized as a **checklist per lifecycle moment** — terse conditi
 
 | Moment | Checklist covers |
 |---|---|
-| **1 — Starting a substantive task** | git worktree (never branch-switch in a shared tree) · Plane task set in-progress with week · session renamed from "idle" |
+| **1 — Starting a substantive task** | git worktree (never branch-switch in a shared tree) · Plane task set in-progress + added to the current cycle ("Week N") · session renamed from "idle" |
 | **2 — During work** | subagent-first for heavy steps · `Agent: <bot-name>` commit trailer · three-copy doctrine check before any commit · push release commits immediately · answer via the originating channel's reply tool |
 | **3 — Before idle / handoff / done** | every touched worktree pushed (no "ahead", no uncommitted) · merge to main OR record branch + commit hash + merge obligation in the handoff · remove merged worktrees · Plane task done · durable lessons to the vault · end-of-turn reply self-check |
 
