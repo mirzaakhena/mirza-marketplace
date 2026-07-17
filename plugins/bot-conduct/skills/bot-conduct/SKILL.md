@@ -49,6 +49,9 @@ every pass.
 - [ ] **Plane** task → done (or note the blocker on it).
 - [ ] Durable lesson/decision from this task → **vault** `Knowledge/`
       (follow the vault's `_meta/Conventions.md`).
+- [ ] Wrote to the vault? → **commit the vault** (local git, NO push/remote):
+      descriptive message + `Agent: <bot-name>` trailer, so vault history
+      stays readable per-change instead of one giant diff.
 - [ ] Turn triggered by a channel message? → self-check: did the final answer
       go out through the reply tool?
 

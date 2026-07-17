@@ -1,7 +1,7 @@
 {
   "name": "bot-conduct",
-  "description": "Living checklist + working rules for agent bots, organized by lifecycle moment: STARTING a task (worktree, Plane task in-progress + assigned to the current cycle (Week N), session rename), DURING work (subagent-first, Agent: commit trailer, three-copy doctrine, push release commits immediately, channel discipline), and BEFORE idle/handoff/done (everything pushed, merge or record the merge obligation in the handoff, Plane task done, durable lessons to the vault). Rationale and the full shared-repo git discipline live in the skill's references/. A PreToolUse hook mechanically enforces the Agent: commit trailer.",
-  "version": "0.0.9",
+  "description": "Living checklist + working rules for agent bots, organized by lifecycle moment: STARTING a task (worktree, Plane task in-progress + assigned to the current cycle (Week N), session rename), DURING work (subagent-first, Agent: commit trailer, three-copy doctrine, push release commits immediately, channel discipline), and BEFORE idle/handoff/done (everything pushed, merge or record the merge obligation in the handoff, Plane task done, durable lessons to the vault + commit the vault, local-only). Rationale and the full shared-repo git discipline live in the skill's references/. A PreToolUse hook mechanically enforces the Agent: commit trailer.",
+  "version": "0.0.10",
   "author": {
     "name": "Mirza"
   },
