@@ -80,8 +80,10 @@ import {
   parseStatuslineSnapshot,
   resolveResumeName,
   shouldAdoptStatuslineName,
+  expectationResolved,
   type SessionState,
   type RegistryEntry,
+  type PendingNameExpectation,
 } from './session-state'
 import { InjectionGate } from './injection-gate'
 
@@ -833,6 +835,15 @@ try {
 // state. Heals divergence from ANY path (poisoned boot seed, terminal-typed
 // /rename, registry races) within one statusline fire. mtime-gated so the
 // steady-state cost is one statSync per 500ms tick.
+//
+// Names the wrapper itself just wrote (rename sniffer, post-/clear chain,
+// /switch) are ahead of CC's statusline until CC processes the injected
+// command — which happens only after the current AI turn ends. Until the
+// statusline CONFIRMS the expected name (or the expectation times out so
+// genuine divergence still heals), revalidation must not adopt a divergent
+// snapshot: its captured_at_ms is capture time, not content time.
+const NAME_EXPECTATION_TIMEOUT_MS = 10 * 60_000
+let pendingNameExpectation: PendingNameExpectation | null = null
 let lastStatusSeenMtimeMs = 0
 function revalidateSessionNameFromStatusline(): void {
   const dir = resolveTelegramStateDir()
@@ -842,15 +853,22 @@ function revalidateSessionNameFromStatusline(): void {
   try {
     mtimeMs = statSync(file).mtimeMs
   } catch {
-    return // file absent — statusline never fired yet
+    return // file absent or unreadable — skip this tick
   }
   if (mtimeMs === lastStatusSeenMtimeMs) return
   lastStatusSeenMtimeMs = mtimeMs // set BEFORE parsing so corrupt files aren't re-parsed every tick
   const raw = readLastStatusRaw()
   if (raw === null) return
+  const now = Date.now()
+  if (
+    pendingNameExpectation &&
+    expectationResolved(pendingNameExpectation, raw, sessionState?.session_id ?? null, now, NAME_EXPECTATION_TIMEOUT_MS)
+  ) {
+    pendingNameExpectation = null
+  }
   const adopt = shouldAdoptStatuslineName(sessionState, raw, {
-    inClearTransition:
-      awaitingClearReady !== null || injectionGate.clearBarrierActive(Date.now()),
+    inClearTransition: awaitingClearReady !== null || injectionGate.isBlocked(now),
+    expectation: pendingNameExpectation,
   })
   if (!adopt) return
   const oldName = sessionState?.session_name ?? null
@@ -887,6 +905,9 @@ const sessionPollInterval = setInterval(() => {
         }`,
       )
       updateSessionState({ session_id: sid, session_name: sessionName ?? null })
+      if (typeof sessionName === 'string') {
+        pendingNameExpectation = { name: sessionName, since_ms: Date.now() }
+      }
       // Record the fresh session's name immediately (or clear the previous
       // one when this /clear came without a name) so peer-status readers
       // never see the old session's name attached to the new session.
@@ -1149,6 +1170,7 @@ function dispatchPayload(
     const renamedTo = renameArgFromCommand(command)
     if (renamedTo) {
       updateSessionState({ session_name: renamedTo })
+      pendingNameExpectation = { name: renamedTo, since_ms: Date.now() }
       // Keep the telegram registry in sync: a PTY-injected /rename never
       // passes through the telegram handler, so without this the registry
       // (and any restart that seeds from it) goes stale.
@@ -1247,10 +1269,14 @@ function dispatchPayload(
     )
     // Prefer the name carried in the payload; fall back to the telegram
     // registry (the payload's sessionName is informational and may be null).
+    const resolvedSwitchName = sessionName ?? readTelegramRegistryName(sid)
     updateSessionState({
       session_id: sid,
-      session_name: sessionName ?? readTelegramRegistryName(sid),
+      session_name: resolvedSwitchName,
     })
+    if (typeof resolvedSwitchName === 'string') {
+      pendingNameExpectation = { name: resolvedSwitchName, since_ms: Date.now() }
+    }
     injectSlashCommand(`/resume ${sid}`)
     // /resume swaps the session inside CC — hold a little longer than a
     // plain slash so the next payload lands after the swap settles.

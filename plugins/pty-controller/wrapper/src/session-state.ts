@@ -79,24 +79,52 @@ export function parseStatuslineSnapshot(raw: string): StatuslineSnapshot | null 
   }
 }
 
+/** A name write the wrapper itself initiated, awaiting statusline confirmation. */
+export interface PendingNameExpectation {
+  name: string
+  since_ms: number
+}
+
+/**
+ * True when a pending expectation should be cleared: the snapshot confirms it
+ * (sid matches and carries the expected name) or it has timed out (so genuine
+ * divergence still heals).
+ */
+export function expectationResolved(
+  expectation: PendingNameExpectation,
+  raw: string,
+  sessionId: string | null,
+  nowMs: number,
+  timeoutMs: number,
+): boolean {
+  if (nowMs - expectation.since_ms > timeoutMs) return true
+  const snap = parseStatuslineSnapshot(raw)
+  return !!snap && sessionId !== null && snap.session_id === sessionId && snap.session_name === expectation.name
+}
+
 /**
  * Self-healing decision (spec 2026-07-20 §3.1): should the wrapper adopt the
  * statusline snapshot's session name? Returns the name to adopt, or null.
  * Guards: no adoption during a /clear transition; snapshot must describe the
- * live session; must be strictly fresher than the wrapper's own state (this
- * rejects the poisoned post-/clear snapshot that pairs a new sid with the
- * old name); and must actually differ from the current name.
+ * live session; when a wrapper-initiated rename is pending confirmation, a
+ * snapshot carrying a different name is refused (its captured_at_ms is
+ * capture time, not content time — it can be a same-turn statusline fire
+ * that predates CC processing our own injected command); must be strictly
+ * fresher than the wrapper's own state (this rejects the poisoned post-/clear
+ * snapshot that pairs a new sid with the old name); and must actually differ
+ * from the current name.
  */
 export function shouldAdoptStatuslineName(
   state: SessionState | null,
   raw: string,
-  opts: { inClearTransition: boolean },
+  opts: { inClearTransition: boolean; expectation?: PendingNameExpectation | null },
 ): string | null {
   if (opts.inClearTransition) return null
   if (!state?.session_id) return null
   const snap = parseStatuslineSnapshot(raw)
   if (!snap) return null
   if (snap.session_id !== state.session_id) return null
+  if (opts.expectation && snap.session_name !== opts.expectation.name) return null
   if (snap.captured_at_ms <= state.updated_at_ms) return null
   if (snap.session_name === state.session_name) return null
   return snap.session_name

@@ -9,7 +9,9 @@ import {
   parseStatuslineSnapshot,
   shouldAdoptStatuslineName,
   resolveResumeName,
+  expectationResolved,
   type SessionState,
+  type PendingNameExpectation,
 } from './session-state'
 
 describe('nameFromLastStatus', () => {
@@ -87,6 +89,13 @@ describe('parseStatuslineSnapshot', () => {
     expect(parseStatuslineSnapshot(raw(1, { session_id: 's' }))).toBe(null)
     expect(parseStatuslineSnapshot(raw(1, { session_id: 's', session_name: '' }))).toBe(null)
   })
+  test('null when captured_at_ms is not a number', () => {
+    expect(
+      parseStatuslineSnapshot(
+        JSON.stringify({ captured_at_ms: '1000', payload: { session_id: 's', session_name: 'x' } }),
+      ),
+    ).toBe(null)
+  })
 })
 
 describe('shouldAdoptStatuslineName', () => {
@@ -118,6 +127,47 @@ describe('shouldAdoptStatuslineName', () => {
     expect(shouldAdoptStatuslineName(null, raw(6000, 'sid-1', 'x'), NO_TRANSITION)).toBe(null)
     expect(shouldAdoptStatuslineName(state({ session_id: null }), raw(6000, 'sid-1', 'x'), NO_TRANSITION)).toBe(null)
   })
+  test('heals from unnamed: null session_name + fresher sid-matching snapshot adopts', () => {
+    expect(
+      shouldAdoptStatuslineName(state({ session_name: null }), raw(6000, 'sid-1', 'task-foo'), NO_TRANSITION),
+    ).toBe('task-foo')
+  })
+  test('refuses adoption while a pending expectation names a DIFFERENT name (stale-content guard)', () => {
+    const expectation: PendingNameExpectation = { name: 'done-x', since_ms: 1000 }
+    expect(
+      shouldAdoptStatuslineName(state(), raw(6000, 'sid-1', 'task-foo'), { ...NO_TRANSITION, expectation }),
+    ).toBe(null)
+  })
+  test('adopts when the pending expectation name matches the snapshot name', () => {
+    const expectation: PendingNameExpectation = { name: 'task-foo', since_ms: 1000 }
+    expect(
+      shouldAdoptStatuslineName(state(), raw(6000, 'sid-1', 'task-foo'), { ...NO_TRANSITION, expectation }),
+    ).toBe('task-foo')
+  })
+})
+
+describe('expectationResolved', () => {
+  const raw = (capturedAt: number, sid: string, name: string) =>
+    JSON.stringify({ captured_at_ms: capturedAt, payload: { session_id: sid, session_name: name } })
+  const expectation: PendingNameExpectation = { name: 'task-foo', since_ms: 1000 }
+  const TIMEOUT = 10 * 60_000
+
+  test('resolved: matching snapshot confirms (sid + name match)', () => {
+    expect(expectationResolved(expectation, raw(2000, 'sid-1', 'task-foo'), 'sid-1', 2000, TIMEOUT)).toBe(true)
+  })
+  test('not resolved: divergent snapshot within timeout', () => {
+    expect(expectationResolved(expectation, raw(2000, 'sid-1', 'other-name'), 'sid-1', 2000, TIMEOUT)).toBe(false)
+  })
+  test('resolved by timeout regardless of snapshot content', () => {
+    const now = expectation.since_ms + TIMEOUT + 1
+    expect(expectationResolved(expectation, raw(now, 'sid-1', 'other-name'), 'sid-1', now, TIMEOUT)).toBe(true)
+  })
+  test('not resolved: corrupt raw within timeout', () => {
+    expect(expectationResolved(expectation, '{ not json', 'sid-1', 2000, TIMEOUT)).toBe(false)
+  })
+  test('not resolved: sessionId null within timeout', () => {
+    expect(expectationResolved(expectation, raw(2000, 'sid-1', 'task-foo'), null, 2000, TIMEOUT)).toBe(false)
+  })
 })
 
 describe('resolveResumeName', () => {
@@ -147,5 +197,9 @@ describe('resolveResumeName', () => {
       .toEqual({ name: 'idle', source: 'registry' })
     expect(resolveResumeName(null, null, 'sid-1')).toEqual({ name: null, source: 'none' })
     expect(resolveResumeName('{ not json', null, 'sid-1')).toEqual({ name: null, source: 'none' })
+  })
+  test('corrupt raw with registry present → registry wins', () => {
+    expect(resolveResumeName('{ not json', { name: 'idle', updatedAt: 1000 }, 'sid-1'))
+      .toEqual({ name: 'idle', source: 'registry' })
   })
 })
