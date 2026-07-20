@@ -87,15 +87,26 @@ Quit with `/exit` inside Claude or Ctrl+C in the wrapper terminal.
 
 ### Session-name self-healing (wrapper >= 0.0.8)
 
-`wrapper.state.json` / `wrapper.current_session_name` menyembuhkan diri dari
-divergensi nama: tiap tick poll 500ms (di luar transisi `/clear`), wrapper
-membandingkan snapshot statusline CC (`last-status.json`) dengan state-nya —
-bila snapshot menggambarkan session yang sama dan LEBIH BARU
-(`captured_at_ms` > `updated_at_ms` state) dengan nama berbeda, nama snapshot
-diadopsi (state + registry), ter-log sebagai `session name revalidated…`.
-Saat boot-resume, nama di-seed dengan arbitrase freshness last-status vs
-registry (tie → registry), ter-log sebagai `resume name resolution…`.
-Desain: `docs/superpowers/specs/2026-07-20-wrapper-session-name-self-healing-design.md`.
+`wrapper.state.json` / `wrapper.current_session_name` self-heals from name
+divergence: on every 500ms poll tick (outside a `/clear` transition), the
+wrapper compares CC's statusline snapshot (`last-status.json`) against its
+own state — if the snapshot describes the same session and is STRICTLY
+NEWER (`captured_at_ms` > state's `updated_at_ms`) with a different name,
+the snapshot's name is adopted (state + registry), logged as
+`session name revalidated…`. On boot-resume, the name is seeded via
+freshness arbitration between last-status and the registry (tie → registry),
+logged as `resume name resolution…`. Because a snapshot's `captured_at_ms`
+is CAPTURE time, not CONTENT time, a snapshot fired in the same turn as a
+wrapper-initiated rename (the `/rename` sniffer, the post-`/clear` chain, or
+`/switch`) can still carry the OLD name while looking "fresher" — so while
+such a rename is pending, revalidation refuses to adopt a snapshot whose
+name doesn't match what the wrapper itself just wrote, until the statusline
+confirms it or a 10-minute timeout expires (so genuine divergence still
+heals). Known limitation: a mid-turn rename immediately followed by a
+wrapper restart can make boot arbitration seed the stale statusline name
+(expectations don't survive restart); continuous revalidation heals it at
+the next statusline fire.
+Design: `docs/superpowers/specs/2026-07-20-wrapper-session-name-self-healing-design.md`.
 
 ## MCP tools
 
