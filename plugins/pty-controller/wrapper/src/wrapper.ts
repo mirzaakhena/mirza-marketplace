@@ -905,9 +905,8 @@ const sessionPollInterval = setInterval(() => {
         }`,
       )
       updateSessionState({ session_id: sid, session_name: sessionName ?? null })
-      if (typeof sessionName === 'string') {
-        pendingNameExpectation = { name: sessionName, since_ms: Date.now() }
-      }
+      pendingNameExpectation =
+        typeof sessionName === 'string' ? { name: sessionName, since_ms: Date.now() } : null
       // Record the fresh session's name immediately (or clear the previous
       // one when this /clear came without a name) so peer-status readers
       // never see the old session's name attached to the new session.
@@ -1274,9 +1273,10 @@ function dispatchPayload(
       session_id: sid,
       session_name: resolvedSwitchName,
     })
-    if (typeof resolvedSwitchName === 'string') {
-      pendingNameExpectation = { name: resolvedSwitchName, since_ms: Date.now() }
-    }
+    pendingNameExpectation =
+      typeof resolvedSwitchName === 'string'
+        ? { name: resolvedSwitchName, since_ms: Date.now() }
+        : null
     injectSlashCommand(`/resume ${sid}`)
     // /resume swaps the session inside CC — hold a little longer than a
     // plain slash so the next payload lands after the swap settles.
