@@ -2,7 +2,15 @@ import { test, expect, describe } from 'bun:test'
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { buildNextState, writeSessionState, nameFromLastStatus, type SessionState } from './session-state'
+import {
+  buildNextState,
+  writeSessionState,
+  nameFromLastStatus,
+  parseStatuslineSnapshot,
+  shouldAdoptStatuslineName,
+  resolveResumeName,
+  type SessionState,
+} from './session-state'
 
 describe('nameFromLastStatus', () => {
   const raw = (payload: unknown) => JSON.stringify({ captured_at_ms: 1, payload })
@@ -59,5 +67,85 @@ describe('writeSessionState', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('parseStatuslineSnapshot', () => {
+  const raw = (capturedAt: number, payload: unknown) =>
+    JSON.stringify({ captured_at_ms: capturedAt, payload })
+
+  test('parses a valid snapshot', () => {
+    expect(parseStatuslineSnapshot(raw(1000, { session_id: 'sid-1', session_name: 'idle' })))
+      .toEqual({ captured_at_ms: 1000, session_id: 'sid-1', session_name: 'idle' })
+  })
+  test('null on malformed JSON', () => {
+    expect(parseStatuslineSnapshot('{ not json')).toBe(null)
+  })
+  test('null when captured_at_ms / payload / fields missing or empty', () => {
+    expect(parseStatuslineSnapshot(JSON.stringify({ payload: { session_id: 's', session_name: 'x' } }))).toBe(null)
+    expect(parseStatuslineSnapshot(raw(1, null))).toBe(null)
+    expect(parseStatuslineSnapshot(raw(1, { session_id: 's' }))).toBe(null)
+    expect(parseStatuslineSnapshot(raw(1, { session_id: 's', session_name: '' }))).toBe(null)
+  })
+})
+
+describe('shouldAdoptStatuslineName', () => {
+  const state = (over: Partial<SessionState> = {}): SessionState => ({
+    session_id: 'sid-1', session_name: 'idle', lifecycle: 'idle', seq: 3, updated_at_ms: 5000, ...over,
+  })
+  const raw = (capturedAt: number, sid: string, name: string) =>
+    JSON.stringify({ captured_at_ms: capturedAt, payload: { session_id: sid, session_name: name } })
+  const NO_TRANSITION = { inClearTransition: false }
+
+  test('adopts: snapshot fresher + sid match + different name', () => {
+    expect(shouldAdoptStatuslineName(state(), raw(6000, 'sid-1', 'task-foo'), NO_TRANSITION)).toBe('task-foo')
+  })
+  test('rejects poisoned/old snapshot (captured_at <= state.updated_at)', () => {
+    expect(shouldAdoptStatuslineName(state(), raw(5000, 'sid-1', 'task-foo'), NO_TRANSITION)).toBe(null)
+    expect(shouldAdoptStatuslineName(state(), raw(4000, 'sid-1', 'task-foo'), NO_TRANSITION)).toBe(null)
+  })
+  test('rejects sid mismatch (snapshot describes another session)', () => {
+    expect(shouldAdoptStatuslineName(state(), raw(6000, 'old-sid', 'task-foo'), NO_TRANSITION)).toBe(null)
+  })
+  test('rejects during /clear transition', () => {
+    expect(shouldAdoptStatuslineName(state(), raw(6000, 'sid-1', 'task-foo'), { inClearTransition: true })).toBe(null)
+  })
+  test('no-op when names equal', () => {
+    expect(shouldAdoptStatuslineName(state(), raw(6000, 'sid-1', 'idle'), NO_TRANSITION)).toBe(null)
+  })
+  test('rejects corrupt raw and null/id-less state, without throwing', () => {
+    expect(shouldAdoptStatuslineName(state(), '{ not json', NO_TRANSITION)).toBe(null)
+    expect(shouldAdoptStatuslineName(null, raw(6000, 'sid-1', 'x'), NO_TRANSITION)).toBe(null)
+    expect(shouldAdoptStatuslineName(state({ session_id: null }), raw(6000, 'sid-1', 'x'), NO_TRANSITION)).toBe(null)
+  })
+})
+
+describe('resolveResumeName', () => {
+  const raw = (capturedAt: number, sid: string, name: string) =>
+    JSON.stringify({ captured_at_ms: capturedAt, payload: { session_id: sid, session_name: name } })
+
+  test('picks last-status when fresher', () => {
+    expect(resolveResumeName(raw(2000, 'sid-1', 'task-x'), { name: 'idle', updatedAt: 1000 }, 'sid-1'))
+      .toEqual({ name: 'task-x', source: 'last-status' })
+  })
+  test('picks registry when fresher', () => {
+    expect(resolveResumeName(raw(1000, 'sid-1', 'rlfv-dashboard-design'), { name: 'idle', updatedAt: 2000 }, 'sid-1'))
+      .toEqual({ name: 'idle', source: 'registry' })
+  })
+  test('tie → registry wins', () => {
+    expect(resolveResumeName(raw(1500, 'sid-1', 'task-x'), { name: 'idle', updatedAt: 1500 }, 'sid-1'))
+      .toEqual({ name: 'idle', source: 'registry' })
+  })
+  test('sid-mismatch snapshot is ignored → registry', () => {
+    expect(resolveResumeName(raw(9000, 'old-sid', 'task-x'), { name: 'idle', updatedAt: 1000 }, 'sid-1'))
+      .toEqual({ name: 'idle', source: 'registry' })
+  })
+  test('only one source present → that source; none → null/none', () => {
+    expect(resolveResumeName(raw(1000, 'sid-1', 'task-x'), null, 'sid-1'))
+      .toEqual({ name: 'task-x', source: 'last-status' })
+    expect(resolveResumeName(null, { name: 'idle', updatedAt: 1 }, 'sid-1'))
+      .toEqual({ name: 'idle', source: 'registry' })
+    expect(resolveResumeName(null, null, 'sid-1')).toEqual({ name: null, source: 'none' })
+    expect(resolveResumeName('{ not json', null, 'sid-1')).toEqual({ name: null, source: 'none' })
   })
 })
