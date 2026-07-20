@@ -6,7 +6,8 @@ describe('promptTextFromPayload', () => {
     expect(promptTextFromPayload({ type: 'prompt', text: 'hello world' })).toBe('hello world')
   })
   test('returns null for a non-prompt payload', () => {
-    expect(promptTextFromPayload({ type: 'slash', command: '/clear' })).toBeNull()
+    const payload = { type: 'slash', command: '/clear' }
+    expect(promptTextFromPayload(payload)).toBeNull()
   })
   test('returns null when text is missing or empty', () => {
     expect(promptTextFromPayload({ type: 'prompt' })).toBeNull()
