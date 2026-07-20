@@ -77,8 +77,13 @@ import { renameArgFromCommand, type Lifecycle } from './session-name'
 import {
   buildNextState,
   writeSessionState,
-  nameFromLastStatus,
+  parseStatuslineSnapshot,
+  resolveResumeName,
+  shouldAdoptStatuslineName,
+  expectationResolved,
   type SessionState,
+  type RegistryEntry,
+  type PendingNameExpectation,
 } from './session-state'
 import { InjectionGate } from './injection-gate'
 
@@ -333,33 +338,36 @@ function writeTelegramRegistryName(sessionId: string, name: string): void {
   }
 }
 
-// Read-side counterpart: resolve a session's label from the telegram
-// registry. Best-effort — missing dir/file/entry all yield null.
-function readTelegramRegistryName(sessionId: string): string | null {
+// Registry entry incl. its write timestamp — needed by the boot-resume
+// freshness arbitration (spec 2026-07-20 §3.2).
+function readTelegramRegistryEntry(sessionId: string): RegistryEntry | null {
   const dir = resolveTelegramStateDir()
   if (!dir) return null
   try {
     const obj = JSON.parse(
       readFileSync(join(dir, 'session-names.json'), 'utf8'),
-    ) as Record<string, { name?: string }>
-    return obj[sessionId]?.name ?? null
+    ) as Record<string, { name?: unknown; updatedAt?: unknown }>
+    const e = obj[sessionId]
+    if (!e || typeof e.name !== 'string' || !e.name) return null
+    return { name: e.name, updatedAt: typeof e.updatedAt === 'number' ? e.updatedAt : 0 }
   } catch {
     return null
   }
 }
 
-// Freshest name source: CC's own statusline snapshot. Only valid when the
-// snapshot describes the asked-for session (id match) — see nameFromLastStatus.
-// Used to seed state on startup-resume, where the telegram registry can be
-// stale (a PTY-injected /rename never passes through the telegram handler).
-function readLastStatusSessionName(sessionId: string): string | null {
+// Read-side counterpart: resolve a session's label from the telegram
+// registry. Best-effort — missing dir/file/entry all yield null.
+function readTelegramRegistryName(sessionId: string): string | null {
+  return readTelegramRegistryEntry(sessionId)?.name ?? null
+}
+
+// Raw contents of telegram's last-status.json (CC statusline snapshot), or
+// null when absent/unreadable. Parsing/validation happens in session-state.ts.
+function readLastStatusRaw(): string | null {
   const dir = resolveTelegramStateDir()
   if (!dir) return null
   try {
-    return nameFromLastStatus(
-      readFileSync(join(dir, 'last-status.json'), 'utf8'),
-      sessionId,
-    )
+    return readFileSync(join(dir, 'last-status.json'), 'utf8')
   } catch {
     return null
   }
@@ -822,12 +830,70 @@ try {
   log(`version file write failed: ${err}`)
 }
 
+// Self-healing (spec 2026-07-20 §3.1): adopt the live session's name from
+// CC's own statusline snapshot whenever it is strictly fresher than our
+// state. Heals divergence from ANY path (poisoned boot seed, terminal-typed
+// /rename, registry races) within one statusline fire. mtime-gated so the
+// steady-state cost is one statSync per 500ms tick.
+//
+// Names the wrapper itself just wrote (rename sniffer, post-/clear chain,
+// /switch) are ahead of CC's statusline until CC processes the injected
+// command — which happens only after the current AI turn ends. Until the
+// statusline CONFIRMS the expected name (or the expectation times out so
+// genuine divergence still heals), revalidation must not adopt a divergent
+// snapshot: its captured_at_ms is capture time, not content time.
+const NAME_EXPECTATION_TIMEOUT_MS = 10 * 60_000
+let pendingNameExpectation: PendingNameExpectation | null = null
+let lastStatusSeenMtimeMs = 0
+function revalidateSessionNameFromStatusline(): void {
+  const dir = resolveTelegramStateDir()
+  if (!dir) return
+  const file = join(dir, 'last-status.json')
+  let mtimeMs: number
+  try {
+    mtimeMs = statSync(file).mtimeMs
+  } catch {
+    return // file absent or unreadable — skip this tick
+  }
+  if (mtimeMs === lastStatusSeenMtimeMs) return
+  lastStatusSeenMtimeMs = mtimeMs // set BEFORE parsing so corrupt files aren't re-parsed every tick
+  const raw = readLastStatusRaw()
+  if (raw === null) return
+  const now = Date.now()
+  if (
+    pendingNameExpectation &&
+    expectationResolved(pendingNameExpectation, raw, sessionState?.session_id ?? null, now, NAME_EXPECTATION_TIMEOUT_MS)
+  ) {
+    pendingNameExpectation = null
+  }
+  const adopt = shouldAdoptStatuslineName(sessionState, raw, {
+    inClearTransition: awaitingClearReady !== null || injectionGate.isBlocked(now),
+    expectation: pendingNameExpectation,
+  })
+  if (!adopt) return
+  const oldName = sessionState?.session_name ?? null
+  updateSessionState({ session_name: adopt })
+  // Keep the registry converged too (same pattern as the /rename handler).
+  // Best-effort: a failed registry write is logged inside the writer and
+  // does not undo the (already correct) state adoption.
+  const sidNow = sessionState?.session_id
+  if (sidNow) writeTelegramRegistryName(sidNow, adopt)
+  log(
+    `session name revalidated from statusline: ${JSON.stringify(oldName)} → ${JSON.stringify(adopt)}`,
+  )
+  // Deliberately NO system-outbox event: the rename already happened in CC;
+  // we are syncing our copy, not orchestrating a transition (spec §3.1).
+}
+
 // Post-/clear poll. Cheap (one readdir every 500ms) and only does work when
 // `awaitingClearReady` is set, so the steady-state cost is negligible.
 // We poll instead of fs.watch because fs.watch's create-event coverage on
 // Windows is historically flaky and this path needs to be reliable.
 const sessionPollInterval = setInterval(() => {
-  if (!awaitingClearReady) return
+  if (!awaitingClearReady) {
+    revalidateSessionNameFromStatusline()
+    return
+  }
   const current = listSessions()
   for (const f of current) {
     if (!awaitingClearReady.sessionsBefore.has(f)) {
@@ -839,6 +905,8 @@ const sessionPollInterval = setInterval(() => {
         }`,
       )
       updateSessionState({ session_id: sid, session_name: sessionName ?? null })
+      pendingNameExpectation =
+        typeof sessionName === 'string' ? { name: sessionName, since_ms: Date.now() } : null
       // Record the fresh session's name immediately (or clear the previous
       // one when this /clear came without a name) so peer-status readers
       // never see the old session's name attached to the new session.
@@ -894,9 +962,23 @@ const sessionPollInterval = setInterval(() => {
 // still runs in this mode but won't detect anything; that's harmless.
 if (!startupMode.isFirstRun && startupMode.latestSessionId) {
   const sid = startupMode.latestSessionId
-  // Resolve label: prefer CC's own statusline snapshot (fresh even when a
-  // PTY-injected /rename bypassed the telegram registry), then the registry.
-  const resolvedName = readLastStatusSessionName(sid) ?? readTelegramRegistryName(sid)
+  // Resolve label by FRESHNESS, not fixed priority (spec 2026-07-20 §3.2):
+  // the statusline snapshot can be a poisoned post-/clear render (new sid +
+  // old name) and the registry can lag a PTY-injected /rename — whichever
+  // was written more recently wins; tie → registry (event-driven writes
+  // beat renders). The old `lastStatus ?? registry` priority is what let a
+  // poisoned snapshot beat a correct registry (incident bot-03 2026-07-18).
+  const lastStatusRaw = readLastStatusRaw()
+  const registryEntry = readTelegramRegistryEntry(sid)
+  const { name: resolvedName, source } = resolveResumeName(lastStatusRaw, registryEntry, sid)
+  const snap = lastStatusRaw ? parseStatuslineSnapshot(lastStatusRaw) : null
+  log(
+    `resume name resolution: last-status=${
+      snap && snap.session_id === sid ? `"${snap.session_name}"@${snap.captured_at_ms}` : 'none'
+    } registry=${
+      registryEntry ? `"${registryEntry.name}"@${registryEntry.updatedAt}` : 'none'
+    } → picked ${source} ${JSON.stringify(resolvedName)}`,
+  )
   updateSessionState({ session_id: sid, session_name: resolvedName })
   writeSystemOutbox({
     type: 'session-change',
@@ -1087,6 +1169,7 @@ function dispatchPayload(
     const renamedTo = renameArgFromCommand(command)
     if (renamedTo) {
       updateSessionState({ session_name: renamedTo })
+      pendingNameExpectation = { name: renamedTo, since_ms: Date.now() }
       // Keep the telegram registry in sync: a PTY-injected /rename never
       // passes through the telegram handler, so without this the registry
       // (and any restart that seeds from it) goes stale.
@@ -1185,10 +1268,15 @@ function dispatchPayload(
     )
     // Prefer the name carried in the payload; fall back to the telegram
     // registry (the payload's sessionName is informational and may be null).
+    const resolvedSwitchName = sessionName ?? readTelegramRegistryName(sid)
     updateSessionState({
       session_id: sid,
-      session_name: sessionName ?? readTelegramRegistryName(sid),
+      session_name: resolvedSwitchName,
     })
+    pendingNameExpectation =
+      typeof resolvedSwitchName === 'string'
+        ? { name: resolvedSwitchName, since_ms: Date.now() }
+        : null
     injectSlashCommand(`/resume ${sid}`)
     // /resume swaps the session inside CC — hold a little longer than a
     // plain slash so the next payload lands after the swap settles.

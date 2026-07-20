@@ -1,6 +1,6 @@
 {
   "name": "pty-controller-wrapper",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Proof of concept: run Claude Code inside a node-pty pseudo-terminal and programmatically send slash commands like /clear. No Telegram, no daemon — just exploration of whether CC behaves correctly under PTY emulation.",
   "private": true,
   "type": "module",
@@ -15,6 +15,7 @@
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
+    "@types/bun": "^1.3.14",
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"

@@ -182,3 +182,52 @@ registry akan tersusul di adopsi/event berikutnya).
 | Pertanyaan | Pilihan | Konsekuensi |
 |---|---|---|
 | Strategi fix | A — self-healing kontinu (bukan boot-only) | Divergensi dari jalur mana pun sembuh sendiri; + arbitrase boot kecil (deviasi dari A murni, disetujui saat presentasi desain) untuk menutup window turn-pertama-setelah-boot |
+
+## 8. Amendemen pasca final review (2026-07-20)
+
+Final review whole-branch menemukan dua bug integrasi Critical di §3.1,
+satu akar masalah: `captured_at_ms` snapshot adalah waktu CAPTURE, bukan
+waktu KONTEN. Wrapper bisa legitimately tahu nama BARU lebih dulu daripada
+statusline CC merefleksikannya — CC baru memproses slash command yang
+di-inject wrapper setelah AI turn yang sedang berjalan selesai, dan
+local command (mis. rename lewat sniffer, chain post-/clear, /switch)
+tidak memicu refresh statusline. Akibatnya guard (b) freshness saja bisa
+salah adopsi: snapshot yang fire di turn yang sama masih membawa nama
+LAMA tapi `captured_at_ms`-nya "lebih baru" dari state (yang baru saja
+ditulis wrapper) → revert nama in-flight, di state MAUPUN registry
+(Critical 1). Terpisah, guard (c) di call site ternyata dead code:
+`injectionGate.clearBarrierActive(...)` selalu false persis saat kondisi
+`awaitingClearReady === null` yang jadi syarat blok itu dievaluasi —
+window settle post-/clear sebenarnya diimplementasikan lewat `holdFor`,
+bukan barrier time, sehingga window itu tidak pernah benar-benar
+ter-guard (Critical 2).
+
+**Fix — guard (e) expected-name confirmation.** Setiap penulisan nama
+yang diinisiasi wrapper sendiri (sniffer `/rename`, chain fresh-session
+post-/clear, handler `/switch`) sekarang mencatat
+`PendingNameExpectation { name, since_ms }` segera setelah
+`updateSessionState`. Selama expectation itu pending, `shouldAdoptStatuslineName`
+menolak adopsi snapshot yang namanya BERBEDA dari nama yang diharapkan —
+biar pun snapshot itu lolos guard (b) freshness. Expectation dianggap
+selesai (`expectationResolved`) ketika: snapshot mengonfirmasi (sid +
+nama cocok), ATAU timeout 10 menit terlampaui — sehingga divergensi asli
+(bukan false positive dari lag statusline) tetap sembuh sendiri, bukan
+macet permanen menolak adopsi.
+
+**Fix — guard (c) diganti ke `injectionGate.isBlocked`.** Call site
+revalidasi sekarang memakai
+`awaitingClearReady !== null || injectionGate.isBlocked(now)` — sinyal
+yang benar-benar hidup di window settle (`isBlocked` mencakup baik clear
+barrier maupun `holdFor`), menggantikan `clearBarrierActive` yang dead
+code di posisi itu.
+
+**Limitation diketahui — boot arbitration pasca mid-turn rename.**
+`PendingNameExpectation` hidup di RAM wrapper, tidak survive restart.
+Skenario: rename mid-turn (expectation belum resolved) diikuti restart
+wrapper segera sesudahnya → arbitrase boot (§3.2) membandingkan
+`last-status` vs registry TANPA sinyal expectation, sehingga bisa memilih
+`last-status` yang stale-content-tapi-newer-captured, bukan registry yang
+sudah benar. Ini bukan bug baru yang bisa diperbaiki dari state RAM
+(expectation tidak bisa dipersist murah tanpa risiko stale-nya sendiri);
+didokumentasikan sebagai known limitation, dan disembuhkan otomatis oleh
+revalidasi kontinu (§3.1) begitu statusline fire lagi di turn berikutnya.
