@@ -85,6 +85,18 @@ What's different vs. plain `claude`:
 
 Quit with `/exit` inside Claude or Ctrl+C in the wrapper terminal.
 
+### Session-name self-healing (wrapper >= 0.0.8)
+
+`wrapper.state.json` / `wrapper.current_session_name` menyembuhkan diri dari
+divergensi nama: tiap tick poll 500ms (di luar transisi `/clear`), wrapper
+membandingkan snapshot statusline CC (`last-status.json`) dengan state-nya —
+bila snapshot menggambarkan session yang sama dan LEBIH BARU
+(`captured_at_ms` > `updated_at_ms` state) dengan nama berbeda, nama snapshot
+diadopsi (state + registry), ter-log sebagai `session name revalidated…`.
+Saat boot-resume, nama di-seed dengan arbitrase freshness last-status vs
+registry (tie → registry), ter-log sebagai `resume name resolution…`.
+Desain: `docs/superpowers/specs/2026-07-20-wrapper-session-name-self-healing-design.md`.
+
 ## MCP tools
 
 The server in [`server.ts`](./server.ts) exposes three tools. Called over the stdio MCP transport.

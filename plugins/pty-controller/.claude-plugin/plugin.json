@@ -1,7 +1,7 @@
 {
   "name": "pty-controller",
   "description": "Lets Claude programmatically send slash commands to itself by going through a parent wrapper process that hosts CC inside a node-pty pseudo-terminal. pty_send_slash is SELF-ONLY (neighbor-autonomy decision 2026-06-07 — the target param was removed) and supports atomic BATCH sequences via `commands` (e.g. [\"/rename done-x\", \"/clear\", \"/rename idle\"]): one pending file, enqueued contiguously, session-change notification deferred to end of batch (wrapper >= 0.0.7). Requires the companion `mirza-cc` wrapper running — this plugin only writes command requests to a shared state directory; the wrapper reads them and injects keystrokes into the PTY. Without the wrapper, the MCP tool returns a clear error and slash commands are no-ops.",
-  "version": "0.0.30",
+  "version": "0.0.31",
   "author": {
     "name": "Mirza"
   },
