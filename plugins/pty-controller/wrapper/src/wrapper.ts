@@ -79,6 +79,7 @@ import {
   writeSessionState,
   parseStatuslineSnapshot,
   resolveResumeName,
+  shouldAdoptStatuslineName,
   type SessionState,
   type RegistryEntry,
 } from './session-state'
@@ -827,12 +828,54 @@ try {
   log(`version file write failed: ${err}`)
 }
 
+// Self-healing (spec 2026-07-20 §3.1): adopt the live session's name from
+// CC's own statusline snapshot whenever it is strictly fresher than our
+// state. Heals divergence from ANY path (poisoned boot seed, terminal-typed
+// /rename, registry races) within one statusline fire. mtime-gated so the
+// steady-state cost is one statSync per 500ms tick.
+let lastStatusSeenMtimeMs = 0
+function revalidateSessionNameFromStatusline(): void {
+  const dir = resolveTelegramStateDir()
+  if (!dir) return
+  const file = join(dir, 'last-status.json')
+  let mtimeMs: number
+  try {
+    mtimeMs = statSync(file).mtimeMs
+  } catch {
+    return // file absent — statusline never fired yet
+  }
+  if (mtimeMs === lastStatusSeenMtimeMs) return
+  lastStatusSeenMtimeMs = mtimeMs // set BEFORE parsing so corrupt files aren't re-parsed every tick
+  const raw = readLastStatusRaw()
+  if (raw === null) return
+  const adopt = shouldAdoptStatuslineName(sessionState, raw, {
+    inClearTransition:
+      awaitingClearReady !== null || injectionGate.clearBarrierActive(Date.now()),
+  })
+  if (!adopt) return
+  const oldName = sessionState?.session_name ?? null
+  updateSessionState({ session_name: adopt })
+  // Keep the registry converged too (same pattern as the /rename handler).
+  // Best-effort: a failed registry write is logged inside the writer and
+  // does not undo the (already correct) state adoption.
+  const sidNow = sessionState?.session_id
+  if (sidNow) writeTelegramRegistryName(sidNow, adopt)
+  log(
+    `session name revalidated from statusline: ${JSON.stringify(oldName)} → ${JSON.stringify(adopt)}`,
+  )
+  // Deliberately NO system-outbox event: the rename already happened in CC;
+  // we are syncing our copy, not orchestrating a transition (spec §3.1).
+}
+
 // Post-/clear poll. Cheap (one readdir every 500ms) and only does work when
 // `awaitingClearReady` is set, so the steady-state cost is negligible.
 // We poll instead of fs.watch because fs.watch's create-event coverage on
 // Windows is historically flaky and this path needs to be reliable.
 const sessionPollInterval = setInterval(() => {
-  if (!awaitingClearReady) return
+  if (!awaitingClearReady) {
+    revalidateSessionNameFromStatusline()
+    return
+  }
   const current = listSessions()
   for (const f of current) {
     if (!awaitingClearReady.sessionsBefore.has(f)) {
