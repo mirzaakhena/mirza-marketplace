@@ -77,8 +77,10 @@ import { renameArgFromCommand, type Lifecycle } from './session-name'
 import {
   buildNextState,
   writeSessionState,
-  nameFromLastStatus,
+  parseStatuslineSnapshot,
+  resolveResumeName,
   type SessionState,
+  type RegistryEntry,
 } from './session-state'
 import { InjectionGate } from './injection-gate'
 
@@ -333,33 +335,36 @@ function writeTelegramRegistryName(sessionId: string, name: string): void {
   }
 }
 
-// Read-side counterpart: resolve a session's label from the telegram
-// registry. Best-effort — missing dir/file/entry all yield null.
-function readTelegramRegistryName(sessionId: string): string | null {
+// Registry entry incl. its write timestamp — needed by the boot-resume
+// freshness arbitration (spec 2026-07-20 §3.2).
+function readTelegramRegistryEntry(sessionId: string): RegistryEntry | null {
   const dir = resolveTelegramStateDir()
   if (!dir) return null
   try {
     const obj = JSON.parse(
       readFileSync(join(dir, 'session-names.json'), 'utf8'),
-    ) as Record<string, { name?: string }>
-    return obj[sessionId]?.name ?? null
+    ) as Record<string, { name?: unknown; updatedAt?: unknown }>
+    const e = obj[sessionId]
+    if (!e || typeof e.name !== 'string' || !e.name) return null
+    return { name: e.name, updatedAt: typeof e.updatedAt === 'number' ? e.updatedAt : 0 }
   } catch {
     return null
   }
 }
 
-// Freshest name source: CC's own statusline snapshot. Only valid when the
-// snapshot describes the asked-for session (id match) — see nameFromLastStatus.
-// Used to seed state on startup-resume, where the telegram registry can be
-// stale (a PTY-injected /rename never passes through the telegram handler).
-function readLastStatusSessionName(sessionId: string): string | null {
+// Read-side counterpart: resolve a session's label from the telegram
+// registry. Best-effort — missing dir/file/entry all yield null.
+function readTelegramRegistryName(sessionId: string): string | null {
+  return readTelegramRegistryEntry(sessionId)?.name ?? null
+}
+
+// Raw contents of telegram's last-status.json (CC statusline snapshot), or
+// null when absent/unreadable. Parsing/validation happens in session-state.ts.
+function readLastStatusRaw(): string | null {
   const dir = resolveTelegramStateDir()
   if (!dir) return null
   try {
-    return nameFromLastStatus(
-      readFileSync(join(dir, 'last-status.json'), 'utf8'),
-      sessionId,
-    )
+    return readFileSync(join(dir, 'last-status.json'), 'utf8')
   } catch {
     return null
   }
@@ -894,9 +899,23 @@ const sessionPollInterval = setInterval(() => {
 // still runs in this mode but won't detect anything; that's harmless.
 if (!startupMode.isFirstRun && startupMode.latestSessionId) {
   const sid = startupMode.latestSessionId
-  // Resolve label: prefer CC's own statusline snapshot (fresh even when a
-  // PTY-injected /rename bypassed the telegram registry), then the registry.
-  const resolvedName = readLastStatusSessionName(sid) ?? readTelegramRegistryName(sid)
+  // Resolve label by FRESHNESS, not fixed priority (spec 2026-07-20 §3.2):
+  // the statusline snapshot can be a poisoned post-/clear render (new sid +
+  // old name) and the registry can lag a PTY-injected /rename — whichever
+  // was written more recently wins; tie → registry (event-driven writes
+  // beat renders). The old `lastStatus ?? registry` priority is what let a
+  // poisoned snapshot beat a correct registry (incident bot-03 2026-07-18).
+  const lastStatusRaw = readLastStatusRaw()
+  const registryEntry = readTelegramRegistryEntry(sid)
+  const { name: resolvedName, source } = resolveResumeName(lastStatusRaw, registryEntry, sid)
+  const snap = lastStatusRaw ? parseStatuslineSnapshot(lastStatusRaw) : null
+  log(
+    `resume name resolution: last-status=${
+      snap && snap.session_id === sid ? `"${snap.session_name}"@${snap.captured_at_ms}` : 'none'
+    } registry=${
+      registryEntry ? `"${registryEntry.name}"@${registryEntry.updatedAt}` : 'none'
+    } → picked ${source} ${JSON.stringify(resolvedName)}`,
+  )
   updateSessionState({ session_id: sid, session_name: resolvedName })
   writeSystemOutbox({
     type: 'session-change',
