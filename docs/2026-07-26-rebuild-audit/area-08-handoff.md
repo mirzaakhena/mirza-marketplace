@@ -200,11 +200,13 @@ Lebih longgar dari aturan lama (35% untuk window 1M) — sejalan dengan catatan 
 | Pengirim | "Sudah terlalu penuh untuk melanjutkan?" | **50% terpakai** | relatif |
 | Penerima | "Cukup kosong untuk menerima?" | **< 100k terpakai** | mutlak |
 
-### 8.C — ⭐ FITUR BARU: "partial handoff" (delegasi, bukan estafet)
+### 8.C — ⭐ FITUR BARU: **delegasi** (nama final, dulu "partial handoff") — bukan estafet
 
 > "Ada ide fitur baru yaitu 'partial handoff'. Ini artinya ada bagian yang akan di handoff ke bot lain tetapi bot utama masih menjalankan task seperti biasa." — user, 2026-07-26
 
-**Ini primitif yang BERBEDA dari handoff.** Handoff = *"saya berhenti, kamu lanjutkan"* (estafet, satu pemilik, pengirim mereset diri). Partial handoff = *"kamu ambil sepotong, saya tetap jalan"* (dua pemilik paralel, tak ada yang mereset).
+**Nama DITETAPKAN 2026-07-29: "delegasi"** (Indonesia, user-facing) / `delegate` (kode, K-16). "Partial handoff" dibuang karena menjelaskan *mekanismenya* (potongan + estafet), bukan *maksudnya* — dan kata "handoff" aktif menyesatkan karena fitur ini eksplisit **bukan** estafet.
+
+**Ini primitif yang BERBEDA dari handoff.** Handoff = *"saya berhenti, kamu lanjutkan"* (estafet, satu pemilik, pengirim mereset diri). Delegasi = *"kamu ambil sepotong, saya tetap jalan"* (dua pemilik paralel, tak ada yang mereset).
 
 ### Kenapa bot peer, bukan subagent
 
@@ -216,9 +218,9 @@ User memilih **semua** alasan berikut, plus satu tambahan yang paling menentukan
 | Jejak terpisah di Telegram | Progres terlihat sebagai percakapan sendiri di thread bot itu |
 | Pekerjaan berjam-jam | Subagent hidup di dalam satu turn; pekerjaan panjang lebih cocok dimiliki proses berdiri sendiri |
 | Bot peer punya keahlian/konfigurasi berbeda | Model/effort berbeda, atau sudah punya konteks project tertentu |
-| ⭐ **User ingin berkomunikasi, berinteraksi, dan berdiskusi LANGSUNG dengan bot yang menerima partial handoff** | Ini yang subagent **tidak mungkin** berikan — subagent tidak punya identitas yang bisa diajak bicara |
+| ⭐ **User ingin berkomunikasi, berinteraksi, dan berdiskusi LANGSUNG dengan bot yang menerima delegasi** | Ini yang subagent **tidak mungkin** berikan — subagent tidak punya identitas yang bisa diajak bicara |
 
-Alasan terakhir itu yang membuat partial handoff bukan duplikasi subagent: yang dibutuhkan bukan *pekerja*, tapi **rekan kerja tambahan yang bisa diajak bicara**.
+Alasan terakhir itu yang membuat delegasi bukan duplikasi subagent: yang dibutuhkan bukan *pekerja*, tapi **rekan kerja tambahan yang bisa diajak bicara**.
 
 ### Keputusan yang sudah diambil
 
@@ -227,14 +229,13 @@ Alasan terakhir itu yang membuat partial handoff bukan duplikasi subagent: yang 
 | **Laporan balik ke bot utama** | **TIDAK ADA KEWAJIBAN.** Bot penerima tidak wajib melaporkan hasil ke bot utama — ia jadi pemilik mandiri atas potongan itu dan berinteraksi langsung dengan user |
 | **Isolasi repo** | **WAJIB git worktree terpisah.** Aturan bot-conduct Rule 1 (SKILL-057) naik dari anjuran jadi **syarat**: bot pelaksana bekerja di worktree sendiri, hasilnya digabung lewat git seperti kontribusi biasa. Ini juga yang membuat user tetap bisa memakai repo itu sendiri saat kedua bot bekerja |
 | **Self-reset pengirim** | **TIDAK** — bot utama tetap jalan (inti perbedaannya dengan handoff) |
+| **ACK penerimaan** (DITETAPKAN 2026-07-29) | **Tidak ada mekanisme baru.** Kewajiban `reply` yang sudah ditegakkan hook `Stop` untuk SETIAP turn (§7) otomatis jadi ACK-nya — begitu bot penerima memproses delegasi, ia sudah wajib membalas ke user di thread-nya sendiri. `fleetd` boleh mencatat transisi status `terkirim` → `dibalas` di tabel `handoffs` sebagai observability pasif (buat `doctor`/`agent_status`), **tanpa** timeout dan tanpa status NOT-OK seperti handoff biasa — karena bot pengirim tidak pernah menunggu apa pun, tidak ada yang perlu digerbang |
+| **Bot tujuan sedang sibuk** (DITETAPKAN 2026-07-29) | **Bukan konsep yang ditangani mesin.** Delegasi cuma jenis lain dari prompt antar-bot yang sudah ada mesinnya (§5.3/§7 area) — pesan selalu terkirim, mengantre di `bot_inbox` kalau sesi tak tersambung, persis seperti prompt antar-bot lain. **Bot penerima sendiri yang memutuskan** kapan menanggapi (langsung, tunda, atau balas "sedang penuh") — melempar keputusan itu ke `fleetd` melanggar **neighbor autonomy** (prinsip #4). Tidak ada logika "antre vs tolak vs tawarkan bot lain" yang perlu dibangun. Courtesy opsional: pengirim boleh cek `agent_status` dulu sebelum mendelegasikan (hemat usaha), tapi bukan syarat mengikat |
 
 ### Penyederhanaan besar yang mengikuti
 
-Karena tidak ada kewajiban lapor balik, **tidak diperlukan kanal balasan sama sekali** — jadi seluruh pertanyaan soal "bagaimana hasilnya kembali" (polling, artefak, prompt balik) **gugur**. Partial handoff memakai ulang mesin handoff yang sudah ada, dikurangi dua hal: tanpa self-reset pengirim, dan tanpa pelacakan ACK-hasil.
+Karena tidak ada kewajiban lapor balik, **tidak diperlukan kanal balasan sama sekali** — jadi seluruh pertanyaan soal "bagaimana hasilnya kembali" (polling, artefak, prompt balik) **gugur**. Delegasi memakai ulang mesin handoff dan mesin prompt-antar-bot yang sudah ada, tanpa satu pun primitif baru — ACK-nya numpang di `reply`+`Stop` yang sudah wajib, penanganan "sibuk"-nya numpang di `bot_inbox` yang sudah ada.
 
 ### Sisa detail untuk desain implementasi
 
-1. **ACK penerimaan** (bukan ACK hasil) — rekomendasi: penerima meng-ACK ke **user**, supaya user tahu potongan itu benar-benar mendarat. ACK ke bot utama tidak wajib.
-2. **Isi file partial handoff** — kandidat: template §8.5 dikurangi bagian yang mengasumsikan estafet (`Lanjutan dari`, `Pair`), ditambah **batas potongan yang jelas** (apa yang termasuk, apa yang tetap milik bot utama) supaya dua bot tidak saling menyerobot.
-3. **Kalau bot tujuan sedang sibuk** — belum diputuskan: antre, tolak, atau tawarkan bot lain.
-4. **Penamaan** — "partial handoff" menjelaskan mekanismenya tapi bukan maksudnya. Kandidat lain: *delegasi*, *split*, *spin-off*. Diputuskan saat desain.
+1. **Isi file delegasi** — kandidat: template §8.5 dikurangi bagian yang mengasumsikan estafet (`Lanjutan dari`, `Pair`), ditambah **batas potongan yang jelas** (apa yang termasuk, apa yang tetap milik bot utama) supaya dua bot tidak saling menyerobot. **Belum dibahas** — satu-satunya item tersisa dari 4 pertanyaan awal.

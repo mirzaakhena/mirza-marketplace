@@ -57,7 +57,7 @@ Desain lama mengasumsikan 4 hook; nyatanya ada 30. Yang langsung relevan dengan 
 | **`PreCompact` / `PostCompact`** | Menjawab masalah nyata: designation handoff hilang saat context di-compact (area 08 §8.3) |
 | `PostToolUse` / `PostToolBatch` | Penjaga jawaban final (area 10 §10.2) bisa lebih presisi daripada membaca transkrip |
 | `SessionEnd`, `SubagentStart/Stop` | Lifecycle yang selama ini ditebak dari filesystem |
-| `WorktreeCreate` / `WorktreeRemove` | Relevan untuk aturan worktree (area 10 §10.A) dan partial handoff (area 08 §8.C) |
+| `WorktreeCreate` / `WorktreeRemove` | Relevan untuk aturan worktree (area 10 §10.A) dan delegasi (area 08 §8.C) |
 | `PermissionRequest` | Ada jalur resminya — kalau relay izin dihidupkan lagi, tak perlu membajak apa pun |
 | `TaskCreated` / `TaskCompleted` | Sinyal "task selesai" yang jadi pemicu handoff — selama ini ditebak |
 | `effort.level` di **semua** hook | Effort bisa dibaca tanpa statusLine |

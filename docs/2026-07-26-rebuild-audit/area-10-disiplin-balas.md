@@ -136,7 +136,7 @@ Bentuknya → 10.C.
 
 **Yang tetap dari SKILL-057:** urutan alat — native tooling dulu (`EnterWorktree` / subagent `isolation:"worktree"`), fallback `git worktree add`; cleanup `git worktree remove` setelah merge.
 
-**Catatan:** untuk **partial handoff** (area 08 §8.C) worktree tetap **wajib**, bukan tawaran — di situ dua bot pasti bekerja bersamaan di repo yang sama.
+**Catatan:** untuk **delegasi** (area 08 §8.C) worktree tetap **wajib**, bukan tawaran — di situ dua bot pasti bekerja bersamaan di repo yang sama.
 
 ## 10.B Rule 6 (three-copy doctrine) — **PINDAH ke CLAUDE.md repo ini**
 

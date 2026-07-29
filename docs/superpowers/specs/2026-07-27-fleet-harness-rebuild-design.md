@@ -4,7 +4,7 @@
 - **Status:** Menunggu review user
 - **Asal:** sesi audit `renew-mirza-marketplace` (2026-07-26). Seluruh 529 item inventaris kapabilitas sudah melewati keputusan sadar.
 - **Dokumen pendamping yang WAJIB dibaca eksekutor:**
-  - `docs/2026-07-26-rebuild-audit/README.md` — ledger induk: 16 keputusan lintas-area (K-1…K-16), 8 fitur baru (B-1…B-8), ringkasan apa yang bertahan
+  - `docs/2026-07-26-rebuild-audit/README.md` — ledger induk: 18 keputusan lintas-area (K-1…K-18), 8 fitur baru (B-1…B-8), ringkasan apa yang bertahan
   - `docs/2026-07-26-rebuild-audit/area-01..14` — keputusan per fitur **beserta alasannya**. Spec ini tidak menduplikasi isinya
   - `docs/2026-07-26-rebuild-audit/hook-mapping.md` — 30 hook Claude Code → kewajiban mekanis
   - `docs/2026-07-26-rebuild-audit/state-inventory.md` — 27 artefak state kondisi lama
@@ -394,7 +394,7 @@ Tiap tahap punya **satu** kriteria selesai yang bisa dibuktikan dan menghasilkan
 | **3. Penegakan** | `PreToolUse` (ack) + `Stop` (jawaban final) + tombol wajib + tombol manual otomatis | Bot **tidak bisa** meninggalkan user tanpa jawaban dan **tidak bisa** bertanya tanpa tombol — dibuktikan dengan **mencoba melanggarnya** |
 | **4. Sesi** | V-1 & V-2 sudah terverifikasi (§11b) — mulai dengan uji ulang singkat jalur `/rename` manual & `UserPromptSubmit` yang baru ditelusuri lewat kode, belum lewat eksperimen hidup, lalu `mirza-cc` + antrean injeksi + `SessionStart` + `/new` `/switch` + `/context` + hook `UserPromptSubmit` untuk penamaan mid-sesi (K-18, tanpa injeksi `/rename`) | Ganti sesi dari Telegram jalan tanpa polling file; nama sesi benar lewat entri `custom-title` di transkrip |
 | **5. Antar-bot** | `agent_list` `agent_status` `agent_send` + handoff dijaga mesin | Handoff dua bot tuntas: file, ACK, laporan, reset — tanpa AI mengingat apa pun |
-| **6. Sisanya** | `peek_conversation`, pencarian, penyembunyian sesi remeh, penamaan otomatis, partial handoff | Per fitur |
+| **6. Sisanya** | `peek_conversation`, pencarian, penyembunyian sesi remeh, penamaan otomatis, delegasi (dulu "partial handoff", B-8) | Per fitur |
 
 Tahap 2–3 sudah membuat sistemnya berguna: bot yang bisa diajak bicara dan tidak bisa mengabaikan user. Tahap 4 baru menyentuh PTY — bagian paling rawan — saat fondasinya sudah terbukti.
 

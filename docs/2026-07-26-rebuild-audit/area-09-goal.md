@@ -40,7 +40,7 @@ Bot tidak menawarkan sendiri *"mau saya jadikan goal?"*.
 
 Meski plugin-nya dibuang, dua aturan di dalamnya adalah gagasan bagus yang layak dipakai di tempat lain:
 
-1. **Kondisi "selesai" harus terverifikasi mekanis** (SKILL-037) — bukan subjektif: test lulus, exit code, jumlah file. Ini memaksa user dan bot menyepakati definisi "selesai" yang tidak bisa ditafsir ulang. Relevan untuk **partial handoff** (area 08 §8.C, batas potongan pekerjaan) dan untuk **plan/task** apa pun.
+1. **Kondisi "selesai" harus terverifikasi mekanis** (SKILL-037) — bukan subjektif: test lulus, exit code, jumlah file. Ini memaksa user dan bot menyepakati definisi "selesai" yang tidak bisa ditafsir ulang. Relevan untuk **delegasi** (area 08 §8.C, batas potongan pekerjaan) dan untuk **plan/task** apa pun.
 2. **Klausa stop wajib bila ada risiko loop tak berujung** (SKILL-039) — mis. *"…atau berhenti setelah 20 turn"*. Prinsip umum: setiap pekerjaan otonom wajib punya kondisi berhenti, bukan hanya kondisi berhasil.
 
 Kedua gagasan ini dicatat untuk dipertimbangkan di area 08/13, bukan hilang bersama plugin-nya.
