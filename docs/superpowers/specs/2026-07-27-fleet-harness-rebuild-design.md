@@ -1,7 +1,7 @@
 # Spec — Rebuild Harness Bot Telegram (`fleet`)
 
 - **Tanggal:** 2026-07-27
-- **Status:** Menunggu review user
+- **Status:** **Disetujui (2026-07-30)** — user memilih lanjut tanpa menantang detail §3.2/§9/§10 secara satu-satu ("tidak ingin terlalu berlama-lama membahas itu, sementara ini saya terima konsekuensi apa adanya"). Ini persetujuan sadar untuk melanjutkan, **bukan** klaim bahwa ketiga bagian itu sudah ditinjau baris-per-baris — kalau nanti ternyata ada yang mengganjal di §3.2 (sentralisasi logika di `fleetd`), §9 (delapan risiko diterima), atau §10 (urutan tahap), itu tetap boleh dibuka ulang kapan saja.
 - **Asal:** sesi audit `renew-mirza-marketplace` (2026-07-26). Seluruh 529 item inventaris kapabilitas sudah melewati keputusan sadar.
 - **Dokumen pendamping yang WAJIB dibaca eksekutor:**
   - `docs/2026-07-26-rebuild-audit/README.md` — ledger induk: 18 keputusan lintas-area (K-1…K-18), 8 fitur baru (B-1…B-8), ringkasan apa yang bertahan
