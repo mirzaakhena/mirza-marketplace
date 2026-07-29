@@ -32,6 +32,19 @@ Kita merakit ulang harness bot Telegram di atas tiga komponen: **`fleetd`** (sat
 
 ### Hubungan dengan sistem lama
 
+> **"`mirza-bots` ini adalah system baru yang tidak perlu kompatibel dengan system lama, tetapi belajar dari system lama."** — user, 2026-07-27
+
+**Kompatibilitas BUKAN tujuan.** Yang diwarisi dari sistem lama adalah **pengetahuannya**, bukan kodenya atau formatnya:
+
+| Diwarisi | Tidak diwarisi |
+|---|---|
+| 97 item scar tissue — kegagalan nyata yang sudah dibayar mahal | Format file state |
+| Konstanta pacing sebagai **titik awal** (wajib dikalibrasi ulang) | Skema `access.json`, `wrapper.*`, `agent-registry.json` |
+| Kontrak perilaku yang terbukti (chunking, album, anti-forge) | Nama key, mirror legacy, sinonim payload |
+| Keputusan prinsip (neighbor autonomy, PTY-untuk-input) | Kode yang bisa diangkut apa adanya |
+
+Ini yang membuat **K-12 (tanpa shim)** bukan sekadar boleh, tapi **benar**: tidak ada yang perlu dikompromikan karena tidak ada yang perlu saling bicara.
+
 **Ini marketplace BARU. `mirza-marketplace` yang lama TIDAK disentuh** — tidak diubah, tidak dihapus, tidak dimigrasi. Ke-11 plugin lamanya tetap berjalan apa adanya selama sistem baru dibangun.
 
 **"DROP" di seluruh dokumen audit berarti "tidak diikutsertakan di sistem baru"**, bukan dihapus dari yang lama.
@@ -289,6 +302,28 @@ Syarat kedua **wajib ada** karena ia menutup lubang yang ditinggalkan nama `idle
 
 **Bila tidak ada bot yang memenuhi syarat:** laporkan kondisi tiap peer secara konkret lalu tawarkan `[Tulis file saja] [Pilih paksa salah satu] [Batal]`. User tetap boleh **sengaja** memilih bot yang tidak siap (SKILL-013) — saat itu pesan handoff membawa penanda "pilihan sadar user" supaya penjaga penerima tidak menolaknya.
 
+### 8.0b Ambang PENGIRIM — **50% dari total context** (user, 2026-07-27)
+
+Bot menawarkan handoff saat pemakaian context-nya mencapai **50% dari ukuran window**-nya. Disetel di config.
+
+| Window | Menawarkan handoff pada | Sisa ruang saat itu |
+|---|---|---|
+| 1.000.000 | 500.000 terpakai | 500.000 |
+| 200.000 | 100.000 terpakai | 100.000 |
+
+**Dibanding aturan lama:** 35% untuk window 1M → **lebih longgar**, bot bekerja lebih lama sebelum menawarkan. Sejalan dengan catatan audit bahwa 35% kemungkinan terlalu konservatif.
+
+⚠️ **Ini membalik sebagian keputusan area 08 §8.2** yang memilih dasar "sisa token" alih-alih persen. User memilih persen untuk ambang pengirim. Pembalikannya dapat diterima karena alasan asli menolak persen berlaku untuk **penerima**, bukan pengirim: "10% terpakai" berarti 20k pada window 200k — terlalu ketat untuk menilai kesegaran. Sementara "setengah penuh" bermakna sama di ukuran window mana pun.
+
+**Dua ambang, dua satuan, sengaja berbeda:**
+
+| Peran | Pertanyaan | Ambang | Satuan |
+|---|---|---|---|
+| Pengirim | "Sudah terlalu penuh untuk melanjutkan?" | **50% terpakai** | relatif |
+| Penerima | "Cukup kosong untuk menerima?" | **< 100k terpakai** | mutlak |
+
+**Kapan diperiksa (tidak berubah):** hanya di batas selesai-task, boleh terlampaui selama task berjalan. Pemicunya hook `TaskCompleted`.
+
 | # | Siapa | Melakukan |
 |---|---|---|
 | 1 | AI pengirim | Menulis file handoff (isi = pekerjaan AI) |
@@ -346,7 +381,7 @@ Semuanya jadi **konfigurasi**, bukan konstanta.
 | # | Angka | Konteks |
 |---|---|---|
 | 1 | Ambang token "sesi remeh" | Mulai dengan 2 kriteria pasti (giliran < 3 **dan** tak pernah dinamai) |
-| 2 | Ambang **sisa token** pemicu tawaran handoff (**PENGIRIM**) | Dasar berubah dari persen ke sisa token; 35% untuk 1M kemungkinan terlalu konservatif. **Bukan** angka 100k di §8.0 — itu ambang penerima |
+| ~~2~~ | ~~Ambang pemicu tawaran handoff (PENGIRIM)~~ | **DITETAPKAN 2026-07-27: 50% dari total context.** Lihat §8.0b |
 | 3 | N giliran sebelum mesin menamai sesi | Kandidat: setelah topik jelas (~3 giliran), bukan berbasis waktu |
 | 4 | N hari retensi `inbox/` | |
 | 5 | Batas waktu tiap kelas injeksi | **Jangan seragam**: `/clear` (barrier, boleh 120 s) vs `/rename` (keystroke, cepat) |

@@ -185,18 +185,20 @@ Ini penerapan **K-5** pada handoff.
 
 User: *"Ya, buang"*. Kalau sewaktu-waktu perlu menyimpan posisi tanpa menyerahkan, itu diminta dengan bahasa biasa ("tulis file handoff-nya saja, jangan kirim") — bukan lewat tombol.
 
-### 8.B — Nilai ambang "sisa token" untuk memicu tawaran handoff — **masih terbuka**
+### 8.B — Ambang PENGIRIM — **DITETAPKAN: 50% dari total context** (user, 2026-07-27)
 
-Belum ditetapkan (§8.2). Ini ambang **PENGIRIM** — *kapan bot menawarkan handoff karena dirinya mulai penuh*.
+Bot menawarkan handoff saat pemakaian context mencapai **50% dari ukuran window**-nya. Disetel di config.
 
-⚠️ **Jangan tertukar dengan §8.2b:** angka 100k yang ditetapkan user 2026-07-27 adalah ambang **PENERIMA** (*apakah bot ini cukup segar untuk menerima*). Dua peran, dua ambang, dua arah:
+Lebih longgar dari aturan lama (35% untuk window 1M) — sejalan dengan catatan audit bahwa 35% kemungkinan terlalu konservatif.
 
-| Peran | Pertanyaan | Ambang |
-|---|---|---|
-| Pengirim | "Apakah saya sudah terlalu penuh untuk melanjutkan?" | **belum ditetapkan** — berbasis **sisa** token |
-| Penerima | "Apakah saya cukup kosong untuk menerima?" | **< 100k terpakai** (mutlak, config) |
+⚠️ **Membalik sebagian §8.2** yang memilih dasar "sisa token" alih-alih persen. Pembalikan ini dapat diterima: alasan asli menolak persen berlaku untuk **penerima** ("10% terpakai" = 20k pada window 200k, terlalu ketat untuk menilai kesegaran), sementara "setengah penuh" bermakna sama di ukuran window mana pun.
 
-Perlu dasar empiris: berapa token yang biasanya dipakai satu task substansial di fleet ini. Rencana: mulai dari satu angka konservatif sebagai **konfigurasi**, lalu disetel setelah ada data.
+**Dua ambang, dua satuan, sengaja berbeda:**
+
+| Peran | Pertanyaan | Ambang | Satuan |
+|---|---|---|---|
+| Pengirim | "Sudah terlalu penuh untuk melanjutkan?" | **50% terpakai** | relatif |
+| Penerima | "Cukup kosong untuk menerima?" | **< 100k terpakai** | mutlak |
 
 ### 8.C — ⭐ FITUR BARU: "partial handoff" (delegasi, bukan estafet)
 
