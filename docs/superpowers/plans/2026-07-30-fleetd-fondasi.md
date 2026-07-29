@@ -323,6 +323,9 @@ git commit -m "feat(fleetd): load and strictly validate config.json"
 ```typescript
 // fleetd/test/fleet-schema.test.ts
 import { describe, test, expect } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { openFleetDb, FLEET_TABLES } from "../src/db/fleet-schema";
 
 describe("fleet.db schema", () => {
@@ -337,13 +340,27 @@ describe("fleet.db schema", () => {
     }
   });
 
-  test("opening the same schema twice does not throw", () => {
-    const db = openFleetDb(":memory:");
+  test("reopening the same on-disk database file does not throw and keeps its tables", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mirza-bots-fleet-schema-"));
+    const dbPath = join(dir, "fleet.db");
+
+    const first = openFleetDb(dbPath);
+    first.close();
+
+    let second: ReturnType<typeof openFleetDb> | undefined;
     expect(() => {
-      db.exec(
-        "CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, bot TEXT NOT NULL, name TEXT, status TEXT NOT NULL DEFAULT 'idle', source TEXT, turn_count INTEGER NOT NULL DEFAULT 0, tokens_used INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0, started_at TEXT NOT NULL, ended_at TEXT, updated_at TEXT NOT NULL)"
-      );
+      second = openFleetDb(dbPath);
     }).not.toThrow();
+
+    const rows = second!
+      .query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+      .all() as Array<{ name: string }>;
+    const names = new Set(rows.map((r) => r.name));
+    for (const table of FLEET_TABLES) {
+      expect(names.has(table)).toBe(true);
+    }
+    second!.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 ```
