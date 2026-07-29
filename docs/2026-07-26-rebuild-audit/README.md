@@ -49,7 +49,7 @@ Keputusan yang muncul saat mengaudit satu area tapi mengikat semua area. Detail 
 | **B-5** | Server menolak `reply` berupa pertanyaan yang tidak membawa tombol | Disetujui | area 04 §4.5 |
 | **B-6** | Penyembunyian otomatis sesi remeh (giliran sedikit + tak pernah dinamai; ambang token menyusul) | Disetujui, ambang token terbuka | area 05 §5.2 |
 | **B-7** | Riwayat sesi per bot yang bisa "dikunjungi sementara" untuk menggali info lama | Dicatat, belum didesain — kandidat kuat sudah terjawab oleh B-2 | area 07 §B-7 |
-| **B-8** | **Delegasi** (dulu "partial handoff") — delegasikan sepotong pekerjaan ke bot lain yang jadi pemilik mandiri; user berdiskusi langsung dengannya; bot utama tetap jalan; wajib worktree terpisah; tanpa kewajiban lapor balik; ACK numpang `reply`+`Stop`; "sibuk" numpang `bot_inbox` (neighbor autonomy) | Disetujui + 3 dari 4 detail ditetapkan 2026-07-29; sisa: isi file delegasi | area 08 §8.C |
+| **B-8** | **Delegasi** (dulu "partial handoff") — delegasikan sepotong pekerjaan ke bot lain yang jadi pemilik mandiri; user berdiskusi langsung dengannya; bot utama tetap jalan; wajib worktree terpisah; tanpa kewajiban lapor balik; ACK numpang `reply`+`Stop`; "sibuk" numpang `bot_inbox` (neighbor autonomy); file `delegasi-*.md` di `.handoff/` dengan field `Batas potongan` | **Selesai didesain 4/4** (2026-07-30) — siap masuk rencana implementasi tahap 6 | area 08 §8.C |
 
 ## Kosakata verdict
 

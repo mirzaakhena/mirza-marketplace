@@ -236,6 +236,61 @@ Alasan terakhir itu yang membuat delegasi bukan duplikasi subagent: yang dibutuh
 
 Karena tidak ada kewajiban lapor balik, **tidak diperlukan kanal balasan sama sekali** — jadi seluruh pertanyaan soal "bagaimana hasilnya kembali" (polling, artefak, prompt balik) **gugur**. Delegasi memakai ulang mesin handoff dan mesin prompt-antar-bot yang sudah ada, tanpa satu pun primitif baru — ACK-nya numpang di `reply`+`Stop` yang sudah wajib, penanganan "sibuk"-nya numpang di `bot_inbox` yang sudah ada.
 
-### Sisa detail untuk desain implementasi
+### Isi file delegasi — DITETAPKAN 2026-07-30
 
-1. **Isi file delegasi** — kandidat: template §8.5 dikurangi bagian yang mengasumsikan estafet (`Lanjutan dari`, `Pair`), ditambah **batas potongan yang jelas** (apa yang termasuk, apa yang tetap milik bot utama) supaya dua bot tidak saling menyerobot. **Belum dibahas** — satu-satunya item tersisa dari 4 pertanyaan awal.
+**Lokasi & nama:** tetap di `.handoff/` (K-1, pengecualian repo kerja), bukan folder baru. Nama file diberi prefix `delegasi-` di depan slug supaya sekilas terlihat beda dari handoff/estafet asli tanpa perlu folder terpisah.
+
+**Basis:** template §8.5 ("hasil perampingan"), disesuaikan karena delegasi punya sifat berbeda dari handoff — **dua pemilik paralel, bukan satu pemilik berestafet**.
+
+**Dibuang** (konsekuensi langsung dari keputusan yang sudah dikunci di atas):
+- `Lanjutan dari` — mengasumsikan rantai handoff berurutan; delegasi bukan rantai, bot utama tidak pernah berhenti.
+- `Pair` — itu untuk mode ping-pong (satu identitas sesi bergantian); delegasi itu dua identitas terpisah bekerja bersamaan.
+
+**Diganti maknanya** (nama/section sama, isinya beda karena dua pemilik paralel):
+- `Branch (HEAD SHA)` → **`Repo & worktree`** — dua path (repo asal pengirim, worktree baru penerima), bukan satu branch yang berpindah tangan.
+- `SUDAH/SEDANG` → **`Konteks yang sudah diketahui`** — hanya bagian yang sudah digali terkait potongan yang didelegasikan, bukan laporan progress seluruh pekerjaan bot utama (itu privat, tidak relevan buat penerima).
+- `AKAN` → **`Definisi selesai`** — goal + kriteria selesai untuk potongan itu (idealnya terverifikasi mekanis, SKILL-037 area 09). Tanpa starting point serinci handoff biasa — penerima bebas menentukan caranya sendiri, ia pemilik mandiri.
+- `Blocker` → **`Kendala`** (opsional, reframed) — bukan "kenapa saya berhenti" (sender tidak berhenti), tapi hal yang penerima perlu tahu sebelum mulai (mis. "tunggu PR #42 di-merge dulu").
+
+**Ditambah — satu field baru, paling penting:**
+- **`Batas potongan`** (wajib, dua sisi eksplisit): *Milik penerima* (sepenuhnya tanggung jawabnya) vs *TETAP milik pengirim* (eksplisit BUKAN bagian delegasi ini). Sebut file/folder spesifik kalau ada risiko tumpang tindih — jangan diasumsikan cukup dari nama worktree saja.
+
+**Dipertahankan apa adanya:** `Tujuan`, `Referensi` (dengan kolom "kapan dibaca"), `Anti-Patterns/Lessons CARRY FORWARD`. "Keputusan user final" tidak jadi section wajib tersendiri — mengikuti aturan §8.5 sendiri: digabung ke `Tujuan` atau `Referensi`, tidak diduplikasi.
+
+**Kerangka lengkap:**
+
+```markdown
+# Delegasi — <judul singkat>
+
+- **Tanggal:** YYYY-MM-DD HH:MM
+- **Dari → Ke:** <bot pengirim> → <bot penerima>
+- **Repo & worktree:** <path repo asal> → <path worktree baru penerima> (branch: <nama>)
+- **Plan terkait:** <link, atau "—">
+
+## 1. Tujuan delegasi
+Apa yang didelegasikan dan kenapa bot lain yang mengerjakan (bukan bot
+utama sendiri, bukan subagent).
+
+## 2. Batas potongan
+- **Milik penerima:** ...
+- **TETAP milik pengirim:** ...
+
+## 3. Konteks yang sudah diketahui
+Apa yang sudah digali/diputuskan terkait potongan ini — supaya penerima
+tidak mulai dari nol.
+
+## 4. Definisi selesai
+Goal + kriteria selesai (mekanis kalau memungkinkan).
+
+## 5. Kendala
+(Opsional) Hal yang perlu diketahui sebelum mulai.
+
+## 6. Referensi
+| File | Kapan dibaca |
+|---|---|
+
+## 7. Anti-Patterns / Lessons — CARRY FORWARD
+(Kalau relevan dengan potongan ini.)
+```
+
+Dengan ini, **B-8 (delegasi) selesai didesain 4/4** — tinggal masuk rencana implementasi tahap 6.
