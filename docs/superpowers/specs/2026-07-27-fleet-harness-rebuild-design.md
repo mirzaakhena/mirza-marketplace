@@ -196,10 +196,12 @@ antre → tertulis (keystroke dikirim) → selesai (dikonfirmasi peristiwa)
 | `/clear` | `SessionStart` `source: "clear"` | ✅ terdokumentasi |
 | `/resume <id>` | `SessionStart` `source: "resume"` | ✅ terdokumentasi |
 | `/compact` | `PostCompact` | ✅ terdokumentasi |
-| `/rename <nama>` | **⚠️ BELUM PASTI** — lihat V-2 | ⚠️ |
+| `/rename <nama>` (diketik user) | Entri `custom-title` di transkrip `.jsonl` (§11b V-2) | ✅ diverifikasi lewat kode; jalur transkripnya sama dengan V-1 |
 | Command plugin | **Tidak ada sinyal** — dianggap selesai setelah tenggat, dicatat apa adanya | ✅ |
 
 Yang tak pernah mencapai "selesai" dalam batas waktunya jadi **insiden yang terlihat**. Menjawab SCAR-071: `{queued:true}` berarti *accepted*, **bukan** *done*.
+
+⚠️ **Kemungkinan simplifikasi belum diputuskan** (lihat §11b bonus finding): karena hook `UserPromptSubmit` juga menerima `sessionTitle` dan memakai jalur apply yang sama dengan `SessionStart`, `/rename` mid-sesi berpotensi **tidak perlu injeksi keystroke sama sekali** — `fleetd` cukup menitipkan nama yang diminta, dan `cc-plugin` mengembalikannya lewat `sessionTitle` pada hook `UserPromptSubmit` berikutnya (nyata atau prompt sintetis kosong untuk memicu). Ini menghapus seluruh ketergantungan pacing SCAR-081 untuk kasus mid-sesi, bukan cuma pasca-`/clear`. **Belum diputuskan user** — dicatat di sini supaya tidak hilang, keputusan menyusul saat tahap 4 dirancang.
 
 ### 5.5 Gerbang injeksi
 
@@ -276,7 +278,7 @@ Diagnosis dari audit: **yang dimekanisasi berhasil, yang tetap jadi teks tidak.*
 | Jawaban final lewat `reply` | `Stop` block/`additionalContext` | **Fix FUNC-3**: blokir bila tak ada reply **setelah tool non-reply TERAKHIR** — ack tak lagi dihitung sebagai jawaban. **Fix flag sticky**: lacak posisi terakhir, bukan flag sesi |
 | Pertanyaan wajib berbutton | `fleetd` menolak `reply` | Deteksi konservatif: periksa **kalimat terakhir**; penolakan kedua untuk teks sama diloloskan + dicatat. **Tanpa parameter opt-out** |
 | Tombol "Jelaskan manual" | `fleetd` menambahkannya | Batas 8 baris harus memperhitungkan baris tambahan server |
-| Nama sesi selalu ada | `SessionStart` → `sessionTitle` (**⚠️ lihat V-1**); mid-sesi lewat `/rename` | Mesin meminta nama ke AI, menerapkannya, memberi tahu user |
+| Nama sesi selalu ada | `SessionStart` → `sessionTitle` (**✅ V-1 dikonfirmasi**, §11b); mid-sesi lewat `/rename` atau berpotensi `UserPromptSubmit` → `sessionTitle` (belum diputuskan, §5.4) | Mesin meminta nama ke AI, menerapkannya, memberi tahu user |
 | Urutan & batas waktu handoff | Tabel `handoffs` + timer `fleetd` | §8 |
 | Commit membawa nama bot | `PreToolUse` matcher `Bash` **+ shell lain** | **Fix FUNC-4/5** (PowerShell lolos) + 4 kelas bypass yang ditemukan reviewer |
 | Designation selamat dari compaction | `PreCompact` | Tulis state sebelum compaction; boleh blokir bila gagal |
@@ -368,7 +370,7 @@ Tiap tahap punya **satu** kriteria selesai yang bisa dibuktikan dan menghasilkan
 | **1. Fondasi** | `fleetd` kosong + dua database + `config.json` + socket + `doctor` | `fleetd` menyala, `doctor` menjawab, satu bot terdaftar dari config |
 | **2. Jalur pesan** | Poller + gerbang allowlist + media + penyimpanan + MCP proxy `reply` | **Bot pertama armada baru** berbalas pesan: teks, foto, album, tombol. Bukan bot uji sekali pakai — ia bot sungguhan yang tetap dipakai |
 | **3. Penegakan** | `PreToolUse` (ack) + `Stop` (jawaban final) + tombol wajib + tombol manual otomatis | Bot **tidak bisa** meninggalkan user tanpa jawaban dan **tidak bisa** bertanya tanpa tombol — dibuktikan dengan **mencoba melanggarnya** |
-| **4. Sesi** | **Verifikasi V-1 & V-2 lebih dulu (§11b)**, lalu `mirza-cc` + antrean injeksi + `SessionStart` + `/new` `/rename` `/switch` + `/context` | Ganti sesi dari Telegram jalan tanpa polling file; nama sesi benar (cara mencapainya bergantung hasil V-1) |
+| **4. Sesi** | V-1 & V-2 sudah terverifikasi (§11b) — mulai dengan uji ulang singkat jalur `/rename` & `UserPromptSubmit` yang baru ditelusuri lewat kode, belum lewat eksperimen hidup, lalu `mirza-cc` + antrean injeksi + `SessionStart` + `/new` `/rename` `/switch` + `/context` | Ganti sesi dari Telegram jalan tanpa polling file; nama sesi benar lewat entri `custom-title` di transkrip |
 | **5. Antar-bot** | `agent_list` `agent_status` `agent_send` + handoff dijaga mesin | Handoff dua bot tuntas: file, ACK, laporan, reset — tanpa AI mengingat apa pun |
 | **6. Sisanya** | `peek_conversation`, pencarian, penyembunyian sesi remeh, penamaan otomatis, partial handoff | Per fitur |
 
@@ -390,29 +392,36 @@ Semuanya jadi **konfigurasi**, bukan konstanta.
 | 4 | N hari retensi `inbox/` | |
 | 5 | Batas waktu tiap kelas injeksi | **Jangan seragam**: `/clear` (barrier, boleh 120 s) vs `/rename` (keystroke, cepat) |
 
-## 11b. Asumsi yang WAJIB diverifikasi sebelum dibangun
+## 11b. Asumsi yang WAJIB diverifikasi sebelum dibangun — ✅ SUDAH DIVERIFIKASI (2026-07-29)
 
-Dua hal di spec ini bersandar pada kemampuan Claude Code yang **belum saya buktikan langsung** — hanya dibaca dari dokumentasi atau disimpulkan. Kalau ternyata salah, bagian yang bergantung padanya harus dirancang ulang. Verifikasi ini **langkah pertama tahap 4**, bukan sesudahnya.
+**Status: SELESAI, tidak lagi jadi blocker tahap 4.** Diverifikasi bukan dari dokumentasi (yang tidak menyatakan hubungan ini), melainkan dari (a) membongkar biner CLI `claude` v2.1.220 terpasang (`strings` + penelusuran fungsi) dan (b) **eksperimen hidup**: memasang hook `SessionStart` di direktori scratch yang mengembalikan `sessionTitle`, menjalankan sesi interaktif sungguhan lewat PTY (Python `pty.fork`), lalu memeriksa transkrip `.jsonl` yang dihasilkan.
 
-### V-1 — Apakah `sessionTitle` sama dengan nama sesi yang dipakai `/rename`?
+### V-1 — Apakah `sessionTitle` sama dengan nama sesi yang dipakai `/rename`? **KONFIRMASI: YA**
 
-**Klaim di spec:** hook `SessionStart` bisa menyetel nama sesi lewat nilai balik `sessionTitle`, sehingga rantai rapuh pasca-`/clear` (`/rename` + pacing + penundaan notifikasi, SCAR-081) bisa dihapus.
+**Bukti hidup:** baris pertama transkrip sesi percobaan, persis setelah hook `SessionStart` jalan:
+```json
+{"type":"custom-title","customTitle":"v1-v2-verify-marker","sessionId":"..."}
+{"type":"agent-name","agentName":"v1-v2-verify-marker","sessionId":"..."}
+```
 
-**Yang belum dipastikan:** apakah "session title" yang diset hook itu **objek yang sama** dengan nama yang diubah `/rename` dan yang tampil di picker `/switch`. Dokumentasi menyebut `session_title` sebagai input `SessionStart` dan `sessionTitle` sebagai output, tapi tidak menyatakan hubungannya dengan `/rename`.
+**Bukti kode:** fungsi yang menulis `customTitle` ini (nama minified `r7e()`) adalah **fungsi yang sama persis** yang dipanggil handler `/rename`:
+```js
+// jalur /rename (diketik user):
+return await r7e(n,"user"), t.setAppState(o=>Yhr(o,{name:n})), await UTe($T(),n,"user"),
+  {message:`Session renamed to: ${n}`, newName:n, isGenerated:r}
 
-**Bila ternyata BEDA:** penamaan pasca-`/clear` kembali memakai injeksi `/rename`, dan seluruh pacing + kerapuhan urutan SCAR-081 **wajib dipertahankan**. Dampak: §7 baris "Nama sesi selalu ada" dan §5.4 berubah; tahap 4 jadi lebih berat.
+// jalur hook SessionStart.sessionTitle:
+w(`Hook sessionTitle applied (...)`), await r7e(t,"hook"), await UTe($T(),t,"user")
+```
+Satu-satunya beda: argumen kedua `r7e()` — `"user"` vs `"hook"` — sekadar tag provenance, bukan jalur penyimpanan berbeda. `UTe()` (writer ke registry sesi per-PID) bahkan menerima `"user"` **hardcoded** di jalur hook.
 
-**Cara memverifikasi:** pasang hook `SessionStart` yang menyetel `sessionTitle`, lalu periksa apakah nama itu muncul di tempat yang sama dengan hasil `/rename` (daftar sesi Claude Code / `~/.claude/projects`).
+**Temuan bonus (di luar cakupan V-1 semula):** field `sessionTitle` di skema hook **bukan hanya milik `SessionStart`** — `UserPromptSubmit` juga menerimanya (dikonfirmasi dari skema Zod di biner: dua-duanya satu-satunya event yang mendeklarasikan `sessionTitle`). Kode pengumpul hasil hook `UserPromptSubmit` memanggil `if(H) await $$o(H)` — **fungsi apply yang sama persis** dengan jalur `SessionStart`. Karena tiap pesan Telegram yang disuntik ke PTY memicu `UserPromptSubmit` di `cc-plugin`, ini membuka jalur penamaan mid-sesi **lewat hook, bukan keystroke `/rename`** — lihat catatan di §5.4 dan §7 di bawah.
 
-### V-2 — Apa sinyal bahwa `/rename` yang disuntik benar-benar mendarat?
+### V-2 — Apa sinyal bahwa rename benar-benar mendarat? **TERJAWAB: ADA sinyal, bukan statusLine**
 
-**Masalahnya:** tidak ada hook untuk perubahan nama sesi, dan snapshot statusLine (satu-satunya sumber data sesi yang kaya) **tidak terdokumentasi memuat nama/judul sesi** — ia memuat `session_id`, model, biaya, context, rate limit.
+Bukan lewat statusLine (tetap tidak memuat nama/judul sesi, sesuai dugaan awal). Sinyalnya adalah **transkrip sesi itu sendiri**: entri `{"type":"custom-title",...}` muncul di file `.jsonl` nyaris seketika saat hook diproses — jalur yang sama persis yang menulis `customTitle` (§ V-1 di atas). `fleetd` sudah wajib tahu path transkrip (K-10), jadi `fs.watch` pada file itu dan menunggu entri `custom-title` adalah sinyal "mendarat" yang eksak — lebih baik dari dugaan awal spec ("kemungkinan besar tidak ada sinyal").
 
-**Akibatnya:** `/rename` mungkin masuk kategori "tidak ada sinyal", sama seperti command plugin — mesin tahu nama yang **diminta**, tapi tidak bisa memastikan TUI menerimanya.
-
-**Bila memang tak ada sinyal:** itu **dapat diterima**, tapi harus disebut jujur — `sessions.name` menjadi *"nama yang kami minta"*, bukan *"nama yang terpasang"*, dan `doctor` tidak bisa mendeteksi rename yang tertelan. Jangan menyembunyikan ini di balik status "selesai" yang tidak diverifikasi.
-
-**Cara memverifikasi:** cek apakah payload statusLine memuat judul/nama sesi di versi Claude Code yang dipakai.
+**Batas kejujuran temuan:** yang diverifikasi **hidup** adalah jalur hook `SessionStart` → `sessionTitle` → entri transkrip. Jalur `/rename` yang diketik manusia dan jalur hook `UserPromptSubmit` ditelusuri lewat **kode** (pemanggilan fungsi yang identik secara literal, bukan sekadar mirip) tapi belum diuji hidup satu per satu — risiko residual kecil, layak dites sekali lagi sesaat sebelum tahap 4 mulai, bukan lagi sebelum brainstorming lanjut.
 
 ## 12. Kebijakan bahasa
 
