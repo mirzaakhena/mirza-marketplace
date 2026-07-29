@@ -14,7 +14,7 @@
 - All persistent state lives under `~/.claude/mirza-bots/` (spec K-1). Every path in this stage goes through a single `stateRoot()` function so it can be overridden for tests via `MIRZA_BOTS_HOME` — never hardcode the real path in test code.
 - `fleetd` is the single point of validation — strict `zod` parsing at every boundary (spec §5.2). `config.json` must be rejected (not silently coerced) on any schema mismatch.
 - Two separate databases, not one: `fleet.db` (small, disposable, safe to delete and rebuild) and `conversations.db` (large, never deleted per K-8). Do not merge their schemas or share a connection.
-- Socket protocol follows the connect→send→answer pattern from spec §5.1 (this stage only implements the short-lived "hook-style" pattern; the long-lived MCP/`mirza-cc` pattern comes in later stages). Requests and responses are single-line JSON terminated by `\n`.
+- Socket protocol follows the connect→send→answer pattern from spec §5.1 (this stage only implements the short-lived "hook-style" pattern; the long-lived MCP/`bot-cc` pattern comes in later stages). Requests and responses are single-line JSON terminated by `\n`.
 - Code, comments, identifiers: English (spec K-16). This stage has no user-facing or machine-to-user messages yet, so the Indonesian-copy rule doesn't apply here — keep it in mind for later stages that do.
 - macOS-focused; no `if (platform === 'windows')` branches anywhere in this stage (spec §3.3).
 - Repo root: `/Users/mirza/Workspace/mirza-bots/` (local git repo, `main` branch, no remote yet — created 2026-07-30). All file paths below are relative to `fleetd/` inside that repo unless stated otherwise.
@@ -799,7 +799,7 @@ export function startSocketServer(sockPath: string, handle: Handler): net.Server
 }
 ```
 
-**Why this shape matters beyond this stage:** spec §5.1 needs the *same* socket to later serve a short-lived "hook" pattern (this one) and long-lived bidirectional MCP/`mirza-cc` connections. Keeping the connection handler per-`conn` (not global state) and framing on `\n` now means tahap 4/5 can add new `Request` variants to the union and long-lived push messages without renegotiating the wire format.
+**Why this shape matters beyond this stage:** spec §5.1 needs the *same* socket to later serve a short-lived "hook" pattern (this one) and long-lived bidirectional MCP/`bot-cc` connections. Keeping the connection handler per-`conn` (not global state) and framing on `\n` now means tahap 4/5 can add new `Request` variants to the union and long-lived push messages without renegotiating the wire format.
 
 - [ ] **Step 4: Run test to verify it passes**
 

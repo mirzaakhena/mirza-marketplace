@@ -14,7 +14,7 @@
 
 ## 1. Ringkasan satu paragraf
 
-Kita merakit ulang harness bot Telegram di atas tiga komponen: **`fleetd`** (satu program latar belakang per mesin yang memegang seluruh logika, koneksi Telegram, dan penyimpanan terpusat), **`mirza-cc`** (program tipis yang **user** jalankan di terminalnya — hanya memegang PTY dan meneruskan keystroke), dan **`cc-plugin`** (satu plugin Claude Code tipis berisi proxy tool + hook + satu skill). Prinsip induknya: **apa pun yang bisa dijamin mesin, dijamin mesin** — kewajiban perilaku yang selama ini hanya diminta lewat teks skill naik jadi penegakan lewat hook dan validasi tool. Konstrain mutlak yang tidak berubah: **tanpa Claude Agent SDK / `claude -p`**; seluruh pemakaian lewat TUI interaktif (alasan billing).
+Kita merakit ulang harness bot Telegram di atas tiga komponen: **`fleetd`** (satu program latar belakang per mesin yang memegang seluruh logika, koneksi Telegram, dan penyimpanan terpusat), **`bot-cc`** (program tipis yang **user** jalankan di terminalnya — hanya memegang PTY dan meneruskan keystroke), dan **`cc-plugin`** (satu plugin Claude Code tipis berisi proxy tool + hook + satu skill). Prinsip induknya: **apa pun yang bisa dijamin mesin, dijamin mesin** — kewajiban perilaku yang selama ini hanya diminta lewat teks skill naik jadi penegakan lewat hook dan validasi tool. Konstrain mutlak yang tidak berubah: **tanpa Claude Agent SDK / `claude -p`**; seluruh pemakaian lewat TUI interaktif (alasan billing).
 
 ## 1b. Lingkup & hubungan dengan yang lama (K-17)
 
@@ -24,7 +24,7 @@ Kita merakit ulang harness bot Telegram di atas tiga komponen: **`fleetd`** (sat
 |---|---|---|
 | Repo / marketplace baru | **`mirza-bots`** | **FINAL** (user 2026-07-30) — sebelumnya ditandai sementara, dikunci begitu masuk tahap implementasi |
 | Program latar belakang | `fleetd` | |
-| Program pemegang PTY | `mirza-cc` | Nama yang sudah dikenal user, dipertahankan |
+| Program pemegang PTY | `bot-cc` | **Diganti 2026-07-30** — sebelumnya `mirza-cc`, nama produksi program pemegang PTY di sistem lama (`plugins/pty-controller/wrapper/`, masih berjalan, K-17, tidak disentuh). Direname supaya sistem baru punya identitas sendiri, bukan meminjam nama sistem lama yang masih hidup |
 | Plugin Claude Code | `cc-plugin` (nama kerja) | |
 | Folder state | `~/.claude/mirza-bots/` | Sengaja **sama** dengan nama repo (user 2026-07-27) — satu nama untuk config, repo, dan state; mudah dihubungkan saat debug |
 | Lokasi repo lokal | `/Users/mirza/Workspace/mirza-bots/` | Sejajar `mirza-marketplace`, dibuat 2026-07-30. Git lokal saja — belum ada remote GitHub, push adalah keputusan terpisah |
@@ -86,7 +86,7 @@ Ini menghapus satu kelas pekerjaan sepenuhnya dan membuat **K-12 (tanpa shim)** 
     └────────▲──────────────────────────────▲────────────────────────┘
              │ hook melapor (pendek)        │ tool + injeksi (panjang)
    ┌─────────┴───────────────┐   ┌──────────┴──────────────────┐
-   │ cc-plugin (dalam CC)    │   │ mirza-cc (DI TERMINAL USER) │
+   │ cc-plugin (dalam CC)    │   │ bot-cc (DI TERMINAL USER) │
    │ • MCP: proxy tool       │   │ • spawn claude di node-pty  │
    │ • 6 hook               │   │ • pipe keyboard user ⇄ TUI  │
    │ • 1 skill (auto-load)   │   │ • terima perintah injeksi   │
@@ -95,11 +95,11 @@ Ini menghapus satu kelas pekerjaan sepenuhnya dan membuat **K-12 (tanpa shim)** 
 
 ### 3.1 Koreksi penting atas design doc 2026-07-03
 
-Design doc lama menggambarkan daemon yang **men-spawn dan me-restart** pemegang PTY dengan backoff eksponensial. **Itu tidak bisa bekerja:** user menjalankan `mirza-cc` di terminalnya dan mengetik langsung ke TUI. Kalau daemon latar belakang yang men-spawn `claude`, tidak ada terminal untuk menampilkannya.
+Design doc lama menggambarkan daemon yang **men-spawn dan me-restart** pemegang PTY dengan backoff eksponensial. **Itu tidak bisa bekerja:** user menjalankan `bot-cc` di terminalnya dan mengetik langsung ke TUI. Kalau daemon latar belakang yang men-spawn `claude`, tidak ada terminal untuk menampilkannya.
 
 Pembagiannya terbalik: **pemegang PTY adalah program yang user jalankan**, dan ia menyambung ke `fleetd` — bukan dilahirkan olehnya. Ini menghapus seluruh mesin supervisi + backoff + eskalasi SIGTERM→SIGKILL dari desain lama.
 
-`mirza-cc` **menyalakan `fleetd` bila belum berjalan** (dikonfirmasi user 2026-07-27) → tidak ada komponen yang harus diingat user, dan "siapa mengawasi pengawas" terjawab: bot pertama yang dibuka. Kalau `fleetd` mati di tengah jalan, `mirza-cc` berikutnya menyalakannya lagi.
+`bot-cc` **menyalakan `fleetd` bila belum berjalan** (dikonfirmasi user 2026-07-27) → tidak ada komponen yang harus diingat user, dan "siapa mengawasi pengawas" terjawab: bot pertama yang dibuka. Kalau `fleetd` mati di tengah jalan, `bot-cc` berikutnya menyalakannya lagi.
 
 ### 3.2 Kenapa seluruh logika di `fleetd`
 
@@ -131,7 +131,7 @@ Pembagiannya terbalik: **pemegang PTY adalah program yang user jalankan**, dan i
 
 ⚠️ **Risiko yang diterima:** kalau `fleetd` mati, **semua** bot bisu sekaligus. Alarm doctor karenanya tidak boleh bergantung pada `fleetd` yang sama untuk menyampaikannya — lihat §7.
 
-### 4.2 `mirza-cc`
+### 4.2 `bot-cc`
 
 **Hanya PTY.** Spawn `claude` di node-pty lewat shell (login shell interaktif di Unix — `claude` adalah shim npm; melewati shell → `ENOENT`, SCAR-025) · pipe stdin/stdout/resize dua arah · terima perintah injeksi dari `fleetd` · laporkan exit.
 
@@ -140,7 +140,7 @@ Pembagiannya terbalik: **pemegang PTY adalah program yang user jalankan**, dan i
 **Yang wajib dipertahankan:**
 - **SIGINT diteruskan ke PTY** (Ctrl+C membatalkan operasi AI, **tidak** membunuh wrapper); SIGTERM baru kill PTY (PTY-047, 048)
 - Shutdown mengembalikan terminal dari raw mode — terminal yang tertinggal raw = shell user rusak (PTY-049)
-- CC exit → `mirza-cc` exit dengan exit code CC (PTY-046)
+- CC exit → `bot-cc` exit dengan exit code CC (PTY-046)
 - Satu proses CC seumur hidup; ganti sesi lewat injeksi `/resume`, bukan respawn (PTY-051)
 - `CLAUDE_BIN` / `CLAUDE_ARGS` bisa dioverride (PTY-040, 041)
 
@@ -169,7 +169,7 @@ Satu-satunya artefak yang dipublikasikan ke marketplace. Dibuat setipis mungkin 
 |---|---|---|
 | Hook | sambung → kirim → jawab → keluar | **Harus sangat cepat** — berdiri di jalur kritis tiap pemanggilan tool (§9.1) |
 | MCP server | sambungan panjang dua arah | Perlu menerima **dorongan**: pesan Telegram masuk, prompt antar-bot |
-| `mirza-cc` | sambungan panjang dua arah | Menerima perintah injeksi, melaporkan PTY mati |
+| `bot-cc` | sambungan panjang dua arah | Menerima perintah injeksi, melaporkan PTY mati |
 
 ### 5.2 Identitas & validasi
 
@@ -374,7 +374,7 @@ Bot menawarkan handoff saat pemakaian context-nya mencapai **50% dari ukuran win
 | # | Risiko | Mitigasi |
 |---|---|---|
 | 1 | **Biaya spawn hook per pemanggilan tool.** Penegakan ack memakai `PreToolUse` bermatcher luas; Bun ~30–50 ms per spawn | Hook sangat tipis (satu roundtrip socket, tanpa baca file/transkrip); matcher dipersempit agar tool `reply` tidak memicu. `async: true` **tidak bisa dipakai** — hook async tak bisa deny. **WAJIB diukur di uji live** |
-| 2 | **`fleetd` mati → semua bot bisu sekaligus** | Alarm doctor tidak boleh bergantung pada `fleetd` yang sama; `mirza-cc` menyalakan ulang |
+| 2 | **`fleetd` mati → semua bot bisu sekaligus** | Alarm doctor tidak boleh bergantung pada `fleetd` yang sama; `bot-cc` menyalakan ulang |
 | 3 | **Hook `SessionStart` salah pasang → deteksi sesi mati TOTAL** (polling lama selalu bekerja) | Batas waktu fallback yang **berbunyi sebagai alarm**, bukan diam |
 | 4 | **`/version` dibuang** padahal pernah menyelamatkan user dari cache plugin versi lama | Versi komponen berjalan dilaporkan `doctor` dan/atau satu baris di `/context` |
 | 5 | **Deteksi "pertanyaan" bisa salah tangkap** teks panjang berisi pertanyaan retoris | Periksa kalimat terakhir saja; penolakan kedua diloloskan + dicatat |
@@ -391,7 +391,7 @@ Tiap tahap punya **satu** kriteria selesai yang bisa dibuktikan dan menghasilkan
 | **1. Fondasi** | `fleetd` kosong + dua database + `config.json` + socket + `doctor` | `fleetd` menyala, `doctor` menjawab, satu bot terdaftar dari config |
 | **2. Jalur pesan** | Poller + gerbang allowlist + media + penyimpanan + MCP proxy `reply` | **Bot pertama armada baru** berbalas pesan: teks, foto, album, tombol. Bukan bot uji sekali pakai — ia bot sungguhan yang tetap dipakai |
 | **3. Penegakan** | `PreToolUse` (ack) + `Stop` (jawaban final) + tombol wajib + tombol manual otomatis | Bot **tidak bisa** meninggalkan user tanpa jawaban dan **tidak bisa** bertanya tanpa tombol — dibuktikan dengan **mencoba melanggarnya** |
-| **4. Sesi** | V-1 & V-2 sudah terverifikasi (§11b) — mulai dengan uji ulang singkat jalur `/rename` manual & `UserPromptSubmit` yang baru ditelusuri lewat kode, belum lewat eksperimen hidup, lalu `mirza-cc` + antrean injeksi + `SessionStart` + `/new` `/switch` + `/context` + hook `UserPromptSubmit` untuk penamaan mid-sesi (K-18, tanpa injeksi `/rename`) | Ganti sesi dari Telegram jalan tanpa polling file; nama sesi benar lewat entri `custom-title` di transkrip |
+| **4. Sesi** | V-1 & V-2 sudah terverifikasi (§11b) — mulai dengan uji ulang singkat jalur `/rename` manual & `UserPromptSubmit` yang baru ditelusuri lewat kode, belum lewat eksperimen hidup, lalu `bot-cc` + antrean injeksi + `SessionStart` + `/new` `/switch` + `/context` + hook `UserPromptSubmit` untuk penamaan mid-sesi (K-18, tanpa injeksi `/rename`) | Ganti sesi dari Telegram jalan tanpa polling file; nama sesi benar lewat entri `custom-title` di transkrip |
 | **5. Antar-bot** | `agent_list` `agent_status` `agent_send` + handoff dijaga mesin | Handoff dua bot tuntas: file, ACK, laporan, reset — tanpa AI mengingat apa pun |
 | **6. Sisanya** | `peek_conversation`, pencarian, penyembunyian sesi remeh, penamaan otomatis, delegasi (dulu "partial handoff", B-8) | Per fitur |
 
