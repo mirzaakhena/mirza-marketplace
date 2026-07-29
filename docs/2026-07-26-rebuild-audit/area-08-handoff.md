@@ -227,7 +227,7 @@ Alasan terakhir itu yang membuat delegasi bukan duplikasi subagent: yang dibutuh
 | Aspek | Keputusan |
 |---|---|
 | **Laporan balik ke bot utama** | **TIDAK ADA KEWAJIBAN.** Bot penerima tidak wajib melaporkan hasil ke bot utama — ia jadi pemilik mandiri atas potongan itu dan berinteraksi langsung dengan user |
-| **Isolasi repo** | **WAJIB git worktree terpisah.** Aturan bot-conduct Rule 1 (SKILL-057) naik dari anjuran jadi **syarat**: bot pelaksana bekerja di worktree sendiri, hasilnya digabung lewat git seperti kontribusi biasa. Ini juga yang membuat user tetap bisa memakai repo itu sendiri saat kedua bot bekerja |
+| **Isolasi repo** (KOREKSI 2026-07-30, semula "wajib") | **Ikut Rule 1 umum (area 10 §10.A) — TAWARAN, bukan wajib.** Pengecualian "wajib untuk delegasi" yang tadinya di sini **dicabut**: alasannya keliru ("dua bot pasti bekerja bersamaan di repo yang sama") — delegasi bisa murni diskusi/analisis tanpa menyentuh file sama sekali (mis. "gali opsi arsitektur X"), dan untuk itu worktree cuma overhead tanpa manfaat, tidak ada yang perlu diisolasi. Bot penerima menawarkan worktree lewat tombol **hanya kalau** potongan yang didelegasikan memang akan menyentuh file/kode — bukan diam-diam dibuat otomatis, bukan pula dipaksa mekanis. Kalau ditawarkan dan diterima: bot pelaksana bekerja di worktree sendiri, hasil digabung lewat git seperti kontribusi biasa, dan user tetap bisa memakai repo itu sendiri saat kedua bot bekerja |
 | **Self-reset pengirim** | **TIDAK** — bot utama tetap jalan (inti perbedaannya dengan handoff) |
 | **ACK penerimaan** (DITETAPKAN 2026-07-29) | **Tidak ada mekanisme baru.** Kewajiban `reply` yang sudah ditegakkan hook `Stop` untuk SETIAP turn (§7) otomatis jadi ACK-nya — begitu bot penerima memproses delegasi, ia sudah wajib membalas ke user di thread-nya sendiri. `fleetd` boleh mencatat transisi status `terkirim` → `dibalas` di tabel `handoffs` sebagai observability pasif (buat `doctor`/`agent_status`), **tanpa** timeout dan tanpa status NOT-OK seperti handoff biasa — karena bot pengirim tidak pernah menunggu apa pun, tidak ada yang perlu digerbang |
 | **Bot tujuan sedang sibuk** (DITETAPKAN 2026-07-29) | **Bukan konsep yang ditangani mesin.** Delegasi cuma jenis lain dari prompt antar-bot yang sudah ada mesinnya (§5.3/§7 area) — pesan selalu terkirim, mengantre di `bot_inbox` kalau sesi tak tersambung, persis seperti prompt antar-bot lain. **Bot penerima sendiri yang memutuskan** kapan menanggapi (langsung, tunda, atau balas "sedang penuh") — melempar keputusan itu ke `fleetd` melanggar **neighbor autonomy** (prinsip #4). Tidak ada logika "antre vs tolak vs tawarkan bot lain" yang perlu dibangun. Courtesy opsional: pengirim boleh cek `agent_status` dulu sebelum mendelegasikan (hemat usaha), tapi bukan syarat mengikat |
@@ -247,7 +247,7 @@ Karena tidak ada kewajiban lapor balik, **tidak diperlukan kanal balasan sama se
 - `Pair` — itu untuk mode ping-pong (satu identitas sesi bergantian); delegasi itu dua identitas terpisah bekerja bersamaan.
 
 **Diganti maknanya** (nama/section sama, isinya beda karena dua pemilik paralel):
-- `Branch (HEAD SHA)` → **`Repo & worktree`** — dua path (repo asal pengirim, worktree baru penerima), bukan satu branch yang berpindah tangan.
+- `Branch (HEAD SHA)` → **`Repo & worktree`** — dua path kalau worktree ditawarkan & diterima (repo asal pengirim, worktree baru penerima); kalau delegasi murni diskusi tanpa file yang disentuh (lihat koreksi isolasi repo di atas), field ini cukup diisi `"tidak dipakai — delegasi diskusi/analisis, tidak menyentuh file"`.
 - `SUDAH/SEDANG` → **`Konteks yang sudah diketahui`** — hanya bagian yang sudah digali terkait potongan yang didelegasikan, bukan laporan progress seluruh pekerjaan bot utama (itu privat, tidak relevan buat penerima).
 - `AKAN` → **`Definisi selesai`** — goal + kriteria selesai untuk potongan itu (idealnya terverifikasi mekanis, SKILL-037 area 09). Tanpa starting point serinci handoff biasa — penerima bebas menentukan caranya sendiri, ia pemilik mandiri.
 - `Blocker` → **`Kendala`** (opsional, reframed) — bukan "kenapa saya berhenti" (sender tidak berhenti), tapi hal yang penerima perlu tahu sebelum mulai (mis. "tunggu PR #42 di-merge dulu").
@@ -264,7 +264,7 @@ Karena tidak ada kewajiban lapor balik, **tidak diperlukan kanal balasan sama se
 
 - **Tanggal:** YYYY-MM-DD HH:MM
 - **Dari → Ke:** <bot pengirim> → <bot penerima>
-- **Repo & worktree:** <path repo asal> → <path worktree baru penerima> (branch: <nama>)
+- **Repo & worktree:** <path repo asal> → <path worktree penerima (branch: <nama>), atau "tidak dipakai" kalau diskusi/analisis saja>
 - **Plan terkait:** <link, atau "—">
 
 ## 1. Tujuan delegasi

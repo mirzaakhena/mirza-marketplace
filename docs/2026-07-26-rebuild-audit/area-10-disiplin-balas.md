@@ -136,7 +136,7 @@ Bentuknya → 10.C.
 
 **Yang tetap dari SKILL-057:** urutan alat — native tooling dulu (`EnterWorktree` / subagent `isolation:"worktree"`), fallback `git worktree add`; cleanup `git worktree remove` setelah merge.
 
-**Catatan:** untuk **delegasi** (area 08 §8.C) worktree tetap **wajib**, bukan tawaran — di situ dua bot pasti bekerja bersamaan di repo yang sama.
+**Koreksi 2026-07-30:** pengecualian "wajib untuk delegasi" yang tadinya ada di sini **dicabut** — lihat area 08 §8.C. Alasan cabut: asumsinya keliru ("dua bot pasti bekerja bersamaan di repo yang sama") — delegasi bisa juga murni diskusi/analisis tanpa menyentuh file sama sekali, dan untuk kasus itu tawaran (bukan wajib) tetap alasan yang benar, sama seperti pekerjaan solo. Delegasi sekarang ikut Rule 1 umum tanpa pengecualian.
 
 ## 10.B Rule 6 (three-copy doctrine) — **PINDAH ke CLAUDE.md repo ini**
 
