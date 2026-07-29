@@ -22,13 +22,12 @@ Kita merakit ulang harness bot Telegram di atas tiga komponen: **`fleetd`** (sat
 
 | Hal | Nama | Catatan |
 |---|---|---|
-| Repo / marketplace baru | **`mirza-bots`** | **Sementara** (user 2026-07-27) — bisa berubah |
+| Repo / marketplace baru | **`mirza-bots`** | **FINAL** (user 2026-07-30) — sebelumnya ditandai sementara, dikunci begitu masuk tahap implementasi |
 | Program latar belakang | `fleetd` | |
 | Program pemegang PTY | `mirza-cc` | Nama yang sudah dikenal user, dipertahankan |
 | Plugin Claude Code | `cc-plugin` (nama kerja) | |
 | Folder state | `~/.claude/mirza-bots/` | Sengaja **sama** dengan nama repo (user 2026-07-27) — satu nama untuk config, repo, dan state; mudah dihubungkan saat debug |
-
-⚠️ Nama repo masih **sementara**. Karena folder state mengikutinya, mengubah nama repo kelak berarti **memindahkan data**. Kalau nama akan diganti, gantilah sebelum ada isinya.
+| Lokasi repo lokal | `/Users/mirza/Workspace/mirza-bots/` | Sejajar `mirza-marketplace`, dibuat 2026-07-30. Git lokal saja — belum ada remote GitHub, push adalah keputusan terpisah |
 
 **Kenapa `fleetd` tidak ikut berganti nama:** ia menamai apa yang program itu **lakukan** (mengurus armada), bukan produknya. Ini keputusan pelaksana — silakan dibantah.
 
