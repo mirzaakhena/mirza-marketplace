@@ -196,20 +196,42 @@ antre → tertulis (keystroke dikirim) → selesai (dikonfirmasi peristiwa)
 | `/clear` | `SessionStart` `source: "clear"` | ✅ terdokumentasi |
 | `/resume <id>` | `SessionStart` `source: "resume"` | ✅ terdokumentasi |
 | `/compact` | `PostCompact` | ✅ terdokumentasi |
-| `/rename <nama>` (diketik user) | Entri `custom-title` di transkrip `.jsonl` (§11b V-2) | ✅ diverifikasi lewat kode; jalur transkripnya sama dengan V-1 |
-| Command plugin | **Tidak ada sinyal** — dianggap selesai setelah tenggat, dicatat apa adanya | ✅ |
+| Command plugin (`/new`, `/switch`, `/context`) | **Tidak ada sinyal** — dianggap selesai setelah tenggat, dicatat apa adanya | ✅ |
+
+`/rename` **tidak lagi ada di tabel ini** — lihat K-18 di bawah, ia keluar total dari daur hidup injeksi keystroke.
 
 Yang tak pernah mencapai "selesai" dalam batas waktunya jadi **insiden yang terlihat**. Menjawab SCAR-071: `{queued:true}` berarti *accepted*, **bukan** *done*.
 
-⚠️ **Kemungkinan simplifikasi belum diputuskan** (lihat §11b bonus finding): karena hook `UserPromptSubmit` juga menerima `sessionTitle` dan memakai jalur apply yang sama dengan `SessionStart`, `/rename` mid-sesi berpotensi **tidak perlu injeksi keystroke sama sekali** — `fleetd` cukup menitipkan nama yang diminta, dan `cc-plugin` mengembalikannya lewat `sessionTitle` pada hook `UserPromptSubmit` berikutnya (nyata atau prompt sintetis kosong untuk memicu). Ini menghapus seluruh ketergantungan pacing SCAR-081 untuk kasus mid-sesi, bukan cuma pasca-`/clear`. **Belum diputuskan user** — dicatat di sini supaya tidak hilang, keputusan menyusul saat tahap 4 dirancang.
+### K-18 — `/rename` DIHAPUS dari injeksi PTY, dipindah ke hook (user, 2026-07-29)
+
+Sejalan dengan bonus finding §11b: hook `UserPromptSubmit` menerima `sessionTitle` lewat jalur apply yang **sama persis** dengan `SessionStart` (§11b V-1). Konsekuensinya, `/rename` **tidak pernah lagi diinjeksikan sebagai keystroke** — baik pasca-`/clear` maupun mid-sesi.
+
+**Cara kerja penuh (mid-sesi):**
+1. User ketik `/rename <nama>` di Telegram → `fleetd` menyimpan `nama` sebagai *pending title* untuk bot itu (kolom di `sessions`, bukan file terpisah).
+2. Pemicu berikutnya untuk `UserPromptSubmit` — pesan Telegram asli berikutnya, **atau** `fleetd` menyuntik satu prompt sintetis kosong lewat PTY semata-mata untuk memicu giliran (bukan `/rename <nama>` sebagai teks — cuma Enter kosong/prompt netral) kalau user ingin efeknya instan tanpa menunggu pesan berikutnya.
+3. Hook `UserPromptSubmit` di `cc-plugin` menanyakan *pending title* ke `fleetd` lewat socket (round-trip yang memang sudah wajib ada untuk hook ini), lalu mengembalikannya lewat `sessionTitle` di output hook.
+4. Claude Code menerapkannya lewat jalur `$$o`/`r7e` yang sama dengan `/rename` manual — entri `custom-title` muncul di transkrip, `fleetd` mengonfirmasi via `fs.watch` (§11b V-2), lapor ke user "berhasil".
+
+**Yang hilang secara struktural:** seluruh pacing SCAR-081 untuk `/rename` (tak ada lagi picker autocomplete yang bisa menelan keystroke, tak ada `MIN_INJECTION_GAP_MS` yang berlaku untuk perintah ini) — karena tak ada lagi keystroke perintah yang dikirim sama sekali untuk kasus mid-sesi. Prompt sintetis kosong (kalau dipakai) tetap lewat jalur `SUBMIT_DELAY_MS`/`MIN_INJECTION_GAP_MS` biasa karena ia tetaplah sebuah prompt — bedanya ia teks netral, bukan slash command yang rawan tertelan autocomplete.
+
+**Konsekuensi ke §4.3:** daftar putih `pty_send_slash` tidak lagi perlu memuat `/rename` — perintah itu sepenuhnya keluar dari permukaan injeksi PTY.
 
 ### 5.5 Gerbang injeksi
 
 Antrean FIFO tunggal per bot, satu penguras. Jendela tunda **monotonik** (`holdFor` hanya memperpanjang). Kegagalan satu item tidak menghentikan antrean.
 
-**Barrier `/clear` jadi peristiwa, bukan polling:** menunggu `SessionStart` `source: "clear"`, bukan menunggu file `.jsonl` muncul. Batas waktu 10 menit **turun pangkat** dari mekanisme jadi **alarm** — kalau menyala, itu tanda ada yang salah.
+**Barrier `/clear` jadi peristiwa, bukan polling:** menunggu `SessionStart` `source: "clear"`, bukan menunggu file `.jsonl` muncul. Batas waktu **turun pangkat** dari mekanisme jadi **alarm** — kalau menyala, itu tanda ada yang salah, bukan lagi jalan fallback untuk memutuskan "selesai".
 
-⚠️ **Konstanta pacing WAJIB dikalibrasi ulang, tidak boleh diasumsikan portabel:** `SUBMIT_DELAY_MS`=250 (autocomplete picker menelan `\r`) · `MIN_INJECTION_GAP_MS`=1500 (BUG #3: payload saling menyisipkan keystroke) · `POST_INJECTION_DELAY_MS`=1000 · `CLEAR_SETTLE_MS`=1500 · `QUEUE_POLL_MS`=200.
+**Batas waktu alarm per kelas (DITETAPKAN 2026-07-29, user — nilai awal, wajib dikalibrasi ulang lewat uji live tahap 4, bukan hasil pengukuran):**
+
+| Kelas | Batas waktu | Kenapa |
+|---|---|---|
+| `/clear` (`SessionStart source:"clear"`) | 10 menit | Reset total + muat ulang semua skill; diberi jeda longgar |
+| `/resume` (`SessionStart source:"resume"`) | 5 menit | Sinyal sama presisinya, tapi kerjanya diduga lebih ringan (buka transkrip lama, bukan bangun dari kosong) |
+| `/compact` (`PostCompact`) | 10 menit | Meringkas transkrip panjang bisa lama; disamakan dengan `/clear` |
+| Command plugin tanpa sinyal (`/new`, `/switch`, `/context`) | 30 detik | Berbasis hook, biasanya nyaris instan — lewat dari itu kemungkinan besar gagal, bukan sedang lambat wajar |
+
+⚠️ **Konstanta pacing keystroke WAJIB dikalibrasi ulang, tidak boleh diasumsikan portabel — nilai lama dipakai sebagai titik awal saja:** `SUBMIT_DELAY_MS`=250 (autocomplete picker menelan `\r`) · `MIN_INJECTION_GAP_MS`=1500 (BUG #3: payload saling menyisipkan keystroke) · `POST_INJECTION_DELAY_MS`=1000 · `CLEAR_SETTLE_MS`=1500 · `QUEUE_POLL_MS`=200.
 
 ⚠️ **Enter TUI = `\r`**, bukan `\n` (SCAR-029).
 
@@ -262,7 +284,7 @@ Nama bot **eksplisit**, lepas dari basename folder — memperbaiki tabrakan nama
 
 **Kolom `bot` + FTS5** adalah prasyarat B-1 (`peek_conversation`) dan pencarian riwayat. Menambahkan indeks belakangan berarti mengindeks ulang seluruh riwayat — makanya sejak awal.
 
-**Retensi:** percakapan **tidak pernah dihapus** (K-8); `VACUUM` manual + ukuran dilaporkan doctor. **`inbox/`**: file lebih tua dari N hari dihapus **kecuali** masih dirujuk baris pesan; baris pesannya tetap ada.
+**Retensi:** percakapan **tidak pernah dihapus** (K-8); `VACUUM` manual + ukuran dilaporkan doctor. **`inbox/`**: file lebih tua dari **90 hari** (DITETAPKAN 2026-07-29, konfigurasi bukan konstanta) dihapus **kecuali** masih dirujuk baris pesan; baris pesannya tetap ada. 90 hari dipilih murni sebagai titik awal cache media lokal (baris teks tak pernah hilang terlepas dari ini) — cukup panjang untuk `peek_conversation`/pencarian yang realistis, gampang dilebarkan begitu ada data pemakaian disk nyata.
 
 **Mulai bersih** — riwayat 6 bot lama tidak diimpor. Konsekuensi jujur: `peek_conversation` dan pencarian **kosong di awal**, baru berguna setelah beberapa minggu.
 
@@ -278,7 +300,7 @@ Diagnosis dari audit: **yang dimekanisasi berhasil, yang tetap jadi teks tidak.*
 | Jawaban final lewat `reply` | `Stop` block/`additionalContext` | **Fix FUNC-3**: blokir bila tak ada reply **setelah tool non-reply TERAKHIR** — ack tak lagi dihitung sebagai jawaban. **Fix flag sticky**: lacak posisi terakhir, bukan flag sesi |
 | Pertanyaan wajib berbutton | `fleetd` menolak `reply` | Deteksi konservatif: periksa **kalimat terakhir**; penolakan kedua untuk teks sama diloloskan + dicatat. **Tanpa parameter opt-out** |
 | Tombol "Jelaskan manual" | `fleetd` menambahkannya | Batas 8 baris harus memperhitungkan baris tambahan server |
-| Nama sesi selalu ada | `SessionStart` → `sessionTitle` (**✅ V-1 dikonfirmasi**, §11b); mid-sesi lewat `/rename` atau berpotensi `UserPromptSubmit` → `sessionTitle` (belum diputuskan, §5.4) | Mesin meminta nama ke AI, menerapkannya, memberi tahu user |
+| Nama sesi selalu ada | `SessionStart` → `sessionTitle` pasca-`/clear`; `UserPromptSubmit` → `sessionTitle` mid-sesi (**✅ V-1 dikonfirmasi + K-18**, §11b/§5.4) — **tanpa injeksi `/rename` sama sekali** | Mesin meminta nama ke AI, menerapkannya, memberi tahu user |
 | Urutan & batas waktu handoff | Tabel `handoffs` + timer `fleetd` | §8 |
 | Commit membawa nama bot | `PreToolUse` matcher `Bash` **+ shell lain** | **Fix FUNC-4/5** (PowerShell lolos) + 4 kelas bypass yang ditemukan reviewer |
 | Designation selamat dari compaction | `PreCompact` | Tulis state sebelum compaction; boleh blokir bila gagal |
@@ -370,7 +392,7 @@ Tiap tahap punya **satu** kriteria selesai yang bisa dibuktikan dan menghasilkan
 | **1. Fondasi** | `fleetd` kosong + dua database + `config.json` + socket + `doctor` | `fleetd` menyala, `doctor` menjawab, satu bot terdaftar dari config |
 | **2. Jalur pesan** | Poller + gerbang allowlist + media + penyimpanan + MCP proxy `reply` | **Bot pertama armada baru** berbalas pesan: teks, foto, album, tombol. Bukan bot uji sekali pakai — ia bot sungguhan yang tetap dipakai |
 | **3. Penegakan** | `PreToolUse` (ack) + `Stop` (jawaban final) + tombol wajib + tombol manual otomatis | Bot **tidak bisa** meninggalkan user tanpa jawaban dan **tidak bisa** bertanya tanpa tombol — dibuktikan dengan **mencoba melanggarnya** |
-| **4. Sesi** | V-1 & V-2 sudah terverifikasi (§11b) — mulai dengan uji ulang singkat jalur `/rename` & `UserPromptSubmit` yang baru ditelusuri lewat kode, belum lewat eksperimen hidup, lalu `mirza-cc` + antrean injeksi + `SessionStart` + `/new` `/rename` `/switch` + `/context` | Ganti sesi dari Telegram jalan tanpa polling file; nama sesi benar lewat entri `custom-title` di transkrip |
+| **4. Sesi** | V-1 & V-2 sudah terverifikasi (§11b) — mulai dengan uji ulang singkat jalur `/rename` manual & `UserPromptSubmit` yang baru ditelusuri lewat kode, belum lewat eksperimen hidup, lalu `mirza-cc` + antrean injeksi + `SessionStart` + `/new` `/switch` + `/context` + hook `UserPromptSubmit` untuk penamaan mid-sesi (K-18, tanpa injeksi `/rename`) | Ganti sesi dari Telegram jalan tanpa polling file; nama sesi benar lewat entri `custom-title` di transkrip |
 | **5. Antar-bot** | `agent_list` `agent_status` `agent_send` + handoff dijaga mesin | Handoff dua bot tuntas: file, ACK, laporan, reset — tanpa AI mengingat apa pun |
 | **6. Sisanya** | `peek_conversation`, pencarian, penyembunyian sesi remeh, penamaan otomatis, partial handoff | Per fitur |
 
@@ -386,11 +408,13 @@ Semuanya jadi **konfigurasi**, bukan konstanta.
 
 | # | Angka | Konteks |
 |---|---|---|
-| 1 | Ambang token "sesi remeh" | Mulai dengan 2 kriteria pasti (giliran < 3 **dan** tak pernah dinamai) |
+| ~~1~~ | ~~Ambang token "sesi remeh"~~ | **DITETAPKAN 2026-07-29: 8.000 token**, sebagai syarat KETIGA (AND) di samping 2 kriteria pasti (giliran < 3 **dan** tak pernah dinamai). Tanpa syarat ini, ambang rendah akan langsung menandai setiap sesi baru sebagai "tidak remeh" karena `additionalContext` skill yang di-load otomatis saja sudah ribuan karakter |
 | ~~2~~ | ~~Ambang pemicu tawaran handoff (PENGIRIM)~~ | **DITETAPKAN 2026-07-27: 50% dari total context.** Lihat §8.0b |
-| 3 | N giliran sebelum mesin menamai sesi | Kandidat: setelah topik jelas (~3 giliran), bukan berbasis waktu |
-| 4 | N hari retensi `inbox/` | |
-| 5 | Batas waktu tiap kelas injeksi | **Jangan seragam**: `/clear` (barrier, boleh 120 s) vs `/rename` (keystroke, cepat) |
+| ~~3~~ | ~~N giliran sebelum mesin menamai sesi~~ | **DITETAPKAN 2026-07-29: 3 giliran** (kandidat lama dikonfirmasi) |
+| ~~4~~ | ~~N hari retensi `inbox/`~~ | **DITETAPKAN 2026-07-29: 90 hari.** Lihat §6.3 |
+| ~~5~~ | ~~Batas waktu tiap kelas injeksi~~ | **DITETAPKAN 2026-07-29: `/clear` 10 menit · `/resume` 5 menit · `/compact` 10 menit · command plugin tanpa sinyal 30 detik.** Lihat §5.5 |
+
+Semua lima nilai di atas adalah **titik awal dari penilaian, bukan hasil pengukuran** — wajib dikalibrasi ulang begitu ada data pemakaian nyata dari uji live tahap 2 dst.
 
 ## 11b. Asumsi yang WAJIB diverifikasi sebelum dibangun — ✅ SUDAH DIVERIFIKASI (2026-07-29)
 

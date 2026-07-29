@@ -35,6 +35,7 @@ Keputusan yang muncul saat mengaudit satu area tapi mengikat semua area. Detail 
 | **K-10** | **PTY untuk input, hook untuk output.** Kebenaran tentang sesi dilaporkan Claude Code lewat hook (`SessionStart`), tidak di-scrape dari filesystem privatnya. Keystroke hanya untuk slash lifecycle. Setiap jalur hook wajib punya alarm bila diam — "setiap kegagalan harus terlihat". | area 06 §6.3 |
 | **K-11** | **Daftar putih, bukan daftar hitam**, untuk apa yang boleh disuntik AI ke sesinya sendiri. Gagal ke arah aman. Setiap penolakan wajib mengajari alternatif yang benar. | area 06 §6.6 |
 | **K-12** | **Tidak ada shim kompatibilitas.** Migrasi "matikan semua, ganti semua" — tak ada periode fleet campuran. | area 06 §6.4 |
+| **K-18** | **`/rename` dihapus total dari injeksi keystroke PTY**, dipindah ke hook `UserPromptSubmit` → `sessionTitle` (jalur apply sama dengan `SessionStart`, dibuktikan §11b V-1). Menghapus seluruh pacing SCAR-081 untuk kasus mid-sesi, bukan cuma pasca-`/clear`. | spec §5.4/§11b, user 2026-07-29 |
 | **K-6** | **Permukaan tool ke AI ditekan seminimal mungkin.** Dari 5 tool telegram tinggal 2 (`reply`, `get_message_by_id`). Setiap tool yang hilang juga menghapus paragraf penjelasannya dari konteks setiap sesi. | area 02 §2.2, area 03 §3.1 |
 
 ## Fitur baru / permintaan yang muncul selama audit
