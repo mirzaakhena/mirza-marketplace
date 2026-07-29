@@ -40,10 +40,13 @@ Prinsip pemisahan yang diadopsi: **apa yang tersimpan** (semuanya, selamanya) �
 
 Sesi yang secara mekanis terlihat remeh **otomatis tidak muncul di picker**, tanpa kerja manual. Transkripnya tetap ada dan tetap terjangkau (lewat pencarian / sebagai bahan memori B-2).
 
-**Kriteria (dikombinasi, pilihan user):**
+**Kriteria (revisi 2026-07-27):**
 1. **Jumlah giliran percakapan sedikit** — mis. < 3 pesan dari user. Sinyal paling langsung: sesi testing hampir selalu 1–2 pesan. Datanya tersedia di store percakapan.
-2. **Tidak pernah diberi nama** — nama masih default (tak pernah `/rename` atau `/new <nama>`). Sinyal niat: user menamai sesi yang dianggap serius.
-3. **Jumlah token di bawah ambang tertentu** — user mengusulkan ini tapi **ambangnya belum diputuskan** → lihat pertanyaan terbuka 5.A.
+2. **Jumlah token di bawah ambang tertentu** — user mengusulkan ini tapi **ambangnya belum diputuskan** → lihat pertanyaan terbuka 5.A.
+
+~~**Tidak pernah diberi nama**~~ — **DIBUANG 2026-07-27.** Kriteria ini saling meniadakan dengan area 10 §10.C: kalau **mesin menjamin setiap sesi punya nama** setelah beberapa giliran, maka "tidak pernah dinamai" hanya bisa terjadi pada sesi yang **lebih pendek** dari ambang penamaan — yang sudah tertangkap kriteria nomor 1. Kriteria yang tidak pernah menambah apa pun dibuang.
+
+Penamaan otomatis (§10.C) **tetap berlaku** — jadi setiap sesi di picker selalu punya nama yang bisa dikenali.
 
 **Kriteria yang DITOLAK:** "tidak menghasilkan perubahan kode" (tidak adil untuk sesi diskusi/brainstorming murni) dan "lebih tua dari N hari" (tidak memisahkan remeh dari penting, hanya menunda masalah).
 

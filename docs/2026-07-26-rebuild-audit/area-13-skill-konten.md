@@ -10,6 +10,14 @@
 
 Semua yang **tidak menyangkut bot Telegram** keluar dari lingkup rebuild versi baru. Ini bukan penilaian bahwa fitur-fitur itu buruk — ini penetapan batas supaya rebuild pertama punya ujung yang jelas.
 
+### ⚠️ Klarifikasi arti "DROP" (user, 2026-07-27) — berlaku untuk SELURUH dokumen audit
+
+> "Drop disini artinya tidak diikutsertakan dalam system baru ini. … Tapi kita ini kan membuat marketplace baru. Kita jangan merubah ataupun menyentuh marketplace lama."
+
+**DROP = tidak diikutsertakan di sistem baru.** BUKAN dihapus, BUKAN diubah, BUKAN dimigrasi.
+
+`mirza-marketplace` beserta 11 plugin-nya **tetap berjalan apa adanya**. Keempat plugin di area ini (`teach-me`, `daily-report`, `knowledge-vault`) tetap terpasang dan tetap bisa dipakai — mereka hanya tidak dibangun ulang ke dalam harness baru. Lihat **K-17**.
+
 Konsekuensinya ke bawah dicatat di §13.4.
 
 ## 13.1 `teach-me` — **DROP dari v1**

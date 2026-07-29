@@ -16,6 +16,22 @@
 
 Kita merakit ulang harness bot Telegram di atas tiga komponen: **`fleetd`** (satu program latar belakang per mesin yang memegang seluruh logika, koneksi Telegram, dan penyimpanan terpusat), **`mirza-cc`** (program tipis yang **user** jalankan di terminalnya — hanya memegang PTY dan meneruskan keystroke), dan **`cc-plugin`** (satu plugin Claude Code tipis berisi proxy tool + hook + satu skill). Prinsip induknya: **apa pun yang bisa dijamin mesin, dijamin mesin** — kewajiban perilaku yang selama ini hanya diminta lewat teks skill naik jadi penegakan lewat hook dan validasi tool. Konstrain mutlak yang tidak berubah: **tanpa Claude Agent SDK / `claude -p`**; seluruh pemakaian lewat TUI interaktif (alasan billing).
 
+## 1b. Lingkup & hubungan dengan yang lama (K-17)
+
+**Ini marketplace BARU. `mirza-marketplace` yang lama TIDAK disentuh** — tidak diubah, tidak dihapus, tidak dimigrasi. Ke-11 plugin lamanya tetap berjalan apa adanya selama sistem baru dibangun.
+
+**"DROP" di seluruh dokumen audit berarti "tidak diikutsertakan di sistem baru"**, bukan dihapus dari yang lama.
+
+Konsekuensi yang harus dijaga:
+
+| Hal | Konsekuensi |
+|---|---|
+| **Token Telegram tidak boleh bentrok** | Telegram hanya izinkan satu penanya per token. Bot uji sistem baru **wajib memakai token sendiri**; bot lama tetap memegang tokennya. Tanpa ini, dua sistem berebut dan dua-duanya kena 409 |
+| **Migrasi per-bot, bukan per-fleet** | Saat sebuah bot benar-benar pindah, instance lamanya dimatikan lalu tokennya dipindah ke config baru. K-12 ("tanpa shim, ganti serentak") berlaku **per bot**, bukan sekaligus enam |
+| **Tidak ada interoperabilitas antar sistem** | Bot lama dan bot baru **tidak** saling mengirim handoff atau agent-bus. Keduanya hidup terpisah sampai migrasi selesai. Ini yang membuat K-12 (tanpa shim) bisa berlaku tanpa risiko |
+| **State terpisah** | Sistem baru memakai `~/.claude/fleet/`; sistem lama tetap memakai `.claude/channels/` per-project dan `~/.claude/agent-registry.json`. Tidak ada yang dibaca silang |
+| **Dokumen audit tinggal di repo lama** | `docs/2026-07-26-rebuild-audit/` dan spec ini lahir di `mirza-marketplace`. Repo baru merujuknya; jangan disalin (dua salinan = dua yang bisa menyimpang, K-15) |
+
 ## 2. Prinsip desain
 
 1. **Mesin dulu, teks belakangan.** Aturan yang bisa dijamin mesin **dijamin mesin**, dan teks yang memohon AI mengingatnya **dihapus** — bukan disimpan sebagai cadangan. Dua sumber aturan = sumber selisih. (K-5)
@@ -53,7 +69,7 @@ Design doc lama menggambarkan daemon yang **men-spawn dan me-restart** pemegang 
 
 Pembagiannya terbalik: **pemegang PTY adalah program yang user jalankan**, dan ia menyambung ke `fleetd` — bukan dilahirkan olehnya. Ini menghapus seluruh mesin supervisi + backoff + eskalasi SIGTERM→SIGKILL dari desain lama.
 
-`mirza-cc` **menyalakan `fleetd` bila belum berjalan** → tidak ada komponen yang harus diingat user, dan "siapa mengawasi pengawas" terjawab: bot pertama yang dibuka.
+`mirza-cc` **menyalakan `fleetd` bila belum berjalan** (dikonfirmasi user 2026-07-27) → tidak ada komponen yang harus diingat user, dan "siapa mengawasi pengawas" terjawab: bot pertama yang dibuka. Kalau `fleetd` mati di tengah jalan, `mirza-cc` berikutnya menyalakannya lagi.
 
 ### 3.2 Kenapa seluruh logika di `fleetd`
 
