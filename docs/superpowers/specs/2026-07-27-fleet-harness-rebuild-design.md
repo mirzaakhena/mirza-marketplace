@@ -26,9 +26,11 @@ Kita merakit ulang harness bot Telegram di atas tiga komponen: **`fleetd`** (sat
 | Program latar belakang | `fleetd` | |
 | Program pemegang PTY | `mirza-cc` | Nama yang sudah dikenal user, dipertahankan |
 | Plugin Claude Code | `cc-plugin` (nama kerja) | |
-| Folder state | `~/.claude/fleet/` | **Sengaja TIDAK mengikuti nama repo.** Nama repo masih sementara; mengikatkan path penyimpanan padanya berarti data harus dipindah bila namanya berubah |
+| Folder state | `~/.claude/mirza-bots/` | Sengaja **sama** dengan nama repo (user 2026-07-27) — satu nama untuk config, repo, dan state; mudah dihubungkan saat debug |
 
-⚠️ Kalau nama folder state ingin disamakan dengan nama repo, putuskan **sebelum** ada data di dalamnya.
+⚠️ Nama repo masih **sementara**. Karena folder state mengikutinya, mengubah nama repo kelak berarti **memindahkan data**. Kalau nama akan diganti, gantilah sebelum ada isinya.
+
+**Kenapa `fleetd` tidak ikut berganti nama:** ia menamai apa yang program itu **lakukan** (mengurus armada), bukan produknya. Ini keputusan pelaksana — silakan dibantah.
 
 ### Hubungan dengan sistem lama
 
@@ -53,10 +55,11 @@ Konsekuensi yang harus dijaga:
 
 | Hal | Konsekuensi |
 |---|---|
-| **Token Telegram tidak boleh bentrok** | Telegram hanya izinkan satu penanya per token. Bot uji sistem baru **wajib memakai token sendiri**; bot lama tetap memegang tokennya. Tanpa ini, dua sistem berebut dan dua-duanya kena 409 |
-| **Migrasi per-bot, bukan per-fleet** | Saat sebuah bot benar-benar pindah, instance lamanya dimatikan lalu tokennya dipindah ke config baru. K-12 ("tanpa shim, ganti serentak") berlaku **per bot**, bukan sekaligus enam |
-| **Tidak ada interoperabilitas antar sistem** | Bot lama dan bot baru **tidak** saling mengirim handoff atau agent-bus. Keduanya hidup terpisah sampai migrasi selesai. Ini yang membuat K-12 (tanpa shim) bisa berlaku tanpa risiko |
-| **State terpisah** | Sistem baru memakai `~/.claude/fleet/`; sistem lama tetap memakai `.claude/channels/` per-project dan `~/.claude/agent-registry.json`. Tidak ada yang dibaca silang |
+| **⭐ TIDAK ADA MIGRASI** | User memilih: `mirza-bots` adalah **armada baru** yang diisi bot-bot baru; keenam bot lama **tetap hidup di sistem lama** selama masih berguna (user 2026-07-27). Tidak ada perkakas migrasi yang perlu dibangun — tidak untuk config, tidak untuk riwayat percakapan |
+| **Token baru untuk bot baru** | Telegram hanya izinkan satu penanya per token. Tiap bot di `mirza-bots` memakai token BotFather **baru**; bot lama tetap memegang tokennya. Tidak ada momen di mana dua sistem berebut token yang sama |
+| **Tidak ada interoperabilitas antar sistem** | Bot lama dan bot baru **tidak** saling mengirim handoff atau agent-bus — permanen, bukan sementara. Ini yang membuat K-12 (tanpa shim) berlaku tanpa risiko sama sekali |
+| **Dua armada dipelihara bersamaan** | Harga yang diterima sadar: user harus mengingat bot mana ada di sistem mana, dan dua basis kode hidup berdampingan. Diperingan oleh fakta bahwa yang lama sudah stabil dan tidak lagi dikembangkan |
+| **State terpisah** | Sistem baru memakai `~/.claude/mirza-bots/`; sistem lama tetap memakai `.claude/channels/` per-project dan `~/.claude/agent-registry.json`. Tidak ada yang dibaca silang |
 | **Dokumen audit tinggal di repo lama** | `docs/2026-07-26-rebuild-audit/` dan spec ini lahir di `mirza-marketplace`. Repo baru merujuknya; jangan disalin (dua salinan = dua yang bisa menyimpang, K-15) |
 
 ## 2. Prinsip desain
@@ -79,7 +82,7 @@ Konsekuensi yang harus dijaga:
     │  ├── antrean + gerbang injeksi (satu per bot)                  │
     │  ├── state machine handoff + alarm batas waktu                 │
     │  ├── doctor → alarm ke Telegram                                │
-    │  └── unix socket: ~/.claude/fleet/fleetd.sock                  │
+    │  └── unix socket: ~/.claude/mirza-bots/fleetd.sock                  │
     └────────▲──────────────────────────────▲────────────────────────┘
              │ hook melapor (pendek)        │ tool + injeksi (panjang)
    ┌─────────┴───────────────┐   ┌──────────┴──────────────────┐
@@ -160,7 +163,7 @@ Satu-satunya artefak yang dipublikasikan ke marketplace. Dibuat setipis mungkin 
 
 ### 5.1 Satu socket, dua pola
 
-`~/.claude/fleet/fleetd.sock`
+`~/.claude/mirza-bots/fleetd.sock`
 
 | Penyambung | Pola | Catatan |
 |---|---|---|
@@ -212,7 +215,7 @@ Antrean FIFO tunggal per bot, satu penguras. Jendela tunda **monotonik** (`holdF
 ## 6. Penyimpanan
 
 ```
-~/.claude/fleet/
+~/.claude/mirza-bots/
   config.json          ← DIEDIT MANUSIA: allowlist + daftar bot
   fleet.db             ← state operasional (kecil, boleh dibuang & dibangun ulang)
   conversations.db     ← percakapan + rujukan media (besar, tak tergantikan)

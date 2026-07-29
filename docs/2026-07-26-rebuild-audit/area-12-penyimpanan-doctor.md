@@ -78,7 +78,7 @@ Belum ada sama sekali. Sepanjang audit ini muncul **enam** hal yang harus "terli
 
 **Pelajaran dari desain lama yang wajib dihindari:** `doctor.ok` di implementasi lama **hardcoded `true`** — laporan kesehatan yang selalu berkata sehat. Kalau ada field ringkasan, ia harus benar-benar dihitung dari komponennya.
 
-**Yang juga wajib dilaporkan `doctor`:** ukuran database (§12.2) dan versi komponen yang **sedang berjalan** — sebagian mengganti fungsi `/version` yang dibuang (area 11 §11.3).
+**Yang juga wajib dilaporkan `doctor`:** ukuran database (§12.2) dan versi komponen yang **sedang berjalan**. Versi ini **hanya** ada di sini — `/version` dibuang dan user memutuskan versinya tidak muncul di `/context` juga (area 11 §11.3, dikonfirmasi 2026-07-27). Jadi `doctor` adalah satu-satunya tempat memastikan versi dari Telegram.
 
 ## 12.6 Mode degradasi — **KEEP prinsipnya**
 
@@ -96,7 +96,7 @@ Belum ada sama sekali. Sepanjang audit ini muncul **enam** hal yang harus "terli
 
 `messages.db` dan file token di-chmod 0600 di POSIX. Di Windows `chmodSync` adalah **no-op senyap** — proteksinya tidak berlaku, dan versi sekarang memancarkan satu warning saat boot alih-alih pura-pura berhasil.
 
-**Keputusan yang tetap terbuka:** strategi perlindungan di Windows (ACL). Diperingan oleh K-1 — file pindah dari dalam repo kerja ke `~/.claude/fleet/`, yang mengurangi paparan (tidak bisa ter-commit), tapi tidak menggantikan izin file.
+**Keputusan yang tetap terbuka:** strategi perlindungan di Windows (ACL). Diperingan oleh K-1 — file pindah dari dalam repo kerja ke `~/.claude/mirza-bots/`, yang mengurangi paparan (tidak bisa ter-commit), tapi tidak menggantikan izin file.
 
 ## 12.8 `wrapper.log`
 

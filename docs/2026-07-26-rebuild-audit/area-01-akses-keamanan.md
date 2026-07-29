@@ -78,11 +78,11 @@ Cabang `if (STATIC)` di `loadAccess`/`saveAccess`/poller/watcher dibuang, termas
 
 **Diputuskan user, 2026-07-26.** Referensi kondisi sekarang: `state-inventory.md` (27 artefak, hanya 1 terpusat).
 
-### Rumah baru: `~/.claude/fleet/`
+### Rumah baru: `~/.claude/mirza-bots/`
 
 Semua artefak milik bot pindah ke satu direktori terpusat. **Di dalam repo kerja tidak ada artefak bot sama sekali** — `<project>/.claude/channels/` hilang total, begitu juga `.gitignore` penjaganya (TG-174, SCAR-095 jadi tidak perlu).
 
-Nama `fleet` dipilih user di atas `mirza` dan `mirza-marketplace`: deskriptif terhadap fungsi (armada bot), bukan terhadap pemilik — masuk akal kalau plugin ini kelak dipakai orang lain.
+**Riwayat nama:** user awalnya memilih `~/.claude/fleet/` (2026-07-26), lalu **menyamakannya dengan nama repo baru** `mirza-bots` (2026-07-27) supaya config, repo, dan folder state satu nama — lebih mudah dihubungkan saat debug.
 
 ### Yang pindah ke pusat
 
@@ -106,8 +106,8 @@ Nama `fleet` dipilih user di atas `mirza` dan `mirza-marketplace`: deskriptif te
 ### Konsekuensi desain yang harus dijaga
 
 1. **Kaitan bot ↔ state lewat NAMA, bukan lokasi folder.** Ini yang membuat repo kerja bisa dipindah/di-rename tanpa memutus riwayat percakapan. Sekaligus memperbaiki SCAR-069/PTY-088: nama bot sekarang = basename `project_dir`, sehingga dua project dengan basename sama saling berebut slot registry dan versi lama hanya mencatat WARNING lalu menimpanya.
-2. **6 proses menulis ke satu tempat.** State liveness ditulis tiap 5 detik per bot. Ini yang harus dijawab desain arsitektur: SQLite WAL berkolom `bot` (transaksi menggantikan lockfile) atau file per-bot di bawah `~/.claude/fleet/bots/<nama>/`. Keputusan ditunda ke tahap arsitektur, tapi **lockfile busy-wait sinkron yang membekukan PTY (SCAR-016) tidak boleh ikut**.
-3. **Satu titik kegagalan tunggal.** Kalau `~/.claude/fleet/` rusak, seluruh fleet terpengaruh — bukan satu bot. Perlu jawaban: backup, deteksi korup (pola TG-156 diperluas), dan `doctor`.
+2. **6 proses menulis ke satu tempat.** State liveness ditulis tiap 5 detik per bot. Ini yang harus dijawab desain arsitektur: SQLite WAL berkolom `bot` (transaksi menggantikan lockfile) atau file per-bot di bawah `~/.claude/mirza-bots/bots/<nama>/`. Keputusan ditunda ke tahap arsitektur, tapi **lockfile busy-wait sinkron yang membekukan PTY (SCAR-016) tidak boleh ikut**.
+3. **Satu titik kegagalan tunggal.** Kalau `~/.claude/mirza-bots/` rusak, seluruh fleet terpengaruh — bukan satu bot. Perlu jawaban: backup, deteksi korup (pola TG-156 diperluas), dan `doctor`.
 
 ## 1.8 Fleet declarative — bot didaftarkan lewat config — **REQUIREMENT BARU**
 

@@ -19,7 +19,7 @@ Keputusan yang muncul saat mengaudit satu area tapi mengikat semua area. Detail 
 
 | # | Keputusan | Asal |
 |---|---|---|
-| **K-1** | **Semua state & config terpusat di `~/.claude/fleet/`.** Repo kerja 100% bersih dari artefak bot; `<project>/.claude/channels/` hilang. Pengecualian: `.handoff/` + `.daily-reports/` tetap di repo (artefak pekerjaan, bukan artefak bot). Kaitan bot ↔ state lewat **nama**, bukan lokasi folder. | area 01 §1.7 |
+| **K-1** | **Semua state & config terpusat di `~/.claude/mirza-bots/`.** Repo kerja 100% bersih dari artefak bot; `<project>/.claude/channels/` hilang. Pengecualian: `.handoff/` + `.daily-reports/` tetap di repo (artefak pekerjaan, bukan artefak bot). Kaitan bot ↔ state lewat **nama**, bukan lokasi folder. | area 01 §1.7 |
 | **K-2** | **Fleet declarative.** Bot didaftarkan di config (nama eksplisit + folder home + token), bukan lewat konvensi basename folder atau skill setup per-project. Jumlah bot & lokasi home bebas. | area 01 §1.8 |
 | **K-3** | **Satu `messages.db` untuk semua bot**, berkolom `bot`. Default baca = percakapan sendiri; mengintip bot lain lewat tool eksplisit. | area 01 §1.9 |
 | **K-4** | **Semua skill setup dibuang** (`/telegram:access`, `/telegram:configure`). Konfigurasi = edit satu file JSON. | area 01 §1.1 |

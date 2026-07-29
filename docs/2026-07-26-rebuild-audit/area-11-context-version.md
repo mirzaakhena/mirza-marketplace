@@ -115,7 +115,7 @@ Setelah konsolidasi, komponen yang tersisa terlalu sedikit untuk perintah sendir
 
 ⚠️ **Risiko yang diterima sadar:** saat bot berperilaku aneh setelah `/reload-plugins` atau restart, user tidak bisa memastikan **dari HP** apakah versi yang berjalan sudah yang terbaru. Ini pernah memakan waktu nyata (cache plugin memakai versi lama diam-diam — insiden 2026-05-20).
 
-**Mitigasi yang disarankan:** tampilkan versi sebagai satu baris kecil di `/context`, atau sertakan di alarm `doctor`. Diputuskan saat implementasi.
+**Mitigasi — dikonfirmasi user 2026-07-27:** versi **tidak** ditampilkan di `/context` maupun di mana pun di Telegram. Satu-satunya tempat versi komponen yang sedang berjalan terbaca adalah **`/doctor`**. Menu slash tetap sebersih mungkin; harga yang diterima: saat bot berperilaku aneh setelah reload, user membuka `/doctor` atau terminal untuk memastikan versinya.
 
 ## 11.4 `/start` — **DROP**; `/help` — **KEEP**
 
