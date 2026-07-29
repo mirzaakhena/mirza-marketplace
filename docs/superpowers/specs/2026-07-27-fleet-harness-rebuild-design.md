@@ -240,15 +240,34 @@ Diagnosis dari audit: **yang dimekanisasi berhasil, yang tetap jadi teks tidak.*
 
 ## 8. Handoff — contoh penerapan "AI mengisi isi, mesin menjaga urutan"
 
+### 8.0 Syarat kesiapan penerima (aturan user, 2026-07-27)
+
+Menggantikan seluruh konvensi nama sesi (`idle` / `task-*` / `done-*`). **Dua syarat, keduanya wajib:**
+
+| Syarat | Nilai |
+|---|---|
+| Context terpakai | **< 100.000 token** — mutlak, tidak ikut ukuran window, **disetel di config** |
+| Tidak sedang bekerja | tidak ada giliran berjalan (fakta dari hook, bukan tebakan dari nama) |
+
+Ambangnya sebenarnya tidak berubah dari aturan lama — 10% dari window 1M **adalah** 100k. Yang berubah: dinyatakan dalam token (jujur) alih-alih persen (menyesatkan), dan lepas dari nama sesi.
+
+Syarat kedua **wajib ada** karena ia menutup lubang yang ditinggalkan nama `idle`: bot yang baru 20k tapi sedang mengerjakan permintaan user tidak boleh menerima estafet — ia akan menelantarkan pekerjaannya.
+
+**Diperiksa dua kali:** pengirim **menyaring** lewat `agent_status` sebelum menulis file (hemat pekerjaan); penerima **memutuskan** (mengikat — kondisi bisa berubah di antaranya, dan neighbor autonomy mensyaratkan penerima selalu boleh menolak).
+
+⚠️ **Jangan tertukar dengan ambang pengirim** (§11 nomor 2, masih terbuka): itu menjawab *"apakah saya sudah terlalu penuh untuk melanjutkan?"* dan berbasis **sisa** token. Yang ini menjawab *"apakah saya cukup kosong untuk menerima?"* dan berbasis **terpakai**.
+
+**Bila tidak ada bot yang memenuhi syarat:** laporkan kondisi tiap peer secara konkret lalu tawarkan `[Tulis file saja] [Pilih paksa salah satu] [Batal]`. User tetap boleh **sengaja** memilih bot yang tidak siap (SKILL-013) — saat itu pesan handoff membawa penanda "pilihan sadar user" supaya penjaga penerima tidak menolaknya.
+
 | # | Siapa | Melakukan |
 |---|---|---|
 | 1 | AI pengirim | Menulis file handoff (isi = pekerjaan AI) |
 | 2 | AI pengirim | Memanggil tool "mulai handoff": target + slug + path file |
 | 3 | `fleetd` | Tulis baris `status=terkirim`, pasang batas waktu, antar prompt ke penerima sebagai notifikasi bermetadata terstruktur |
 | 4 | AI pengirim | Lapor ke user "terkirim, menunggu ACK" — lalu **selesai, tidak menyimpan apa pun** |
-| 5 | AI penerima | Membaca, memutuskan terima/tolak, memanggil tool ACK |
-| 6 | `fleetd` | `status=diterima`, matikan batas waktu, **beri tahu user**, antre `/clear` ke pengirim |
-| 7 | Pengirim | Sesi bersih, status `idle` |
+| 5 | AI penerima | Membaca, memeriksa syarat §8.0, memanggil tool ACK dengan hasil **OK** atau **NOT-OK + alasan** |
+| 6 | `fleetd` | Matikan batas waktu. **OK** → beri tahu user, antre `/clear` ke pengirim. **NOT-OK** → kembalikan ke user beserta alasan + pilihan bot lain |
+| 7 | Pengirim | (jalur OK) Sesi bersih, status idle |
 
 **Tiga kegagalan lama yang tertutup:** compaction selama masa tunggu (state bukan di context) · ACK datang setelah pengirim ter-reset (baris data tetap utuh) · cron yang harus diingat untuk dibatalkan (batas waktu = kolom, diawasi mesin).
 
@@ -297,7 +316,7 @@ Semuanya jadi **konfigurasi**, bukan konstanta.
 | # | Angka | Konteks |
 |---|---|---|
 | 1 | Ambang token "sesi remeh" | Mulai dengan 2 kriteria pasti (giliran < 3 **dan** tak pernah dinamai) |
-| 2 | Ambang **sisa token** pemicu tawaran handoff | Dasar berubah dari persen ke sisa token; 35% untuk 1M kemungkinan terlalu konservatif |
+| 2 | Ambang **sisa token** pemicu tawaran handoff (**PENGIRIM**) | Dasar berubah dari persen ke sisa token; 35% untuk 1M kemungkinan terlalu konservatif. **Bukan** angka 100k di §8.0 — itu ambang penerima |
 | 3 | N giliran sebelum mesin menamai sesi | Kandidat: setelah topik jelas (~3 giliran), bukan berbasis waktu |
 | 4 | N hari retensi `inbox/` | |
 | 5 | Batas waktu tiap kelas injeksi | **Jangan seragam**: `/clear` (barrier, boleh 120 s) vs `/rename` (keystroke, cepat) |
