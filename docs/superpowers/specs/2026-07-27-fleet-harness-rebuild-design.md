@@ -18,6 +18,20 @@ Kita merakit ulang harness bot Telegram di atas tiga komponen: **`fleetd`** (sat
 
 ## 1b. Lingkup & hubungan dengan yang lama (K-17)
 
+### Nama
+
+| Hal | Nama | Catatan |
+|---|---|---|
+| Repo / marketplace baru | **`mirza-bots`** | **Sementara** (user 2026-07-27) — bisa berubah |
+| Program latar belakang | `fleetd` | |
+| Program pemegang PTY | `mirza-cc` | Nama yang sudah dikenal user, dipertahankan |
+| Plugin Claude Code | `cc-plugin` (nama kerja) | |
+| Folder state | `~/.claude/fleet/` | **Sengaja TIDAK mengikuti nama repo.** Nama repo masih sementara; mengikatkan path penyimpanan padanya berarti data harus dipindah bila namanya berubah |
+
+⚠️ Kalau nama folder state ingin disamakan dengan nama repo, putuskan **sebelum** ada data di dalamnya.
+
+### Hubungan dengan sistem lama
+
 **Ini marketplace BARU. `mirza-marketplace` yang lama TIDAK disentuh** — tidak diubah, tidak dihapus, tidak dimigrasi. Ke-11 plugin lamanya tetap berjalan apa adanya selama sistem baru dibangun.
 
 **"DROP" di seluruh dokumen audit berarti "tidak diikutsertakan di sistem baru"**, bukan dihapus dari yang lama.
