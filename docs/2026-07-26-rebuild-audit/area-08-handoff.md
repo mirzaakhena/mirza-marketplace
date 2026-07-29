@@ -77,7 +77,7 @@ Bot melaporkan kondisi tiap peer secara konkret (*"bot-02 penuh 340k · bot-03 s
 
 Konsisten dengan SKILL-013 yang tetap berlaku: **user boleh sengaja memilih bot yang tidak siap** — marka hanya informasi. Saat itu terjadi, pesan handoff membawa penanda "ini pilihan sadar user" supaya penjaga di sisi penerima tidak menolaknya.
 
-**Catatan:** opsi "[Tulis file saja]" menghidupkan kembali fungsi mode **File only** yang di-DROP di §8.1 — tapi sebagai *jalan keluar saat buntu*, bukan sebagai mode yang dipilih di awal. Itu perbedaan yang bermakna: ia muncul tepat saat berguna, bukan sebagai tombol yang harus diabaikan setiap kali.
+**Catatan — dikonfirmasi user 2026-07-27:** opsi "[Tulis file saja]" menghidupkan kembali fungsi mode **File only** yang di-DROP di §8.1, tapi sebagai **jalan keluar saat buntu**, bukan mode yang dipilih di awal. Perbedaannya bermakna: ia muncul tepat saat berguna (semua bot penuh/sibuk, dan pekerjaan tetap perlu dicatat sebelum konteksnya hilang), bukan sebagai tombol yang harus diabaikan setiap kali handoff.
 
 ## 8.3 ⭐ Pelacak state handoff pindah ke MESIN
 

@@ -55,10 +55,11 @@ Konsekuensi yang harus dijaga:
 
 | Hal | Konsekuensi |
 |---|---|
-| **⭐ TIDAK ADA MIGRASI** | User memilih: `mirza-bots` adalah **armada baru** yang diisi bot-bot baru; keenam bot lama **tetap hidup di sistem lama** selama masih berguna (user 2026-07-27). Tidak ada perkakas migrasi yang perlu dibangun — tidak untuk config, tidak untuk riwayat percakapan |
-| **Token baru untuk bot baru** | Telegram hanya izinkan satu penanya per token. Tiap bot di `mirza-bots` memakai token BotFather **baru**; bot lama tetap memegang tokennya. Tidak ada momen di mana dua sistem berebut token yang sama |
-| **Tidak ada interoperabilitas antar sistem** | Bot lama dan bot baru **tidak** saling mengirim handoff atau agent-bus — permanen, bukan sementara. Ini yang membuat K-12 (tanpa shim) berlaku tanpa risiko sama sekali |
-| **Dua armada dipelihara bersamaan** | Harga yang diterima sadar: user harus mengingat bot mana ada di sistem mana, dan dua basis kode hidup berdampingan. Diperingan oleh fakta bahwa yang lama sudah stabil dan tidak lagi dikembangkan |
+| **⭐ TIDAK ADA MIGRASI, DAN SISTEM LAMA TIDAK RELEVAN** | `mirza-bots` adalah **armada baru** berisi bot-bot baru bertoken baru. Nasib keenam bot lama **bukan pertimbangan desain sama sekali** — user: *"tidak perlu peduli dengan bot lama. bukan hal yang sulit bagi saya untuk membuat bot yang baru."* Tidak ada perkakas migrasi, tidak ada impor riwayat, tidak ada interoperabilitas, dan **tidak ada syarat hidup-berdampingan yang perlu dijaga** |
+
+Ini menghapus satu kelas pekerjaan sepenuhnya dan membuat **K-12 (tanpa shim)** bukan lagi kompromi transisi, melainkan **kondisi permanen**.
+
+⚠️ **Pergeseran makna di §10:** "bot uji" di tahap 2 **bukan bot uji** — ia bot pertama yang sungguhan dari armada baru. Tidak ada yang dibuang setelah pengujian.
 | **State terpisah** | Sistem baru memakai `~/.claude/mirza-bots/`; sistem lama tetap memakai `.claude/channels/` per-project dan `~/.claude/agent-registry.json`. Tidak ada yang dibaca silang |
 | **Dokumen audit tinggal di repo lama** | `docs/2026-07-26-rebuild-audit/` dan spec ini lahir di `mirza-marketplace`. Repo baru merujuknya; jangan disalin (dua salinan = dua yang bisa menyimpang, K-15) |
 
@@ -365,7 +366,7 @@ Tiap tahap punya **satu** kriteria selesai yang bisa dibuktikan dan menghasilkan
 | Tahap | Isi | Selesai bila |
 |---|---|---|
 | **1. Fondasi** | `fleetd` kosong + dua database + `config.json` + socket + `doctor` | `fleetd` menyala, `doctor` menjawab, satu bot terdaftar dari config |
-| **2. Jalur pesan** | Poller + gerbang allowlist + media + penyimpanan + MCP proxy `reply` | **Satu bot uji di macOS** berbalas pesan: teks, foto, album, tombol |
+| **2. Jalur pesan** | Poller + gerbang allowlist + media + penyimpanan + MCP proxy `reply` | **Bot pertama armada baru** berbalas pesan: teks, foto, album, tombol. Bukan bot uji sekali pakai — ia bot sungguhan yang tetap dipakai |
 | **3. Penegakan** | `PreToolUse` (ack) + `Stop` (jawaban final) + tombol wajib + tombol manual otomatis | Bot **tidak bisa** meninggalkan user tanpa jawaban dan **tidak bisa** bertanya tanpa tombol — dibuktikan dengan **mencoba melanggarnya** |
 | **4. Sesi** | **Verifikasi V-1 & V-2 lebih dulu (§11b)**, lalu `mirza-cc` + antrean injeksi + `SessionStart` + `/new` `/rename` `/switch` + `/context` | Ganti sesi dari Telegram jalan tanpa polling file; nama sesi benar (cara mencapainya bergantung hasil V-1) |
 | **5. Antar-bot** | `agent_list` `agent_status` `agent_send` + handoff dijaga mesin | Handoff dua bot tuntas: file, ACK, laporan, reset — tanpa AI mengingat apa pun |
