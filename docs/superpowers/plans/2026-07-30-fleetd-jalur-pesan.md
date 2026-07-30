@@ -2191,43 +2191,54 @@ git commit -m "feat(cc-plugin): entrypoint and plugin manifest"
 
 **This task cannot be executed by an implementer subagent alone — it needs the human partner's real bot token and, for full confidence, their participation sending a real message.** Unlike every other task in this plan, its success criterion is not "tests pass" but "a human confirms a real conversation happened." Do not mark this task complete from automated evidence alone.
 
-- [ ] **Step 1: Confirm `config.json` is ready**
+**DONE — 2026-07-30, session `renew-mirza-marketplace-3`.** Every step below is
+confirmed live by the human partner + direct inspection of `conversations.db`.
+One real Critical gap in Tasks 1-9 was found and fixed along the way (see
+Step 3) — not a scenario this task anticipated, since §4 of the handoff only
+flagged `${CLAUDE_PLUGIN_ROOT}`-expansion and `cwd`-identity as risks; the
+actual blocker was one layer further downstream.
+
+- [x] **Step 1: Confirm `config.json` is ready**
 
 The human partner already provided two real bot tokens and their Telegram user id during this planning session (2026-07-30), registered at `~/.claude/mirza-bots/config.json` as `bot-01` (token ending `...zmnHx_w`, `home: /Users/mirza/Workspace/mirza-bots`) and `bot-02` (token ending `...G8xiUbY`, `home: /Users/mirza/Workspace/mirza-bots-02`). Before proceeding:
 - Confirm `bot-02`'s `home` folder actually exists on disk (`/Users/mirza/Workspace/mirza-bots-02`) — it did not exist when this entry was written and was a placeholder guess. If the human partner intends a different folder for `bot-02`'s Claude Code session, update `config.json` to match before continuing; identity binding (Task 3/6's `hello`) requires an exact string match against whatever `cwd` that session reports.
 - This task's live checks below only require `bot-01` — `bot-02` exists so a second bot is ready for whenever bot-to-bot scenarios (Tahap 5) are tested, not something this task needs to exercise.
 - Re-verify `allowFrom` still contains the human partner's real Telegram user id.
 
-- [ ] **Step 2: Start `fleetd` for real**
+`bot-02`'s `home` (`/Users/mirza/Workspace/mirza-bots-02`) still does not exist on disk — confirmed harmless: `fleetd` starts fine and polls both bots regardless (it doesn't stat `home` at startup, only at `hello`-time identity matching). Left as-is; `bot-02` isn't exercised by this task. `allowFrom` confirmed to contain the real user id (it had already received real messages before this session started).
 
-```bash
-cd fleetd
-bun run start
-```
+- [x] **Step 2: Start `fleetd` for real**
 
-Confirm via `bun run doctor` (from Tahap 1) that it reports `botCount: 2` and the socket is listening.
+Started via `bun run start` (background). `bun run doctor` reported `botCount: 2`, socket listening, both DBs ready.
 
-- [ ] **Step 3: Load `cc-plugin` into a Claude Code session**
+- [x] **Step 3: Load `cc-plugin` into a Claude Code session**
 
-This requires a **separate** Claude Code session from the one executing this plan (a plugin's MCP server is only live in a session that has it configured) — this is a manual step outside the scope of any tooling in this repo. Report back to the human partner with exact instructions for how to point a Claude Code session's `.mcp.json` (or equivalent plugin-loading mechanism for their Claude Code version) at `cc-plugin/src/main.ts`, and ask them to open that session with the plugin's working directory set to the `home` path registered for `bot-01` in `config.json` (identity binding depends on this matching exactly, per Task 3/6).
+**Found and fixed a real Critical gap here — the first text message the human partner sent produced no visible notification in the second Claude Code session at all, with zero errors anywhere.** Root-caused by tracing the delivery chain end to end:
 
-- [ ] **Step 4: Send a real message and observe the round trip**
+- `fleetd` received the message, passed the allowlist gate, and wrote it to `conversations.db` — confirmed via direct query.
+- `registry.push()` returned `delivered: true`, meaning it successfully wrote the push down the open socket to `cc-plugin` — confirmed by reading the source, since `bot_inbox` (the offline-queue fallback for `delivered: false`) stayed empty.
+- So the break was strictly in `cc-plugin` → Claude Code client, not on the `fleetd` side. Two things were wrong simultaneously, both required for `notifications/claude/channel` to reach a session at all:
+  1. `cc-plugin/src/server.ts` constructed `McpServer` with no `capabilities` option, so it never declared `experimental: {"claude/channel": {}}`. Claude Code silently drops the notification from any server that hasn't declared this — no error surfaced anywhere on either side. Fixed: capability added.
+  2. Even with the capability, the receiving session must be started with `--dangerously-load-development-channels plugin:<name>@<marketplace>`, and `<name>@<marketplace>` must resolve to an **installed** plugin — `--plugin-dir` (session-scoped, no catalog) was tried first and fails with `plugin not installed`. Fixed: added a local-only marketplace (`mirza-bots/.claude-plugin/marketplace.json`), then `claude plugin marketplace add` + `claude plugin install cc-plugin@mirza-bots`.
 
-Ask the human partner to send a text message to `bot-01` on Telegram. Confirm, in order:
-1. `fleetd`'s logs show the message was received and allowed through the allowlist gate.
-2. A row appears in `conversations.db` (`bun run` a one-off query, or use `sqlite3 ~/.claude/mirza-bots/conversations.db "SELECT * FROM messages ORDER BY id DESC LIMIT 1"` if `sqlite3` is available).
-3. The Claude Code session with `cc-plugin` loaded shows the message content (via the `notifications/claude/channel` mechanism — ask the human partner to confirm they saw it appear).
-4. Ask that session's AI to reply; confirm the human partner receives the reply on Telegram.
+This mirrors exactly how `plugins/telegram@mirza-marketplace` already works in production — same two requirements, both already satisfied there, neither carried over to `cc-plugin` in Tasks 1-9. The `docs/superpowers/specs/2026-07-27-fleet-harness-rebuild-design.md` architecture spec never discusses `claude/channel` capability declaration or the flag's install requirement at all — a genuine spec gap, not an implementation slip against a documented requirement.
 
-Also send a **photo**, and separately an **album** (multiple photos in one Telegram share action), and confirm: single photo downloads into `~/.claude/mirza-bots/inbox/bot-01/` with the `messages` row's `attachments` referencing it; the album produces exactly ONE new row (not one per photo) with all photos in `attachments`.
+Verified working end to end with: `cd /Users/mirza/Workspace/mirza-bots && claude --dangerously-load-development-channels "plugin:cc-plugin@mirza-bots"`. `mirza-bots/README.md`'s installation section rewritten around this verified procedure; fix committed (`mirza-bots` main, local-only, no remote).
 
-- [ ] **Step 5: Verify buttons, including the answerCallbackQuery scar-tissue check**
+Confirmed separately and cheaply, without needing the second session at all: `resolveIdentityCwd()` (`CLAUDE_PROJECT_DIR` fallback to `process.cwd()`) resolves correctly against `bot-01`'s `home` — ran `cc-plugin/src/main.ts` directly with `CLAUDE_PROJECT_DIR` set, got `connected to fleetd as bot "bot-01"`, no `unknown_cwd`, no `/var` vs `/private/var` symlink mismatch. §4 risk #2 from the handoff is closed. §4 risks #1/#3 (`${CLAUDE_PLUGIN_ROOT}` expansion, installed-copy `node_modules`) also closed as a side effect of the plugin-install fix above — the installed plugin's `${CLAUDE_PLUGIN_ROOT}` resolves to the repo itself, where `node_modules` already exists.
 
-Ask that session's AI to call `reply` with `buttons` (e.g. two options). Confirm:
-1. The human partner sees the buttons rendered under the message on Telegram.
-2. They tap one. **Immediately** (not after any delay) the button should stop showing its "loading" state on their Telegram client — this is the human-visible symptom of `ctx.answerCallbackQuery()` actually having been called; if the button spins and never resolves, that is the exact scar-tissue failure this plan's tests were written to catch, and it means something is wrong in Task 6's `callback_query:data` handler that the automated tests missed.
-3. The Claude Code session sees the pressed button's `data` value arrive as a new message (via the same `notifications/claude/channel` path, tagged `kind: "callback"` in its meta).
+- [x] **Step 4: Send a real message and observe the round trip**
 
-- [ ] **Step 6: Report results honestly**
+All four confirmed after the Step 3 fix: `fleetd` allowlist-gate pass → `conversations.db` row → visible in the second Claude Code session (`▎ Channels (experimental)…` notification, message rendered as a new turn) → AI's `reply` received on Telegram.
 
-Write a short report (to the plan's SDD workspace, or directly to the human partner if executing inline) stating exactly what was confirmed and what wasn't. If any of the checks in Steps 4-5 fails, that is real information about a real gap in Tasks 1-9 — do not mark this task complete until every human-observable check is confirmed, or the specific failure is understood and reported as a concern rather than silently glossed over.
+Photo and album also confirmed via direct `conversations.db` inspection: a single photo produced one row with one `attachments` entry pointing into `~/.claude/mirza-bots/inbox/bot-01/`. The first album attempt produced no row at all and no error in the `fleetd` log (still unexplained — most likely a client-side send timing issue, not reproduced on retry); a second attempt from the human partner produced exactly ONE row with all 3 photos in `attachments` — the grouping behavior itself works correctly.
+
+- [x] **Step 5: Verify buttons, including the answerCallbackQuery scar-tissue check**
+
+All three confirmed by the human partner: buttons rendered on Telegram, tapped, loading spinner cleared **instantly** (the `answerCallbackQuery()` scar-tissue check passes), and the pressed button's `data` arrived in the Claude Code session (confirmed via `conversations.db`: two callback rows, `test_button_b` and `test_button_c`, `source: user`).
+
+**New, out-of-scope observation (not a bug):** pressing a button does not remove/disable it on the Telegram side — standard Telegram behavior unless the bot explicitly calls `editMessageReplyMarkup` after handling a callback, which nothing in Tasks 1-9 ever specified or implemented. Human partner explicitly deferred this to a later stage; not fixed in this session.
+
+- [x] **Step 6: Report results honestly**
+
+Reported inline to the human partner throughout, plus this write-up. Summary: **Tahap 2 works end to end for `bot-01`**, but only after a real fix (channel capability + plugin-install) that Tasks 1-9 had missed entirely — the automated test suites (`fleetd` 59/59, `cc-plugin` 16/16) could never have caught this, since it's a Claude-Code-client-side requirement with no unit-testable surface in either package. Any future second `cc-plugin`-style channel (e.g. for `bot-02`, or a redesigned Tahap 4) needs the same two-part registration from day one. Known, accepted gaps carried forward: button keyboards don't self-clear after a press; the one unreproduced album-drop on first attempt.
