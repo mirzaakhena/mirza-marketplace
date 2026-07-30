@@ -166,3 +166,38 @@ desainnya — biaya per giliran naik, protokol tetap punya satu rumah.
 Sesi Claude Code yang digerakkan Telegram menutup gilirannya dengan penanda
 minimal alih-alih prosa — **dibuktikan dengan melihat transkrip sesi
 sungguhan setelah percakapan Telegram nyata**, bukan dari unit test hijau.
+
+## 11. Hasil — TERPENUHI (2026-07-31)
+
+Diimplementasikan di `mirza-bots` (commit `cf0462e` deklarasi `instructions`,
+`b787e0c` stempel marker, `b977691` rilis 0.2.0 + dokumentasi). 19 unit test
+lolos.
+
+**V-1 dan V-2 (§6) dijawab empiris saat penulisan rencana**, bukan
+diasumsikan:
+
+- **V-1 — YA.** Probe `claude -p` mengembalikan tepat `'.'`, `output_tokens: 3`,
+  tanpa error. Penanda `"."` dipakai.
+- **V-2 — YA** di level protokol. Probe `InMemoryTransport` membuktikan
+  `client.getInstructions()` mengembalikan string yang dideklarasikan lewat
+  wrapper `McpServer`. Jejak kodenya: `McpServer` meneruskan `options` ke
+  `Server` (`mcp.js:24`), yang membaca `options.instructions` (`index.js:50`)
+  dan mengirimkannya di hasil initialize (`index.js:268`). Catatan: di versi
+  SDK ini `instructions` bertipe **`string`**, bukan array seperti yang
+  dipakai `plugins/telegram` lama.
+
+**Uji live dengan bot Telegram sungguhan (`bot-01`), dikonfirmasi user:**
+
+| Yang diperiksa | Hasil |
+|---|---|
+| Balasan di Telegram tetap normal (isi lengkap, bahasa user) | ✅ tidak ada regresi |
+| Giliran transkrip jadi ringkas, bukan prosa | ✅ |
+| **Masih ringkas setelah ~15-20 giliran** (uji *instruction-fade* yang sebenarnya) | ✅ tidak luntur |
+| **Giliran yang diketik langsung di terminal tetap dijawab penuh** (aturan tidak bocor) | ✅ |
+
+Cek ketiga dan keempat adalah yang menentukan: patuh di giliran pertama tidak
+membuktikan apa pun, dan kebocoran ke giliran terminal persis kelas bug
+"sticky" yang desain ini dirancang untuk kebal terhadapnya (§4).
+
+**Belum diukur:** penghematan token secara kuantitatif — memang di luar
+cakupan (§9), bisa dilakukan kapan saja dengan membandingkan ukuran transkrip.
