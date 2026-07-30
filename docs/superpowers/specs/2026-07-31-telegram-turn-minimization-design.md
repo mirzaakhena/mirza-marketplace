@@ -201,3 +201,27 @@ membuktikan apa pun, dan kebocoran ke giliran terminal persis kelas bug
 
 **Belum diukur:** penghematan token secara kuantitatif — memang di luar
 cakupan (§9), bisa dilakukan kapan saja dengan membandingkan ukuran transkrip.
+
+### 11.1 Perubahan setelah uji live (review whole-branch)
+
+Review akhir menemukan satu cacat lintas-task yang **tidak mungkin terlihat
+oleh review per-task**: paragraf pertama `SERVER_INSTRUCTIONS` menyatakan
+sebagai fakta seluruh-sesi bahwa *"satu-satunya yang sampai ke user adalah
+tool `reply`"* — padahal protokolnya berlingkup (paragraf ketiga baru
+membatasi aturan ringkasnya ke giliran bertanda). Untuk giliran yang diketik
+langsung di terminal, klaim itu **salah**: di situ transkrip justru satu-satunya
+yang dibaca user. Risikonya bukan prosa berlebih (yang benign), melainkan AI
+mengirim jawaban pertanyaan-terminal ke Telegram.
+
+Uji live poin keempat memang lolos — jadi secara empiris AI menyelesaikan
+ketegangan itu sendiri — tapi teksnya tetap diperbaiki supaya tidak
+bergantung pada itu (`42a4dbc`, dirilis sebagai 0.2.1 di `24c55b4`). Perbaikan
+ini **mempersempit** klaim yang terlalu luas, jadi tidak membatalkan hasil uji
+live di atas.
+
+**Pelajaran operasional yang ikut ditemukan** (`fbe7543`): `claude plugin
+install` **tidak** memperbarui plugin yang sudah terpasang — ia menjawab
+*"already installed"* dan diam-diam menyajikan build lama. Perbaikan yang sudah
+di-commit tidak pernah sampai ke sesi mana pun sampai urutan yang benar
+dijalankan: naikkan versi → `claude plugin marketplace update` → `claude plugin
+update` → restart sesi. Prosedur di `mirza-bots/README.md` sudah dikoreksi.
