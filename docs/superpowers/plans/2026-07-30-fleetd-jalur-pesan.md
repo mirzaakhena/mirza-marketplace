@@ -24,7 +24,8 @@
 - **A known, intentional scope simplification for this stage:** `reply`'s target chat is "whichever chat most recently messaged this bot," tracked in memory (not persisted) and reset naturally on `fleetd` restart. There is no per-session chat routing yet — that concept doesn't exist until Tahap 4 wires up real Claude Code sessions. This is adequate for Tahap 2's acceptance test (one person, one bot, one conversation) and is explicitly **not** a final design — flag it for revisit once sessions exist.
 - **Repo layout:** `fleetd/` (extended, not restructured) and a new sibling package `cc-plugin/` at the `mirza-bots` repo root, both plain `package.json` + Bun, matching Tahap 1's convention.
 - **Live testing requires a real Telegram bot token**, which is not something any task in this plan can supply — the final task is explicitly a manual, human-in-the-loop step. Every other task must be fully provable by automated tests using dependency injection, `InMemoryTransport`, or a local test HTTP server standing in for Telegram's file-download API — never a real network call to Telegram in `bun test`.
-- **⚠️ Known scope gap against spec §10's literal Tahap 2 wording, flagged rather than silently dropped:** spec §10 lists Tahap 2's completion criterion as "bot berbalas pesan: teks, foto, album, **tombol**" (buttons), but its "Isi" (contents) column for this stage only lists "poller + gerbang allowlist + media + penyimpanan + MCP proxy reply" — buttons aren't in the task breakdown, and no button design work has been done at the audit-doc level for this stage specifically (button *enforcement* — server adding a "Jelaskan manual" button, rejecting button-less questions — is Tahap 3's job per spec §7, which structurally needs button support to exist first). This plan's `reply` tool is text-only, matching spec §4.3's explicit "reply tanpa param format." **This plan does not implement Telegram inline keyboard buttons.** Flag this to the human partner before or during Task 10's live check — if button support turns out to be expected as part of *this* stage's "done," that's a plan gap to fix (likely: add a `buttons` parameter to `reply` and a callback_query handler to the poller) before Task 10 can honestly be called complete, not something to quietly reinterpret away.
+- **Telegram inline keyboard buttons (added 2026-07-30, user request).** `reply` gains an optional `buttons: Array<Array<{ text: string; data: string }>>` parameter (rows of buttons), translated to grammy's `InlineKeyboard`. Pressing a button delivers a `callback_query` update, distinct from a normal message — **`ctx.answerCallbackQuery()` must be called for every callback_query, unconditionally, before any other handling.** This is not a style preference: skipping it is exactly the failure this project has already paid for once — spec §10 itself records it as a lesson from the old rewrite ("457 unit test hijau tapi `answerCallbackQuery` tak ter-port → spinner Telegram berputar selamanya" — 457 green unit tests, but the button spinner spun forever on real Telegram because nothing ever integration-tested the real callback path). Every task touching callback_query handling in this plan carries a test that asserts `answerCallbackQuery` was actually called against a fake Telegram server — not just that the handler ran.
+- **What buttons do NOT include in this stage:** no button-press *enforcement* (spec §7's "reject a question with no buttons," "server adds a 'Jelaskan manual' button" are Tahap 3 concerns, layered on top of the raw button-sending capability this stage provides) and no persistent tracking of which buttons are still "live" versus stale after a bot restart (in-memory only, same spirit as the `lastChatByBot` simplification above).
 
 ---
 
@@ -296,7 +297,7 @@ git commit -m "feat(fleetd): media downloader"
 **Interfaces:**
 - Consumes: `Config` from Tahap 1's `../config` (to resolve `hello`'s cwd to a bot name).
 - Produces:
-  - New `protocol.ts` exports: `HelloRequest = { type: "hello"; cwd: string }`, `ReplyRequest = { type: "reply"; text: string }`, extended `Request = DoctorRequest | HelloRequest | ReplyRequest`, `PushMessage = { type: "push_message"; text: string; meta: Record<string, string> }`, extended `Response` to include `{ ok: true; bot: string }` (hello success) and `{ ok: true }` (reply accepted).
+  - New `protocol.ts` exports: `HelloRequest = { type: "hello"; cwd: string }`, `ButtonRow = Array<{ text: string; data: string }>`, `ReplyRequest = { type: "reply"; text: string; buttons?: ButtonRow[] }`, extended `Request = DoctorRequest | HelloRequest | ReplyRequest`, `PushMessage = { type: "push_message"; text: string; meta: Record<string, string> }`, extended `Response` to include `{ ok: true; bot: string }` (hello success) and `{ ok: true }` (reply accepted).
   - New `registry.ts` export: `class ConnectionRegistry` with `register(bot: string, conn: BoundConnection): void`, `unregister(bot: string, conn: BoundConnection): void`, `push(bot: string, msg: PushMessage): boolean` (returns `true` if delivered to at least one live connection, `false` if nobody is connected for that bot — Task 4's poller uses the `false` case to fall back to `bot_inbox`).
   - Modified `server.ts` exports: `Handler` now receives a second argument `conn: BoundConnection` with `conn.send(msg)` and mutable `conn.boundBot: string | null`; `startSocketServer(sockPath, config, handle, registry)` gains two parameters (`config` to resolve `hello`, `registry` to register/unregister bound connections) — Task 6 (main.ts) passes both.
 
@@ -393,7 +394,8 @@ Now extend the protocol file:
 // fleetd/src/socket/protocol.ts — full file after this task
 export type DoctorRequest = { type: "doctor" };
 export type HelloRequest = { type: "hello"; cwd: string };
-export type ReplyRequest = { type: "reply"; text: string };
+export type ButtonRow = Array<{ text: string; data: string }>;
+export type ReplyRequest = { type: "reply"; text: string; buttons?: ButtonRow[] };
 export type Request = DoctorRequest | HelloRequest | ReplyRequest;
 
 export type DoctorReport = {
@@ -924,6 +926,28 @@ describe("handleIncomingMessage", () => {
     server.stop(true);
     rmSync(inboxRoot, { recursive: true, force: true });
   });
+
+  test("a button press (callbackData set) is stored and pushed as the pressed button's data, tagged kind=callback", async () => {
+    const conversationsDb = openConversationsDb(":memory:");
+    const fleetDb = openFleetDb(":memory:");
+    const registry = new ConnectionRegistry();
+    const sent: PushMessage[] = [];
+    registry.register("bot-01", { send: (m) => sent.push(m), boundBot: "bot-01" });
+
+    await handleIncomingMessage(baseMsg({ text: undefined, callbackData: "confirm_yes" }), {
+      config,
+      conversationsDb,
+      fleetDb,
+      registry,
+      inboxRoot: mkdtempSync(join(tmpdir(), "poller-test-")),
+    });
+
+    const hits = searchMessages(conversationsDb, "confirm_yes");
+    expect(hits.length).toBe(1);
+    expect(sent.length).toBe(1);
+    expect(sent[0]?.text).toBe("confirm_yes");
+    expect(sent[0]?.meta.kind).toBe("callback");
+  });
 });
 
 describe("startPolling retry loop", () => {
@@ -986,6 +1010,7 @@ export type NormalizedMessage = {
   userName?: string;
   text?: string;
   photoUrls?: string[];
+  callbackData?: string;
   ts: string;
 };
 
@@ -1007,6 +1032,12 @@ export async function handleIncomingMessage(msg: NormalizedMessage, deps: Poller
     attachments.push(destPath);
   }
 
+  // A button press has no `text` of its own -- its meaning IS the callback data
+  // (e.g. "confirm_yes"). Store and push that as the message content so the AI
+  // sees what was pressed; `kind: "callback"` in meta distinguishes it from a
+  // message the human actually typed.
+  const displayText = msg.callbackData ?? msg.text;
+
   insertMessage(deps.conversationsDb, {
     ts: msg.ts,
     bot: msg.bot,
@@ -1014,17 +1045,18 @@ export async function handleIncomingMessage(msg: NormalizedMessage, deps: Poller
     source: "user",
     userId: msg.userId,
     userName: msg.userName,
-    text: msg.text,
+    text: displayText,
     attachments: attachments.length > 0 ? JSON.stringify(attachments) : undefined,
   });
 
   const pushMsg: PushMessage = {
     type: "push_message",
-    text: msg.text ?? "(media)",
+    text: displayText ?? "(media)",
     meta: {
       chat_id: msg.chatId,
       user_id: msg.userId,
       ts: msg.ts,
+      kind: msg.callbackData !== undefined ? "callback" : "message",
       ...(attachments.length > 0 ? { attachments: attachments.join(",") } : {}),
     },
   };
@@ -1070,7 +1102,7 @@ Note on `process.on('unhandledRejection'/'uncaughtException', ...)`: this is reg
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd fleetd && bun test test/telegram/poller.test.ts`
-Expected: PASS — 6 tests, 0 fail.
+Expected: PASS — 7 tests, 0 fail.
 
 - [ ] **Step 5: Run the full suite**
 
@@ -1101,12 +1133,13 @@ git commit -m "feat(fleetd): resilient poller with allowlist/media/storage/push-
 1. `reply`'s handler needs `conn.boundBot` (Task 3's `Handler` type is `(req, conn) => Response`, so this is available), and sending via Telegram needs a `Bot` instance per configured bot. Rather than constructing a fresh `Bot` per `reply` call, build one `Map<string, Bot>` once (shared by the polling loop and the `reply` handler).
 2. `Bot` construction honors an optional `TELEGRAM_API_ROOT` env var (verified this session against a local fake Telegram server, including the `deleteWebhook` call grammy makes internally before `bot.start()`'s long-poll loop begins) so tests never touch the real Telegram API.
 3. **Album grouping is real here, not deferred.** `ctx.getFile()` only returns a `file_path`; grammy has no built-in URL builder (checked its type declarations this session) — the download URL has to be built by hand as `${apiRoot}/file/bot${token}/${file_path}`, using the same `apiRoot` as `makeBot` so tests route file downloads to the fake server too. One `AlbumBuffer<string>` (holding file URLs, not full messages) is created per bot; a photo with a `media_group_id` goes into that bot's buffer keyed by the group id, and the buffer's `onFlush` is what finally calls `handleIncomingMessage` with all the group's URLs in `photoUrls`. A photo with no `media_group_id` (a single photo, not an album) skips the buffer and calls `handleIncomingMessage` immediately with a one-element `photoUrls`.
+4. **Buttons, both directions.** Sending: `reply`'s optional `buttons: ButtonRow[]` is translated to a grammy `InlineKeyboard` via a small `buildInlineKeyboard` helper (verified this session: `InlineKeyboard().text(t,d)` appends to the current row, `.row()` starts a new one — the helper calls `.row()` before every row except the first). Receiving: a button press arrives as a `callback_query` update, not a `message` update, handled by a separate `bot.on("callback_query:data", ...)`. **`ctx.answerCallbackQuery()` must be called first, unconditionally, before anything else in that handler** — verified this session against a fake Telegram server (`/answerCallbackQuery` receiving the right `callback_query_id`). Skipping this is the exact scar tissue spec §10 already documents from the old rewrite.
 
 - [ ] **Step 1: Extend `main.ts`**
 
 ```typescript
 // fleetd/src/main.ts — full file after this task
-import { Bot, type Context } from "grammy";
+import { Bot, InlineKeyboard, type Context } from "grammy";
 import { ensureStateDirs, configPath, fleetDbPath, conversationsDbPath, socketPath, stateRoot } from "./paths";
 import { loadConfig } from "./config";
 import { openFleetDb } from "./db/fleet-schema";
@@ -1116,7 +1149,7 @@ import { ConnectionRegistry } from "./socket/registry";
 import { buildDoctorReport } from "./doctor";
 import { handleIncomingMessage, startPolling, type NormalizedMessage } from "./telegram/poller";
 import { AlbumBuffer } from "./telegram/album-buffer";
-import type { Request, Response } from "./socket/protocol";
+import type { Request, Response, ButtonRow } from "./socket/protocol";
 
 const VERSION = (await import("../package.json")).version;
 
@@ -1131,6 +1164,15 @@ function makeBot(token: string): Bot {
 
 function fileUrl(token: string, filePath: string): string {
   return `${apiRoot()}/file/bot${token}/${filePath}`;
+}
+
+function buildInlineKeyboard(rows: ButtonRow[]): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  for (const [i, row] of rows.entries()) {
+    if (i > 0) kb.row();
+    for (const btn of row) kb.text(btn.text, btn.data);
+  }
+  return kb;
 }
 
 export function main(): void {
@@ -1228,6 +1270,25 @@ export function main(): void {
       await handleIncomingMessage(msg, deps);
     });
 
+    bot.on("callback_query:data", async (ctx) => {
+      // MUST be first and unconditional -- otherwise the button spins forever on
+      // the user's Telegram client. See spec §10's own recorded lesson from the
+      // old rewrite (457 green unit tests, this exact call missing in production).
+      await ctx.answerCallbackQuery();
+
+      const chatId = ctx.callbackQuery.message?.chat.id ?? ctx.from.id;
+      const msg: NormalizedMessage = {
+        bot: botName,
+        chatId: String(chatId),
+        userId: String(ctx.from.id),
+        userName: ctx.from.username,
+        callbackData: ctx.callbackQuery.data,
+        ts: new Date().toISOString(),
+      };
+      lastChatByBot.set(botName, msg.chatId);
+      await handleIncomingMessage(msg, deps);
+    });
+
     startPolling(bot, {
       start: () => bot.start(),
       onGiveUp: (err) => {
@@ -1252,7 +1313,8 @@ export function main(): void {
         if (!chatId) return { ok: false, error: "no_known_chat" };
         const bot = bots.get(conn.boundBot);
         if (!bot) return { ok: false, error: "unknown_bot" };
-        await bot.api.sendMessage(chatId, req.text);
+        const replyMarkup = req.buttons ? buildInlineKeyboard(req.buttons) : undefined;
+        await bot.api.sendMessage(chatId, req.text, replyMarkup ? { reply_markup: replyMarkup } : undefined);
         return { ok: true };
       }
       return { ok: false, error: "unknown_type" };
@@ -1281,11 +1343,16 @@ Add this fake Telegram server and the new test to `fleetd/test/e2e.test.ts`, alo
 import { writeFileSync as overwriteConfig } from "node:fs";
 
 // A minimal fake Telegram Bot API covering exactly the calls grammy's polling
-// loop and sendMessage make: deleteWebhook (called once before long-polling
-// starts), getMe (bot identity), getUpdates (long-poll -- serves one queued
-// update then empties out), and sendMessage (records what was sent).
-function startFakeTelegramApi(queuedUpdate: unknown) {
-  const sentMessages: Array<{ chat_id: string; text: string }> = [];
+// loop, sendMessage, and callback_query handling make: deleteWebhook (called
+// once before long-polling starts), getMe (bot identity), getUpdates
+// (long-poll -- serves each queued update once, in order, then empties out),
+// sendMessage (records what was sent, including reply_markup for button
+// tests), and answerCallbackQuery (records which callback_query_id was
+// acknowledged -- this is the assertion that catches the "spinner forever"
+// scar tissue if a future change ever drops the ctx.answerCallbackQuery() call).
+function startFakeTelegramApi(queuedUpdates: unknown[]) {
+  const sentMessages: Array<{ chat_id: string; text: string; reply_markup?: unknown }> = [];
+  const answeredCallbackIds: string[] = [];
   let getUpdatesCalls = 0;
   const server = Bun.serve({
     port: 0,
@@ -1299,20 +1366,25 @@ function startFakeTelegramApi(queuedUpdate: unknown) {
       }
       if (url.pathname.endsWith("/getUpdates")) {
         getUpdatesCalls++;
-        return Response.json({ ok: true, result: getUpdatesCalls === 1 ? [queuedUpdate] : [] });
+        return Response.json({ ok: true, result: getUpdatesCalls <= queuedUpdates.length ? [queuedUpdates[getUpdatesCalls - 1]] : [] });
       }
       if (url.pathname.endsWith("/sendMessage")) {
-        const body = (await req.json()) as { chat_id: string; text: string };
-        sentMessages.push({ chat_id: String(body.chat_id), text: body.text });
+        const body = (await req.json()) as { chat_id: string; text: string; reply_markup?: unknown };
+        sentMessages.push({ chat_id: String(body.chat_id), text: body.text, reply_markup: body.reply_markup });
         return Response.json({
           ok: true,
           result: { message_id: sentMessages.length, date: 0, chat: { id: body.chat_id, type: "private" }, text: body.text },
         });
       }
+      if (url.pathname.endsWith("/answerCallbackQuery")) {
+        const body = (await req.json()) as { callback_query_id: string };
+        answeredCallbackIds.push(body.callback_query_id);
+        return Response.json({ ok: true, result: true });
+      }
       return Response.json({ ok: false }, { status: 404 });
     },
   });
-  return { server, sentMessages };
+  return { server, sentMessages, answeredCallbackIds };
 }
 
 // New describe block -- separate from Tahap 1's, so it gets its own beforeAll/afterAll
@@ -1329,7 +1401,7 @@ describe("fleetd Tahap 2 end-to-end: poll, store, push, reply", () => {
       text: "halo bot",
     },
   };
-  const { server: fakeTelegram, sentMessages } = startFakeTelegramApi(queuedUpdate);
+  const { server: fakeTelegram, sentMessages } = startFakeTelegramApi([queuedUpdate]);
 
   writeFileSync(
     join(home, "config.json"),
@@ -1398,7 +1470,106 @@ describe("fleetd Tahap 2 end-to-end: poll, store, push, reply", () => {
     await Bun.sleep(50);
     expect(JSON.parse(lines[1]!)).toEqual({ ok: true });
 
-    expect(sentMessages).toEqual([{ chat_id: "111", text: "balasan AI" }]);
+    expect(sentMessages[0]).toEqual({ chat_id: "111", text: "balasan AI", reply_markup: undefined });
+    client.end();
+  });
+});
+
+// Separate describe block, its own fleetd + fake Telegram instance, dedicated to
+// buttons: a callback_query update (button press) and a reply carrying buttons.
+describe("fleetd Tahap 2 end-to-end: buttons", () => {
+  const home = mkdtempSync(join(tmpdir(), "mirza-bots-e2e-t2-buttons-"));
+  const queuedCallbackUpdate = {
+    update_id: 1,
+    callback_query: {
+      id: "cbq-1",
+      from: { id: 111, is_bot: false, first_name: "mirza" },
+      message: { message_id: 5, date: Math.floor(Date.now() / 1000), chat: { id: 111, type: "private" } },
+      chat_instance: "abc",
+      data: "confirm_yes",
+    },
+  };
+  const { server: fakeTelegram, sentMessages, answeredCallbackIds } = startFakeTelegramApi([queuedCallbackUpdate]);
+
+  writeFileSync(
+    join(home, "config.json"),
+    JSON.stringify({
+      allowFrom: ["111"],
+      bots: { "bot-01": { home: "/tmp/bot-01", token: "fake:token" } },
+    })
+  );
+
+  const root = join(import.meta.dir, "..");
+  let fleetdProc: ReturnType<typeof Bun.spawn>;
+
+  beforeAll(() => {
+    fleetdProc = Bun.spawn(["bun", "run", "src/main.ts"], {
+      cwd: root,
+      env: { ...process.env, MIRZA_BOTS_HOME: home, TELEGRAM_API_ROOT: `http://localhost:${fakeTelegram.port}` },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  });
+
+  afterAll(async () => {
+    fleetdProc.kill();
+    fakeTelegram.stop(true);
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  test("a button press is acknowledged via answerCallbackQuery and stored/pushed, then reply-with-buttons sends the right reply_markup", async () => {
+    // The critical scar-tissue assertion: answerCallbackQuery was actually called,
+    // with the exact callback_query_id from the update -- not just "the handler ran."
+    let answered = false;
+    for (let waited = 0; waited < 4000 && !answered; waited += 100) {
+      await Bun.sleep(100);
+      answered = answeredCallbackIds.includes("cbq-1");
+    }
+    expect(answered).toBe(true);
+
+    // The press was stored as a message (searchable by its callback data).
+    const convDbPath = join(home, "conversations.db");
+    const { openConversationsDb, searchMessages } = await import("../src/db/conversations-schema");
+    const db = openConversationsDb(convDbPath);
+    expect(searchMessages(db, "confirm_yes").length).toBe(1);
+    db.close();
+
+    // Now send a reply WITH buttons and confirm the fake API received the right
+    // inline_keyboard shape.
+    const sockPath = join(home, "fleetd.sock");
+    const net = await import("node:net");
+    const { encode } = await import("../src/socket/protocol");
+    const client = net.createConnection(sockPath);
+    const lines: string[] = [];
+    let buf = "";
+    client.on("data", (chunk) => {
+      buf += chunk.toString("utf8");
+      let idx: number;
+      while ((idx = buf.indexOf("\n")) !== -1) {
+        lines.push(buf.slice(0, idx));
+        buf = buf.slice(idx + 1);
+      }
+    });
+    await new Promise<void>((resolve) => client.on("connect", resolve));
+    client.write(encode({ type: "hello", cwd: "/tmp/bot-01" }));
+    await Bun.sleep(50);
+    expect(JSON.parse(lines[0]!)).toEqual({ ok: true, bot: "bot-01" });
+
+    client.write(
+      encode({
+        type: "reply",
+        text: "Pilih salah satu:",
+        buttons: [[{ text: "Ya", data: "confirm_yes" }, { text: "Tidak", data: "confirm_no" }]],
+      })
+    );
+    await Bun.sleep(50);
+    expect(JSON.parse(lines[1]!)).toEqual({ ok: true });
+
+    const sent = sentMessages.find((m) => m.text === "Pilih salah satu:");
+    expect(sent?.reply_markup).toEqual({
+      inline_keyboard: [[{ text: "Ya", callback_data: "confirm_yes" }, { text: "Tidak", callback_data: "confirm_no" }]],
+    });
+
     client.end();
   });
 });
@@ -1428,7 +1599,7 @@ git commit -m "feat(fleetd): wire pollers and reply handler into main.ts"
 
 **Interfaces:**
 - Consumes: `fleetd`'s socket protocol (`hello`, `reply`, `push_message`) — this package does NOT import from `fleetd/` (separate deployable artifact, per spec's "cc-plugin is the only thing published to the marketplace"); it re-declares the wire types it needs locally.
-- Produces: `class FleetdClient` with `connect(sockPath: string, cwd: string): Promise<{ bot: string }>`, `reply(text: string): Promise<void>`, `onPush(handler: (msg: PushMessage) => void): void`, `close(): void` — Task 8's MCP server uses this as its only channel to `fleetd`.
+- Produces: `type ButtonRow = Array<{ text: string; data: string }>`, `class FleetdClient` with `connect(sockPath: string, cwd: string): Promise<{ bot: string }>`, `reply(text: string, buttons?: ButtonRow[]): Promise<void>`, `onPush(handler: (msg: PushMessage) => void): void`, `close(): void` — Task 8's MCP server uses this as its only channel to `fleetd`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1501,6 +1672,29 @@ describe("FleetdClient", () => {
     client.close();
   });
 
+  test("reply with buttons includes them in the request", async () => {
+    tmp = mkdtempSync(join(tmpdir(), "fleetd-client-test-"));
+    const sockPath = join(tmp, "fleetd.sock");
+    const received: any[] = [];
+    server = startFakeFleetd(sockPath, (line, conn) => {
+      const req = JSON.parse(line);
+      received.push(req);
+      if (req.type === "hello") conn.write(JSON.stringify({ ok: true, bot: "bot-01" }) + "\n");
+      if (req.type === "reply") conn.write(JSON.stringify({ ok: true }) + "\n");
+    });
+
+    const client = new FleetdClient();
+    await client.connect(sockPath, "/fake/cwd");
+    await client.reply("Pilih salah satu:", [[{ text: "Ya", data: "confirm_yes" }, { text: "Tidak", data: "confirm_no" }]]);
+
+    expect(received[1]).toEqual({
+      type: "reply",
+      text: "Pilih salah satu:",
+      buttons: [[{ text: "Ya", data: "confirm_yes" }, { text: "Tidak", data: "confirm_no" }]],
+    });
+    client.close();
+  });
+
   test("onPush delivers a push_message the server sends unsolicited", async () => {
     tmp = mkdtempSync(join(tmpdir(), "fleetd-client-test-"));
     const sockPath = join(tmp, "fleetd.sock");
@@ -1554,6 +1748,7 @@ Run `bun install` inside `cc-plugin/` after creating this file.
 import net from "node:net";
 
 export type PushMessage = { type: "push_message"; text: string; meta: Record<string, string> };
+export type ButtonRow = Array<{ text: string; data: string }>;
 type HelloResponse = { ok: true; bot: string } | { ok: false; error: string };
 type ReplyResponse = { ok: true } | { ok: false; error: string };
 
@@ -1612,7 +1807,7 @@ export class FleetdClient {
     });
   }
 
-  reply(text: string): Promise<void> {
+  reply(text: string, buttons?: ButtonRow[]): Promise<void> {
     return new Promise((resolve, reject) => {
       if (!this.socket) return reject(new Error("not connected"));
       this.pending.push((line) => {
@@ -1620,7 +1815,7 @@ export class FleetdClient {
         if (res.ok) resolve();
         else reject(new Error(`reply rejected: ${res.error}`));
       });
-      this.socket.write(this.encode({ type: "reply", text }));
+      this.socket.write(this.encode({ type: "reply", text, ...(buttons ? { buttons } : {}) }));
     });
   }
 
@@ -1637,7 +1832,7 @@ export class FleetdClient {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd cc-plugin && bun test test/fleetd-client.test.ts`
-Expected: PASS — 3 tests, 0 fail.
+Expected: PASS — 4 tests, 0 fail.
 
 - [ ] **Step 5: Commit**
 
@@ -1693,6 +1888,38 @@ describe("cc-plugin MCP server", () => {
 
     expect(replied).toEqual(["halo dari AI"]);
     expect(result.isError).toBeFalsy();
+
+    await mcpClient.close();
+    await server.close();
+  });
+
+  test("the reply tool passes an optional buttons argument through to FleetdClient.reply", async () => {
+    const calls: Array<{ text: string; buttons?: unknown }> = [];
+    const client = fakeFleetdClient({
+      reply: async (text: string, buttons?: any) => {
+        calls.push({ text, buttons });
+      },
+    });
+    const server = buildServer(client);
+
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const mcpClient = new Client({ name: "test-client", version: "0.1.0" });
+    await Promise.all([server.connect(serverTransport), mcpClient.connect(clientTransport)]);
+
+    await mcpClient.callTool({
+      name: "reply",
+      arguments: {
+        text: "Pilih salah satu:",
+        buttons: [[{ text: "Ya", data: "confirm_yes" }, { text: "Tidak", data: "confirm_no" }]],
+      },
+    });
+
+    expect(calls).toEqual([
+      {
+        text: "Pilih salah satu:",
+        buttons: [[{ text: "Ya", data: "confirm_yes" }, { text: "Tidak", data: "confirm_no" }]],
+      },
+    ]);
 
     await mcpClient.close();
     await server.close();
@@ -1784,11 +2011,17 @@ export function buildServer(client: FleetdClient): McpServer {
   server.registerTool(
     "reply",
     {
-      description: "Send a reply message to the user on Telegram.",
-      inputSchema: { text: z.string().min(1) },
+      description:
+        "Send a reply message to the user on Telegram. Optionally attach inline keyboard buttons as rows of {text, data} -- pressing a button delivers `data` back as the user's next message.",
+      inputSchema: {
+        text: z.string().min(1),
+        buttons: z
+          .array(z.array(z.object({ text: z.string().min(1), data: z.string().min(1) })))
+          .optional(),
+      },
     },
-    async ({ text }) => {
-      await client.reply(text);
+    async ({ text, buttons }) => {
+      await client.reply(text, buttons);
       return { content: [{ type: "text", text: "sent" }] };
     }
   );
@@ -1821,7 +2054,7 @@ export function buildServer(client: FleetdClient): McpServer {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd cc-plugin && bun test test/server.test.ts`
-Expected: PASS — 3 tests, 0 fail.
+Expected: PASS — 4 tests, 0 fail.
 
 - [ ] **Step 5: Commit**
 
@@ -1958,9 +2191,12 @@ git commit -m "feat(cc-plugin): entrypoint and plugin manifest"
 
 **This task cannot be executed by an implementer subagent alone — it needs the human partner's real bot token and, for full confidence, their participation sending a real message.** Unlike every other task in this plan, its success criterion is not "tests pass" but "a human confirms a real conversation happened." Do not mark this task complete from automated evidence alone.
 
-- [ ] **Step 1: Request the bot token and register it in `config.json`**
+- [ ] **Step 1: Confirm `config.json` is ready**
 
-Ask the human partner for the Telegram bot token they said was ready. Add it to `~/.claude/mirza-bots/config.json` (created in Tahap 1's live check) as `bots["bot-01"].token`, and confirm `allowFrom` contains the human partner's real Telegram user id (they can get this from `@userinfobot` on Telegram if unknown).
+The human partner already provided two real bot tokens and their Telegram user id during this planning session (2026-07-30), registered at `~/.claude/mirza-bots/config.json` as `bot-01` (token ending `...zmnHx_w`, `home: /Users/mirza/Workspace/mirza-bots`) and `bot-02` (token ending `...G8xiUbY`, `home: /Users/mirza/Workspace/mirza-bots-02`). Before proceeding:
+- Confirm `bot-02`'s `home` folder actually exists on disk (`/Users/mirza/Workspace/mirza-bots-02`) — it did not exist when this entry was written and was a placeholder guess. If the human partner intends a different folder for `bot-02`'s Claude Code session, update `config.json` to match before continuing; identity binding (Task 3/6's `hello`) requires an exact string match against whatever `cwd` that session reports.
+- This task's live checks below only require `bot-01` — `bot-02` exists so a second bot is ready for whenever bot-to-bot scenarios (Tahap 5) are tested, not something this task needs to exercise.
+- Re-verify `allowFrom` still contains the human partner's real Telegram user id.
 
 - [ ] **Step 2: Start `fleetd` for real**
 
@@ -1969,7 +2205,7 @@ cd fleetd
 bun run start
 ```
 
-Confirm via `bun run doctor` (from Tahap 1) that it reports `botCount: 1` and the socket is listening.
+Confirm via `bun run doctor` (from Tahap 1) that it reports `botCount: 2` and the socket is listening.
 
 - [ ] **Step 3: Load `cc-plugin` into a Claude Code session**
 
@@ -1977,14 +2213,21 @@ This requires a **separate** Claude Code session from the one executing this pla
 
 - [ ] **Step 4: Send a real message and observe the round trip**
 
-Ask the human partner to send a text message to their bot on Telegram. Confirm, in order:
+Ask the human partner to send a text message to `bot-01` on Telegram. Confirm, in order:
 1. `fleetd`'s logs show the message was received and allowed through the allowlist gate.
 2. A row appears in `conversations.db` (`bun run` a one-off query, or use `sqlite3 ~/.claude/mirza-bots/conversations.db "SELECT * FROM messages ORDER BY id DESC LIMIT 1"` if `sqlite3` is available).
 3. The Claude Code session with `cc-plugin` loaded shows the message content (via the `notifications/claude/channel` mechanism — ask the human partner to confirm they saw it appear).
 4. Ask that session's AI to reply; confirm the human partner receives the reply on Telegram.
 
-Also send a **photo** and confirm it downloads into `~/.claude/mirza-bots/inbox/bot-01/` and the `messages` row's `attachments` column references it.
+Also send a **photo**, and separately an **album** (multiple photos in one Telegram share action), and confirm: single photo downloads into `~/.claude/mirza-bots/inbox/bot-01/` with the `messages` row's `attachments` referencing it; the album produces exactly ONE new row (not one per photo) with all photos in `attachments`.
 
-- [ ] **Step 5: Report results honestly**
+- [ ] **Step 5: Verify buttons, including the answerCallbackQuery scar-tissue check**
 
-Write a short report (to the plan's SDD workspace, or directly to the human partner if executing inline) stating exactly what was confirmed and what wasn't. If any of the four checks in Step 4 fails, that is real information about a real gap in Tasks 1-9 — do not mark this task complete until all four checks the human partner can observe are confirmed, or the specific failure is understood and reported as a concern rather than silently glossed over.
+Ask that session's AI to call `reply` with `buttons` (e.g. two options). Confirm:
+1. The human partner sees the buttons rendered under the message on Telegram.
+2. They tap one. **Immediately** (not after any delay) the button should stop showing its "loading" state on their Telegram client — this is the human-visible symptom of `ctx.answerCallbackQuery()` actually having been called; if the button spins and never resolves, that is the exact scar-tissue failure this plan's tests were written to catch, and it means something is wrong in Task 6's `callback_query:data` handler that the automated tests missed.
+3. The Claude Code session sees the pressed button's `data` value arrive as a new message (via the same `notifications/claude/channel` path, tagged `kind: "callback"` in its meta).
+
+- [ ] **Step 6: Report results honestly**
+
+Write a short report (to the plan's SDD workspace, or directly to the human partner if executing inline) stating exactly what was confirmed and what wasn't. If any of the checks in Steps 4-5 fails, that is real information about a real gap in Tasks 1-9 — do not mark this task complete until every human-observable check is confirmed, or the specific failure is understood and reported as a concern rather than silently glossed over.
