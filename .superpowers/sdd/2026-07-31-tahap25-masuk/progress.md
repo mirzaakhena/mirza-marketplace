@@ -64,5 +64,11 @@ Task 6: REAL FLAKE FOUND AND FIXED while running this task, unrelated to documen
 Task 6: if the startup order in main() is ever changed so the socket binds before the pollers start, this wait becomes redundant rather than wrong -- leave it, it costs one readdir.
 Task 6: deviation from the brief, deliberate -- the brief's path-escape test asserts `startsWith(resolve(destDir) + "/")` and hardcodes `/tmp`. Rewritten with `sep` and `tmpdir()`: join() emits backslashes on Windows, so the brief's form fails there for reasons unrelated to the escape being blocked. Same W-5 class as Task 0.
 
+Task 7: complete (commit `48197b6`, mirza-bots). Two MCP tools: `read_history` and `search_history`. fleetd 116/116 and cc-plugin 27/27, three consecutive runs each. cc-plugin hits the brief's 27 exactly; fleetd reads +4 over the brief's 112.
+Task 7: K-3 boundary is enforced at ONE place -- `resolveRequestedBot` in main.ts, the only layer that knows who is asking. `getMessagesAround`/`searchMessages` deliberately do NOT default the bot themselves; a default down there would silently change what every existing caller of the module sees.
+Task 7: this also closes B-1 `peek_conversation` ahead of Tahap 6 -- reaching another bot's history is exactly the explicit-`bot`-parameter path. Worth reflecting into the B-1 row when Tahap 6 is planned.
+Task 7: deviation from the brief, same class as Task 0 -- the cc-plugin search-rejection test uses try/catch instead of `expect(...).rejects`, which hangs under bun on Windows when the settle depends on socket I/O.
+Task 7: SCAR-088 note carried over from the brief and worth keeping visible -- history rows contain sender text and the tools hand it to the AI as tool output. That is NOT the scar's case (sender text arriving AS the incoming message being acted on). Do not "fix" it by routing history through `meta`.
+
 Task 0 follow-up: STILL OPEN -- W-3 (socket path limited to ~107 chars, genuinely new) and W-7 (now folded into SCAR-026). Both BUTUH KEPUTUSAN, neither blocks Task 3.
 Task 0 409 check: the test-bot token (8912773865) is a DIFFERENT bot from the one currently serving the live Telegram channel (8690938443), so running fleetd here does NOT contend for the live channel's token. Verified before starting fleetd, not assumed.
