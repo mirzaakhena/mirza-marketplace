@@ -90,10 +90,10 @@ diurutkan dari yang paling mungkin menggigit:
 
 - **Repo dokumen** `mirza-marketplace` — punya remote, **push**. Semua spec,
   plan, BACKLOG, ledger SDD hidup di sini.
-- **Repo kode** `mirza-bots` — sampai handoff ini ditulis **belum punya remote**;
-  user sedang membuatkannya supaya kode bisa sampai ke Windows. Kalau saat kamu
-  membaca ini remote-nya sudah ada, perlakukan normal. Kalau belum, **jangan
-  mengarang remote sendiri** — tanya user.
+- **Repo kode** `mirza-bots` — `git@github.com:mirzaakhena/mirza-bots.git`
+  (remote dibuat 2026-07-31 khusus supaya kode bisa sampai ke mesin ini; 39
+  commit sebelumnya hanya ada di MacBook). Riwayatnya sudah disisir sebelum
+  dipublikasikan: tidak ada token Telegram, API key, maupun berkas kredensial.
 - Kerja langsung di branch `main` (user sudah izinkan eksplisit untuk pekerjaan ini).
 - Kode & komentar **bahasa Inggris**; pesan ke user ikut bahasa user (K-16).
 - `config.json` berisi token **tidak ada di git** (memang desainnya). Mesin
