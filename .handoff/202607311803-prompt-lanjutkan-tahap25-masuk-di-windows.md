@@ -54,7 +54,30 @@ Cara mengeksekusi: skill `superpowers:subagent-driven-development`, satu subagen
 per task, review setelah tiap task, review whole-branch di akhir. Ledger di §0
 adalah sumber kebenaran progres, bukan ingatan percakapan.
 
-## 3. ⚠️ Yang BELUM PERNAH diuji di Windows — periksa ini sebelum menjanjikan apa pun
+## 2b. ⚠️ TASK 0 — Verifikasi portabilitas Windows (kerjakan SEBELUM Task 3)
+
+**Ini task pertama yang harus dituntaskan di mesin ini, bukan sekadar peringatan.**
+Ia tidak ada di rencana asli karena rencana itu ditulis saat pekerjaan masih di
+macOS. Perlakukan seperti task lain: ada kriteria selesai, hasilnya dicatat.
+
+**Kriteria selesai:** ketiga hal di bawah terjawab dengan bukti, dan hasilnya
+ditulis ke `.superpowers/sdd/2026-07-31-tahap25-masuk/progress.md` sebagai baris
+`Task 0: …` plus ke `BACKLOG.md` kalau ada temuan baru (aturan keempat).
+
+1. **`cd fleetd && bun test` — apakah 69 test masih hijau di Windows?**
+   Beberapa test menyalakan `fleetd` sungguhan sebagai proses terpisah, jadi
+   unix socket ikut teruji di sini.
+2. **`cd cc-plugin && bun test` — apakah 22 test masih hijau?**
+3. **Apakah `fleetd` benar-benar bisa menyala?** `cd fleetd && bun run start`
+   lalu `bun run doctor` dari terminal lain. Harus melaporkan `"ok": true`.
+
+**Kalau ada yang merah karena unix socket / path separator: itu temuan
+portabilitas yang nyata dan belum pernah diketahui siapa pun.** Laporkan apa
+adanya ke user, catat ke `BACKLOG.md`, dan **jangan ditambal diam-diam** — kalau
+`fleetd` ternyata tidak bisa jalan di Windows, itu menyentuh keputusan
+arsitektur (K-14), bukan sekadar bug yang bisa di-patch sendiri.
+
+## 3. Detail risiko portabilitas (bahan untuk Task 0)
 
 Seluruh pekerjaan ini lahir dan diuji **hanya di macOS**. Berikut yang berisiko,
 diurutkan dari yang paling mungkin menggigit:
@@ -99,6 +122,14 @@ diurutkan dari yang paling mungkin menggigit:
 - `config.json` berisi token **tidak ada di git** (memang desainnya). Mesin
   Windows perlu diberi token terpisah — file di `~/.claude/mirza-bots/config.json`
   (atau padanan Windows-nya), permission dibatasi ke pemilik saja.
+- ⚠️ **User memakai TOKEN BOT YANG SAMA di mesin ini.** Aturan Telegram:
+  **satu token, satu penanya — penanya kedua ditolak `409 Conflict`**
+  (area-14 §14.1; inilah kelas bug yang melahirkan seluruh desain `fleetd`).
+  Artinya **hanya satu mesin boleh menjalankan `fleetd` untuk token itu pada
+  satu waktu**. `fleetd` di MacBook **sudah dimatikan 2026-07-31 18:35** dan
+  socketnya dilepas, jadi token bebas. Kalau suatu saat bot terlihat "bisu tapi
+  proses jalan normal", **409 adalah tersangka pertama** — periksa apakah ada
+  `fleetd` lain yang masih hidup di mesin lain.
 
 ## 6. Dua scar tissue yang paling mahal kalau dilanggar
 
