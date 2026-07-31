@@ -37,6 +37,38 @@ Satu baris = satu entri keputusan di dokumen sumber (satu baris tabel, atau satu
 
 **Total item di file ini: 313** (41 dari rekonsiliasi area 01-04 + 272 dari ekstraksi area 05-14).
 
+### Tahap 2.5 — pecahan kerja (diputuskan user 2026-07-31)
+
+Tahap 2 dinyatakan "selesai" sebelum file ini ada, lalu rekonsiliasi menemukan
+sisanya masih besar. Sisa itu dipecah jadi tiga sub-proyek supaya tiap satu
+menghasilkan sesuatu yang utuh dan bisa diuji sendiri. **Urutan yang dipilih
+user: MASUK → KELUAR → GUARD.**
+
+| Sub-proyek | Isi | Urutan |
+|---|---|---|
+| **2.5-MASUK** | `message_id`+`metadata` disimpan (akar) · handler `message:document` **berikut** `safeName()` · catch-all lampiran tak didukung · quote-reply masuk (TG-111) · pengerasan album (cap 10, sort by `message_id`, `Promise.allSettled`, aturan caption) · unduh gagal per-item tidak menjatuhkan seluruh pesan | **1** |
+| **2.5-KELUAR** | Konversi CommonMark→MarkdownV2 · mesin chunking · logging balasan ke `conversations.db` (TG-081) · pengiriman lampiran keluar (TG-070/071/079 + TG-069) · quote-reply keluar (TG-077) · hasil `sent (id: N)` (TG-082) · keyboard hanya di chunk terakhir (TG-078) | 2 |
+| **2.5-GUARD** | Typing indicator (TG-103) · config korup → `.corrupt-<ts>` (TG-156) · penegakan permission 0600 file token oleh `fleetd` (SCAR-024) · tool `get_message_by_id` · `peek_conversation` (B-1) | 3 |
+
+**Catatan penamaan:** sub-proyek ini sengaja dinamai MASUK/KELUAR/GUARD, bukan
+A/B/C — "B-N" di repo ini sudah berarti item ledger permintaan fitur, dan
+"antar-bot" adalah Tahap 5. Penamaan A/B/C sempat dipakai dan langsung
+menimbulkan kebingungan.
+
+**Tidak termasuk 2.5** (tetap Tahap 3): semantik tombol — validasi boundary,
+prefiks `ai:`, resolusi label saat tap, hapus keyboard setelah tap, tombol
+"Jelaskan manual" (B-4), penolakan pertanyaan-tanpa-tombol (B-5).
+
+**Sudah ditutup di luar sub-proyek:** permission `config.json` disetel manual ke
+`0600` pada 2026-07-31 (sebelumnya `0644` — token SELURUH armada bisa dibaca
+proses mana pun di mesin itu). Penegakannya oleh kode tetap ada di 2.5-GUARD.
+
+**Kontradiksi FTS5 (Bagian 4 Kelompok B #2) SUDAH TERJAWAB** oleh fakta lapangan,
+2026-07-31: `conversations.db` sungguhan sudah punya tabel `messages_fts` beserta
+ketiga trigger sinkronisasinya — jadi §12.4 ("wajib sejak awal") sudah menang,
+skemanya terbangun di Tahap 1. Yang tersisa untuk Tahap 6 hanya *tool*
+pencariannya. Bukan lagi keputusan terbuka.
+
 ---
 
 ## Bagian 3 — Blokir struktural
