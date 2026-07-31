@@ -22,7 +22,7 @@
 | **Tahap berjalan** | Tahap 2.5 — sub-proyek **MASUK** (kelengkapan jalur pesan masuk) |
 | **Spec aktif** | `docs/superpowers/specs/2026-07-31-tahap25-masuk-design.md` |
 | **Rencana aktif** | `docs/superpowers/plans/2026-07-31-tahap25-masuk.md` |
-| **Status** | Task 1 & 2 SELESAI (kode `c82de8f`, fleetd 69 / cc-plugin 22, review bersih). **Task 0 (verifikasi Windows) SELESAI 2026-07-31** — `fleetd` **jalan di Windows**, `doctor` `"ok": true`; 4 test merah semuanya artefak harness, bukan cacat produk. Lihat Bagian 7. Sisa Task 3-8. |
+| **Status** | Task 1 & 2 SELESAI (kode `c82de8f`, review bersih). **Task 0 (verifikasi Windows) SELESAI 2026-07-31** — `fleetd` **jalan di Windows**, `doctor` `"ok": true`. Temuan harness diperbaiki di `0605ebe` (test-only): **fleetd 69/69, cc-plugin 22/22 hijau di Windows**. Sisa temuan W-3/W-4/W-7 di Bagian 7. Sisa Task 3-8. |
 | **Handoff terakhir** | `.handoff/202607311803-prompt-lanjutkan-tahap25-masuk-di-windows.md` — estafet ke PC Windows |
 | **Selesai terakhir** | Tahap 2 Task 10 (uji live) · B-9 giliran ringkas (`cc-plugin` 0.2.1, terverifikasi hidup) |
 | **Berikutnya setelah MASUK** | 2.5-KELUAR, lalu 2.5-GUARD, lalu Tahap 3 |
@@ -578,9 +578,14 @@ pertama kali di Windows 11 (Bun 1.3.11). **Kesimpulan utama: `fleetd` JALAN di
 Windows.** `bun run src/main.ts` menyala, `bun run doctor` menjawab `"ok": true`,
 socket dan `conversations.db` berfungsi. K-14 tidak tersentuh.
 
-**Hasil test:** fleetd **68/69** hijau (+3 galat teardown), cc-plugin **19/22** hijau.
-Keempat kegagalan fleetd dan ketiga kegagalan cc-plugin **semuanya artefak harness
-uji, bukan cacat kode produk** — masing-masing dibuktikan terpisah di bawah.
+**Hasil test saat pertama dijalankan:** fleetd **68/69** hijau (+3 galat teardown),
+cc-plugin **19/22** hijau. Keempat kegagalan fleetd dan ketiga kegagalan cc-plugin
+**semuanya artefak harness uji, bukan cacat kode produk** — masing-masing dibuktikan
+terpisah di bawah.
+
+**Setelah perbaikan `0605ebe` (test-only, tidak ada berkas `src/` yang disentuh):
+fleetd 69/69 dan cc-plugin 22/22 hijau di Windows**, diverifikasi tiga kali
+berturut-turut. Yang tersisa: **W-3, W-4, W-7** — W-4 satu-satunya cacat kode nyata.
 
 **Fakta akar yang menjelaskan sebagian besar temuan:** di Windows, Bun memakai
 **AF_UNIX asli** (Windows 10 1803+), bukan named pipe. Berkas socket benar-benar
@@ -590,12 +595,13 @@ untuk socket yang hidup.** Ini bukan dugaan: dibuktikan dengan probe langsung.
 
 | ID | Temuan | Sifat | Bukti | Status |
 |---|---|---|---|---|
-| **W-1** | `existsSync()` bohong untuk socket hidup di Windows (`stat` → EACCES). Menjatuhkan gerbang kesiapan `e2e.test.ts:192-206` → **1 test merah nyata**. Juga membuat pembersihan socket basi di `fleetd/src/socket/server.ts:28` jadi no-op permanen di Windows | Test-only | Probe: `readdir` melihat berkas, `existsSync` `false`, `lstat` EACCES. Restart di atas socket basi **diuji dan tetap berhasil** — jadi no-op itu tidak berbahaya | PERLU FIX (ganti gerbang jadi coba-konek, bukan cek berkas) |
-| **W-2** | `rmSync(home, {recursive, force})` di `afterAll` e2e melempar **EBUSY**: `fleetdProc.kill()` kembali sebelum proses anak melepas handle SQLite/socket | Test-only | 3 galat teardown, ketiganya muncul sebagai test `(unnamed)` | PERLU FIX (tunggu `proc.exited` sebelum `rmSync`) |
+| **W-1** | `existsSync()` bohong untuk socket hidup di Windows (`stat` → EACCES). Menjatuhkan gerbang kesiapan `e2e.test.ts:192-206` → **1 test merah nyata**. Juga membuat pembersihan socket basi di `fleetd/src/socket/server.ts:28` jadi no-op permanen di Windows | Test-only | Probe: `readdir` melihat berkas, `existsSync` `false`, `lstat` EACCES. Restart di atas socket basi **diuji dan tetap berhasil** — jadi no-op itu tidak berbahaya | **SELESAI** `0605ebe` — gerbang diganti `readdir()` |
+| **W-2** | `rmSync(home, {recursive, force})` di `afterAll` e2e melempar **EBUSY**: `fleetdProc.kill()` kembali sebelum proses anak melepas handle SQLite/socket | Test-only | 3 galat teardown, ketiganya muncul sebagai test `(unnamed)` | **SELESAI** `0605ebe` — tunggu `proc.exited` sebelum `rmSync` |
 | **W-3** | Path socket dibatasi **~107 karakter** (`sockaddr_un.sun_path` = 108 byte). Lebih dari itu → `Failed to listen`. Path produksi (`~/.claude/mirza-bots/fleetd.sock`, 44 karakter) aman; `MIRZA_BOTS_HOME` yang dalam **tidak** aman | Batas nyata, belum menggigit | Bisect: 101 char OK, 111 char gagal. macOS lebih ketat lagi (104) | BUTUH KEPUTUSAN (validasi panjang path saat start?) |
 | **W-4** | **`fleetd/src/main.ts:308` mencetak `fleetd listening on …` tanpa syarat** — padahal `server.listen()` asinkron, jadi baris itu ikut tercetak saat listen GAGAL. Pesan liveness yang berbohong | **Cacat kode nyata, lintas-platform** | Teramati langsung: `listening on …` lalu `Failed to listen at …` di proses yang sama | PERLU FIX — menyentuh desain alarm `doctor` (celah "fleetd mati diam-diam" di Bagian 0) |
-| **W-5** | 2 test cc-plugin meng-assert pemisah path POSIX (`/tmp/…`, `${home}/.claude/…`); `join()` di Windows menghasilkan `\` | Test-only, kosmetik | `main.test.ts:9,21` | PERLU FIX (assert pakai `join()`, bukan literal) |
-| **W-6** | `await expect(promise).rejects.toThrow()` di `bun test` Windows **tidak pernah settle** bila penyelesaian promise bergantung pada event `close` socket — menggantung tanpa batas (diuji >120 detik). Membuat 1 test cc-plugin merah | Test-only (cacat Bun di Windows) | Kode produksi terbukti BENAR lewat 3 jalur: `bun run` standalone, `bun test` dengan `try/catch`, dan 4 varian buildup — semuanya menolak dengan `connection lost`. Hanya bentuk `expect().rejects` yang gagal | PERLU FIX (pakai `try/catch` di test) |
+| **W-5** | 2 test cc-plugin meng-assert pemisah path POSIX (`/tmp/…`, `${home}/.claude/…`); `join()` di Windows menghasilkan `\` | Test-only, kosmetik | `main.test.ts:9,21` | **SELESAI** `0605ebe` — ekspektasi dibangun dengan `join()` |
+| **W-6** | `await expect(promise).rejects.toThrow()` di `bun test` Windows **tidak pernah settle** bila penyelesaian promise bergantung pada event `close` socket — menggantung tanpa batas (diuji >120 detik). Membuat 1 test cc-plugin merah | Test-only (cacat Bun di Windows) | Kode produksi terbukti BENAR lewat 3 jalur: `bun run` standalone, `bun test` dengan `try/catch`, dan 4 varian buildup — semuanya menolak dengan `connection lost`. Hanya bentuk `expect().rejects` yang gagal | **SELESAI** `0605ebe` — diganti `try/catch` |
+| **W-8** | Konek ke socket yang **belum** ada memancarkan error yang test runner `bun` kaitkan ke test yang sedang berjalan, **sekalipun sudah ada listener `error` yang menanganinya** dan `try/catch` melingkupinya. Di `bun run` (bukan `bun test`) handler yang sama bekerja normal | Test-only (cacat Bun di Windows) | Ditemukan saat memperbaiki W-1: gerbang probe-konek justru menjatuhkan test yang seharusnya ia jaga | DIHINDARI `0605ebe` — gerbang menunggu entri `readdir` dulu, jadi tidak pernah konek ke ruang kosong. Akar di Bun belum dilaporkan ke hulu |
 | **W-7** | `config.json` ber-BOM UTF-8 membuat `fleetd` mati saat start dengan `JSON Parse error: Unrecognized token '﻿'`. Alat Windows (PowerShell `Set-Content -Encoding utf8`) menghasilkan BOM secara default | Jebakan operasional nyata | Teralami langsung saat menyiapkan config uji | BUTUH KEPUTUSAN (strip BOM, atau pesan galat yang menyebut BOM) |
 
 **Yang TIDAK terjadi** (hipotesis yang diuji lalu gugur — dicatat supaya tidak
