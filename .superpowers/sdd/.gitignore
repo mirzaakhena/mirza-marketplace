@@ -1,0 +1,11 @@
+# Was `*` -- dibuat otomatis oleh skill subagent-driven-development supaya
+# workspace-nya jadi scratch yang tidak ikut git.
+#
+# Sengaja dinonaktifkan 2026-07-31: ledger + brief + laporan di sini adalah
+# PETA PEMULIHAN untuk melanjutkan rencana di mesin lain. Selama diignore,
+# sebuah handoff membawa rencananya tapi tidak membawa progresnya -- sesi
+# penerima tidak bisa tahu task mana yang sudah selesai.
+#
+# Yang tetap diabaikan: berkas diff review, karena bisa dibangun ulang dari
+# git kapan saja dan ukurannya besar.
+*.diff

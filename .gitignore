@@ -31,5 +31,8 @@ desktop.ini
 2027-*-*.txt
 
 _notes/
-# SDD orchestration scratch (subagent-driven-development)
-.superpowers/
+# SDD orchestration scratch (subagent-driven-development).
+# NOT ignored on purpose (2026-07-31): the ledger, task briefs, and task
+# reports under .superpowers/sdd/ are the recovery map for resuming a plan
+# on ANOTHER machine. Ignoring them meant a handoff carried the plan but not
+# the progress -- the receiving session could not tell which tasks were done.
