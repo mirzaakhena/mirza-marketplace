@@ -216,3 +216,28 @@ Dibuktikan dengan percakapan Telegram sungguhan, bukan test hijau:
    bukan diam.
 5. Album tetap satu baris, urutannya benar, dan satu foto gagal tidak
    menjatuhkan seluruh pesan.
+
+## 10. Hasil verifikasi §6 — `V-1-partial` (2026-07-31)
+
+**Sumber `session_id` yang dipakai: env var `CLAUDE_CODE_SESSION_ID`, dikirim
+`cc-plugin` lewat `hello`.** V-2 dan V-3 tidak dijalankan — aturan "berhenti di
+kandidat pertama yang berhasil" terpenuhi di V-1.
+
+| Uji | Hasil | Bukti |
+|---|---|---|
+| V-1(a) stabil dalam satu sesi | **YA** | Environment sebuah proses tidak bisa berubah setelah `exec`; satu-satunya cara nilainya berganti adalah proses MCP itu sendiri restart. |
+| V-1(a) berbeda antar sesi | **YA** | Sesi pertama → `1108ee17-fb2f-430b-8e79-b49917762e79`. Setelah user menutup dan membuka sesi baru (proses `cc-plugin` baru, spawn 15:00:57) → `83cfd7e4-ad49-4015-baec-14db592b2c14`. Nilai berbeda. |
+| V-1(b) sama dengan id resume | **TIDAK** | Tidak ada berkas `<id>.jsonl` maupun `"sessionId":"<id>"` untuk kedua nilai di `~/.claude/projects/-Users-mirza-Workspace-mirza-bots/`. Sesi pertama sudah berakhir dan transkripnya tetap tidak pernah muncul dengan nama itu — jadi ini bukan sekadar soal transkrip yang belum ter-flush. |
+
+**Kenapa `V-1-partial` diterima, bukan jatuh ke V-2:** tujuan kolom ini
+(§4) adalah *"sesi Claude Code tempat percakapan berlangsung"* — pembeda
+antar-sesi yang stabil sudah memenuhinya. §8 risiko 2 juga sudah menerima
+sadar bahwa nilainya potret saat koneksi dibuat, dengan kebenaran sesi yang
+otoritatif jadi milik Tahap 4. **Kesetaraan dengan id resume tidak dibutuhkan
+oleh apa pun dalam lingkup ini.**
+
+**Utang yang dicatat untuk Tahap 4:** nilai di kolom `session_id` **tidak bisa
+dipakai untuk `claude --resume`**. Kalau Tahap 4 kelak butuh menautkan
+percakapan ke transkrip yang bisa dilanjutkan, ia perlu sumber lain — jalur
+hook `SessionStart` (V-2, direstui K-10) adalah kandidat berikutnya. Kolomnya
+sudah siap menerima nilai yang lebih baik tanpa migrasi.
