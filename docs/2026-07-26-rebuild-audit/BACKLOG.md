@@ -1,6 +1,84 @@
 # BACKLOG — rebuild fleetd/cc-plugin
 
-**Dibuat:** 2026-07-31
+**Dibuat:** 2026-07-31 · **Terakhir diperbarui:** 2026-07-31
+
+---
+
+# Bagian 0 — MULAI DARI SINI
+
+> **Ini berkas pegangan tunggal untuk seluruh rebuild.** Kalau kamu sesi baru
+> dan cuma diberi satu instruksi ("baca `BACKLOG.md`"), itu memang cukup —
+> segala hal lain yang kamu butuhkan ditunjuk dari sini.
+>
+> Berkas ini **hidup**: ia berubah setiap ada kemajuan. Blok "Kondisi sekarang"
+> di bawah wajib diperbarui setiap sesi yang mengubah keadaan.
+
+## Kondisi sekarang
+
+*(Blok ini yang paling sering basi. Perbarui SEBELUM sesi berakhir.)*
+
+| | |
+|---|---|
+| **Tahap berjalan** | Tahap 2.5 — sub-proyek **MASUK** (kelengkapan jalur pesan masuk) |
+| **Spec aktif** | `docs/superpowers/specs/2026-07-31-tahap25-masuk-design.md` |
+| **Rencana aktif** | `docs/superpowers/plans/2026-07-31-tahap25-masuk.md` |
+| **Status** | Spec disetujui user; rencana implementasi sedang disusun. Belum ada kode 2.5-MASUK yang ditulis. |
+| **Handoff terakhir** | `.handoff/202607301502-prompt-lanjutkan-tahap2-live-check-mirza-bots.md` |
+| **Selesai terakhir** | Tahap 2 Task 10 (uji live) · B-9 giliran ringkas (`cc-plugin` 0.2.1, terverifikasi hidup) |
+| **Berikutnya setelah MASUK** | 2.5-KELUAR, lalu 2.5-GUARD, lalu Tahap 3 |
+
+## Utang yang harus dibayar sebelum tahap berikutnya
+
+*(Hal yang sudah diketahui tapi belum dikerjakan, dan mudah terlupa karena
+bukan bagian dari tahap manapun.)*
+
+- **42 item `BUTUH KEPUTUSAN`** — Bagian 4 & 6. Yang paling mendesak: rumah skill
+  `telegram-conduct` (rumah belasan aturan, tidak dimiliki tahap manapun).
+  Disepakati dibereskan **bersama perencanaan Tahap 3**, bukan lebih awal.
+- **2 kontradiksi antar-dokumen** — Bagian 4 Kelompok B. (Kontradiksi ketiga,
+  FTS5, sudah ditutup 2026-07-31.)
+- **Penegakan permission `0600`** pada `config.json` oleh kode — sudah ditambal
+  manual, penegakannya ada di 2.5-GUARD.
+
+## Peta berkas — apa dibaca kapan
+
+| Berkas | Perannya | Kapan dibaca |
+|---|---|---|
+| **`BACKLOG.md`** (ini) | Checklist induk + kondisi sekarang | **Selalu, pertama** |
+| `docs/superpowers/specs/2026-07-27-fleet-harness-rebuild-design.md` | Arsitektur (`fleetd`/`bot-cc`/`cc-plugin`) + peta 6 tahap (§10) | Saat butuh tahu *kenapa* sesuatu dirancang begitu, atau urutan tahap |
+| `docs/2026-07-26-rebuild-audit/README.md` | Ledger keputusan K-1..K-18 + permintaan B-1..B-10 | Saat menyentuh keputusan lama, atau sebelum memutuskan hal baru yang mungkin sudah diputuskan |
+| `docs/2026-07-26-rebuild-audit/area-01..14-*.md` | Inventaris fitur asli + verdict per fitur | Saat butuh alasan lengkap satu baris backlog |
+| `docs/2026-07-26-rebuild-audit/2026-07-31-rekonsiliasi-tahap1-2-vs-area-01-04.md` | Gap area 01-04 vs kode nyata | Saat mengerjakan Tahap 2.5 |
+| `docs/2026-07-26-rebuild-audit/2026-07-31-ekstraksi-area-05-14.md` | Item area 05-14 (belum disilangkan ke kode) | Saat merencanakan Tahap 3-6 |
+| `docs/superpowers/specs/` + `docs/superpowers/plans/` | Spec & rencana per sub-proyek | Sesuai "Spec/Rencana aktif" di atas |
+| `.handoff/` | Kondisi antar-sesi | Di awal sesi lanjutan |
+| `CLAUDE.md` (root repo) | Aturan repo + checklist rilis plugin lama | Sebelum menyentuh `plugins/**` |
+| `mirza-bots/README.md` | Apa yang benar-benar ada di kode + prosedur pasang/update `cc-plugin` | Sebelum menjalankan atau merilis |
+
+**Repo:** dokumen di `/Users/mirza/Workspace/mirza-marketplace` (punya remote,
+push). Kode di `/Users/mirza/Workspace/mirza-bots` (**tanpa remote** — commit
+lokal saja, jangan pernah `git push` di sana).
+
+**JANGAN dibaca:** `docs/notes/` — sistem lama, tidak relevan.
+
+## Aturan keempat — temuan baru wajib masuk ke sini
+
+Tiga aturan di bawah menjaga item yang **sudah** terdaftar. Aturan ini menjaga
+yang **belum**:
+
+4. **Setiap fitur, gap, atau keputusan yang baru ditemukan dicatat ke berkas ini
+   pada commit yang sama saat ia ditemukan** — sekalipun tidak akan dikerjakan
+   sekarang. Kalau belum jelas milik tahap mana, taruh di Bagian 6 dengan status
+   `BUTUH KEPUTUSAN`; jangan dibuang, jangan ditebak diam-diam.
+
+**Kenapa aturan ini ada:** dua fitur (quote-reply B-10, indikator typing TG-103)
+lolos dari seluruh Tahap 1-2 dan baru ketahuan karena user kebetulan
+mengingatnya — bukan karena ada mekanisme yang menangkapnya. Berkas ini menutup
+risiko itu untuk 313 item yang sudah terdaftar; aturan keempat inilah
+satu-satunya yang menutupnya untuk yang ke-314. **Ia bergantung pada disiplin,
+bukan mekanisme** — jadi ditulis di depan, bukan dikubur di bawah.
+
+---
 
 ## Kenapa file ini ada
 
