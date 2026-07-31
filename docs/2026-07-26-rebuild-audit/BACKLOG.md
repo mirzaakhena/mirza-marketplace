@@ -39,6 +39,17 @@ bukan bagian dari tahap manapun.)*
   FTS5, sudah ditutup 2026-07-31.)
 - **Penegakan permission `0600`** pada `config.json` oleh kode — sudah ditambal
   manual, penegakannya ada di 2.5-GUARD.
+- **⚠️ Celah desain baru (ditemukan 2026-07-31, belum tercatat di mana pun):**
+  spec §5 baris 102 memutuskan `bot-cc` menyalakan `fleetd` **bila belum
+  berjalan** — jadi pemulihannya terjadi **saat bot dibuka**. Itu tidak menutup
+  kasus `fleetd` mati **di tengah jalan sementara bot tetap terbuka**: tidak ada
+  yang menyalakannya lagi sampai user kebetulan membuka bot berikutnya, dan bot
+  yang sedang terbuka jadi bisu **tanpa pemberitahuan apa pun**. Terjadi dua kali
+  nyata pada 2026-07-31. Alarm `doctor` (area-12 §12.5) memang dirancang untuk
+  ini, tapi belum dibangun dan belum jelas siapa yang menjalankannya secara
+  berkala. **Perlu diputuskan bersama perencanaan Tahap 4** (rumah `bot-cc`).
+  Sementara itu: `fleetd` dijalankan manual dari terminal user sendiri, bukan
+  dari sesi Claude Code — proses background sesi ikut mati saat sesi dibersihkan.
 
 ## Peta berkas — apa dibaca kapan
 
