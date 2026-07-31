@@ -604,16 +604,41 @@ dibuat di disk — `readdir` dan `Test-Path` melihatnya — tetapi `stat()` atas
 mengembalikan **`EACCES`**, sehingga **`fs.existsSync()` selalu menjawab `false`
 untuk socket yang hidup.** Ini bukan dugaan: dibuktikan dengan probe langsung.
 
+### ⚠️ Koreksi 2026-07-31 — sebagian "temuan" ini sudah terdaftar sejak awal
+
+Task 0 pertama kali mencatat W-1..W-8 seolah semuanya baru. **Itu keliru.** Spec
+§3.3 sudah memuat daftar scar tissue Windows yang wajib dipasang saat platform itu
+disasar, dan tiga hal di bawah adalah anggotanya — bukan penemuan:
+
+| Yang saya catat | Sebenarnya | Akibat |
+|---|---|---|
+| **W-7** (config ber-BOM membunuh `fleetd`) | **SCAR-026 (CRLF/BOM)** | Bukan temuan baru; sudah diantisipasi sejak audit. Statusnya turun jadi rujukan silang |
+| Penguncian permission `config.json` lewat `icacls` | **SCAR-024** (`chmod` no-op → strategi ACL) | Kebetulan sudah mengikuti strategi yang benar |
+| **W-2** (`rmSync` EBUSY) | Bertetangga **SCAR-022** (retry `renameSync` EPERM/EBUSY untuk antivirus) | Kelas yang sama: handle Windows belum lepas saat operasi berikutnya jalan |
+
+**Yang benar-benar baru tinggal W-1, W-3, W-8** — ketiganya menyangkut AF_UNIX di
+Bun/Windows, yang memang belum ada di daftar §3.3 karena daftar itu lahir dari
+sistem lama yang tidak memakai unix socket.
+
+**Pelajaran prosesnya:** aturan keempat menyuruh mencatat temuan baru, tapi tidak
+menyuruh **memeriksa dulu apakah ia benar-benar baru**. Tiga dari delapan ternyata
+sudah terdaftar. Sebelum menambah baris ke sini, sisir dulu spec §3.3 dan daftar
+SCAR di area-01..14.
+
+**Juga sudah dipatuhi tanpa disadari:** §3.3 melarang menyebar cabang `if (windows)`
+untuk jalur yang belum bisa diuji siapa pun. Perbaikan `0605ebe` dan `b0cc2f5`
+tidak menambahkan satu pun — semuanya netral-platform.
+
 | ID | Temuan | Sifat | Bukti | Status |
 |---|---|---|---|---|
 | **W-1** | `existsSync()` bohong untuk socket hidup di Windows (`stat` → EACCES). Menjatuhkan gerbang kesiapan `e2e.test.ts:192-206` → **1 test merah nyata**. Juga membuat pembersihan socket basi di `fleetd/src/socket/server.ts:28` jadi no-op permanen di Windows | Test-only | Probe: `readdir` melihat berkas, `existsSync` `false`, `lstat` EACCES. Restart di atas socket basi **diuji dan tetap berhasil** — jadi no-op itu tidak berbahaya | **SELESAI** `0605ebe` — gerbang diganti `readdir()` |
-| **W-2** | `rmSync(home, {recursive, force})` di `afterAll` e2e melempar **EBUSY**: `fleetdProc.kill()` kembali sebelum proses anak melepas handle SQLite/socket | Test-only | 3 galat teardown, ketiganya muncul sebagai test `(unnamed)` | **SELESAI** `0605ebe` — tunggu `proc.exited` sebelum `rmSync` |
+| **W-2** | `rmSync(home, {recursive, force})` di `afterAll` e2e melempar **EBUSY**: `fleetdProc.kill()` kembali sebelum proses anak melepas handle SQLite/socket. **Sekelas SCAR-022** (retry EPERM/EBUSY), bukan temuan mandiri | Test-only | 3 galat teardown, ketiganya muncul sebagai test `(unnamed)` | **SELESAI** `0605ebe` — tunggu `proc.exited` sebelum `rmSync` |
 | **W-3** | Path socket dibatasi **~107 karakter** (`sockaddr_un.sun_path` = 108 byte). Lebih dari itu → `Failed to listen`. Path produksi (`~/.claude/mirza-bots/fleetd.sock`, 44 karakter) aman; `MIRZA_BOTS_HOME` yang dalam **tidak** aman | Batas nyata, belum menggigit | Bisect: 101 char OK, 111 char gagal. macOS lebih ketat lagi (104) | BUTUH KEPUTUSAN (validasi panjang path saat start?) |
 | **W-4** | **`fleetd/src/main.ts:308` mencetak `fleetd listening on …` tanpa syarat** — padahal `server.listen()` asinkron, jadi baris itu ikut tercetak saat listen GAGAL. Pesan liveness yang berbohong, dan daemon tetap hidup dalam keadaan tuli | **Cacat kode nyata, lintas-platform** | Teramati langsung: `listening on …` lalu `Failed to listen at …` di proses yang sama. Test regresi tingkat daemon sempat merah persis begitu, berikut proses yang menggantung sampai batas 10 detik | **SELESAI** `b0cc2f5` — `startSocketServer` dapat callback `onListening`/`onListenError` yang di-subscribe **sebelum** `listen()`; `main.ts` mengumumkan dari event, dan pada gagal bind melapor lalu `exit(1)` |
 | **W-5** | 2 test cc-plugin meng-assert pemisah path POSIX (`/tmp/…`, `${home}/.claude/…`); `join()` di Windows menghasilkan `\` | Test-only, kosmetik | `main.test.ts:9,21` | **SELESAI** `0605ebe` — ekspektasi dibangun dengan `join()` |
 | **W-6** | `await expect(promise).rejects.toThrow()` di `bun test` Windows **tidak pernah settle** bila penyelesaian promise bergantung pada event `close` socket — menggantung tanpa batas (diuji >120 detik). Membuat 1 test cc-plugin merah | Test-only (cacat Bun di Windows) | Kode produksi terbukti BENAR lewat 3 jalur: `bun run` standalone, `bun test` dengan `try/catch`, dan 4 varian buildup — semuanya menolak dengan `connection lost`. Hanya bentuk `expect().rejects` yang gagal | **SELESAI** `0605ebe` — diganti `try/catch` |
 | **W-8** | Konek ke socket yang **belum** ada memancarkan error yang test runner `bun` kaitkan ke test yang sedang berjalan, **sekalipun sudah ada listener `error` yang menanganinya** dan `try/catch` melingkupinya. Di `bun run` (bukan `bun test`) handler yang sama bekerja normal | Test-only (cacat Bun di Windows) | Ditemukan saat memperbaiki W-1: gerbang probe-konek justru menjatuhkan test yang seharusnya ia jaga | DIHINDARI `0605ebe` — gerbang menunggu entri `readdir` dulu, jadi tidak pernah konek ke ruang kosong. Akar di Bun belum dilaporkan ke hulu |
-| **W-7** | `config.json` ber-BOM UTF-8 membuat `fleetd` mati saat start dengan `JSON Parse error: Unrecognized token '﻿'`. Alat Windows (PowerShell `Set-Content -Encoding utf8`) menghasilkan BOM secara default | Jebakan operasional nyata | Teralami langsung saat menyiapkan config uji | BUTUH KEPUTUSAN (strip BOM, atau pesan galat yang menyebut BOM) |
+| **W-7** | `config.json` ber-BOM UTF-8 membuat `fleetd` mati saat start dengan `JSON Parse error: Unrecognized token '﻿'`. Alat Windows (PowerShell `Set-Content -Encoding utf8`) menghasilkan BOM secara default | **BUKAN temuan baru — ini SCAR-026 (CRLF/BOM)**, sudah terdaftar di spec §3.3 | Teralami langsung saat menyiapkan config uji; jadi konfirmasi lapangan bahwa SCAR-026 memang masih menggigit | BUTUH KEPUTUSAN — sama seperti sebelumnya (strip BOM, atau pesan galat yang menyebut BOM), tapi dikerjakan sebagai bagian SCAR-026, bukan sebagai item terpisah |
 
 **Yang TIDAK terjadi** (hipotesis yang diuji lalu gugur — dicatat supaya tidak
 diselidiki ulang):
