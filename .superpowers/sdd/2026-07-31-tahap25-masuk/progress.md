@@ -49,5 +49,10 @@ Task 3: fleetd now 82/82, green twice in a row. NOTE ON THE NUMBER -- the brief 
 Task 3: left alone deliberately, per the brief -- `callback_query:data` (a button press is not a reply) and the album flush (Task 5 rewrites that callback, and Telegram attaches a reply to one album member, not to the group).
 Task 3: main.ts changed, so the daemon was booted for real afterwards and `doctor` answered ok:true -- not just unit-tested.
 
+Task 4: complete (commit `a94da07`, mirza-bots). Per-item download tolerance (TG-105): `downloadAll` + `Downloadable`/`DownloadResult` exported from poller.ts, using Promise.allSettled and reading results back in input order. fleetd 85/85, green twice (brief said 81 against the stale baseline; +4 as expected).
+Task 4: TDD note -- the new import of `downloadAll` made the whole test file fail to resolve, which would have masked the two behavioural tests. Added `downloadAll` first WITHOUT wiring it into handleIncomingMessage, re-ran, and confirmed the two behavioural tests were genuinely red on their own before changing the caller. Worth repeating whenever a task's tests import a symbol that does not exist yet.
+Task 4: small deviation from the brief, deliberate -- the brief's snippet keeps `Date.now()` inside the map. Stamped once outside instead: per-item calls can collide within the same millisecond and make filenames non-monotonic. Behaviour otherwise identical.
+Task 4: `failedCount` is returned but only `void`-ed at the call site, exactly as the brief specifies. Task 5 is what turns it into a user-visible notice for albums -- if Task 5 changes shape, this dangling value is the loose end to check.
+
 Task 0 follow-up: STILL OPEN -- W-3 (socket path limited to ~107 chars, genuinely new) and W-7 (now folded into SCAR-026). Both BUTUH KEPUTUSAN, neither blocks Task 3.
 Task 0 409 check: the test-bot token (8912773865) is a DIFFERENT bot from the one currently serving the live Telegram channel (8690938443), so running fleetd here does NOT contend for the live channel's token. Verified before starting fleetd, not assumed.
