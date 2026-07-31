@@ -21,6 +21,16 @@
 
 This plugin bridges a Telegram bot to a Claude Code session via an MCP server (Bun + grammy). The bot logs in with your token, polls for incoming messages, and forwards every DM/group message as a `<channel>` notification to the paired session. Outbound: the AI can `reply`, `react`, `edit_message`, `download_attachment`, and render inline-keyboard buttons.
 
+### Terse turns (`[protocol: terse-turn]`)
+
+Someone chatting over Telegram is away from the terminal and will essentially never read the session transcript — so prose written there is duplicated work that costs tokens on every later turn of the session.
+
+Every inbound notification is therefore prefixed with `[protocol: terse-turn]`, and the server's MCP `instructions` teach the AI what it means: say everything through the `reply` tool, then end the turn with a single `.` — no restating, no summarizing.
+
+The prefix rides on the message rather than a session flag, which is what keeps the protocol scoped correctly: **turns you type directly into the terminal never carry it and are answered in full**, because there the transcript is the only thing you see. An earlier session-wide flag went sticky — once a session had seen one Telegram message, terminal-typed turns were misclassified too.
+
+It is an instruction, not an enforced rule. If the AI ignores it nothing breaks: you simply get the old verbose transcript back, while `reply` still delivers normally.
+
 ## Prerequisites
 
 - [Bun](https://bun.sh) — the MCP server runs on Bun. Install via `curl -fsSL https://bun.sh/install | bash`.

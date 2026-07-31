@@ -499,6 +499,19 @@ function chunk(text: string, limit: number, mode: 'length' | 'newline'): string[
 // everything else goes as documents (raw file, no compression).
 const PHOTO_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp'])
 
+// The single copy of this contract: the marker stamped onto every inbound
+// Telegram notification, and the marker `instructions` below teaches the AI to
+// recognize. Two literals would drift apart silently — the AI would keep looking
+// for a marker that no longer arrives, and nothing anywhere would error.
+//
+// Prefixing the notification content is what scopes the protocol to
+// Telegram-driven turns, with no flag and no state: turns the user types
+// straight into the terminal never pass through these notifications at all.
+// A session-wide `telegramDriven` flag was tried before and went sticky — once a
+// session had seen one Telegram message, terminal-typed turns were misclassified
+// too. Carrying the signal on the message itself cannot have that bug.
+const TERSE_TURN_MARKER = '[protocol: terse-turn]'
+
 const mcp = new Server(
   { name: 'telegram', version: '1.0.0' },
   {
@@ -516,6 +529,10 @@ const mcp = new Server(
     },
     instructions: [
       'The sender reads Telegram, not this session. Anything you want them to see must go through the reply tool — your transcript output never reaches their chat.',
+      '',
+      `When an incoming message is prefixed with ${TERSE_TURN_MARKER}, do not write prose in that turn. Say everything you have to say through the reply tool, then end the turn with a single "." and nothing else. Never restate, summarize, or explain in the transcript what you already sent via reply — nobody reads it, and it keeps costing tokens on every later turn of the session.`,
+      '',
+      'This applies only to turns carrying that prefix. Turns the user types directly into this terminal are ordinary turns — answer those in full, as usual, because there the transcript is the only thing they see.',
       '',
       'Messages from Telegram arrive as <channel source="telegram" chat_id="..." message_id="..." user="..." ts="...">. If the tag has an image_path attribute, Read that file — it is a photo the sender attached. If the tag has attachment_file_id, call download_attachment with that file_id to fetch the file, then Read the returned path. Reply with the reply tool — pass chat_id back. Use reply_to (set to a message_id) only when replying to an earlier message; the latest message doesn\'t need a quote-reply, omit reply_to for normal responses.',
       '',
@@ -1363,7 +1380,7 @@ bot.on('callback_query:data', async ctx => {
     void mcp.notification({
       method: 'notifications/claude/channel',
       params: {
-        content: tappedLabel ? `[button tapped: ${tappedLabel}]` : `[button tapped]`,
+        content: `${TERSE_TURN_MARKER}\n${tappedLabel ? `[button tapped: ${tappedLabel}]` : `[button tapped]`}`,
         meta: {
           chat_id,
           callback_id: aiParsed.callback_id,
@@ -1791,7 +1808,7 @@ async function handleInboundAlbum(
   mcp.notification({
     method: 'notifications/claude/channel',
     params: {
-      content: combinedCaption,
+      content: `${TERSE_TURN_MARKER}\n${combinedCaption}`,
       meta: {
         chat_id,
         message_id: String(firstMsgId),
@@ -1924,7 +1941,7 @@ async function handleInbound(
   mcp.notification({
     method: 'notifications/claude/channel',
     params: {
-      content: text,
+      content: `${TERSE_TURN_MARKER}\n${text}`,
       meta: {
         chat_id,
         ...(msgId != null ? { message_id: String(msgId) } : {}),
