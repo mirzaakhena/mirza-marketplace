@@ -62,6 +62,7 @@ bukan bagian dari tahap manapun.)*
 | `docs/2026-07-26-rebuild-audit/2026-07-31-rekonsiliasi-tahap1-2-vs-area-01-04.md` | Gap area 01-04 vs kode nyata | Saat mengerjakan Tahap 2.5 |
 | `docs/2026-07-26-rebuild-audit/2026-07-31-ekstraksi-area-05-14.md` | Item area 05-14 (belum disilangkan ke kode) | Saat merencanakan Tahap 3-6 |
 | `docs/superpowers/specs/` + `docs/superpowers/plans/` | Spec & rencana per sub-proyek | Sesuai "Spec/Rencana aktif" di atas |
+| ⚠️ `.superpowers/sdd/2026-07-31-tahap25-masuk/` | Ledger progres + brief tiap task | Sebelum mengerjakan task. **Ada DUA set `task-N-brief.md` bernama identik** — yang benar ada di folder ini; yang di `.superpowers/sdd/` (root) sisa proyek lain (`packages/shared`, `bot-03`, "fase 0") dan **tidak terlihat salah**: bentuknya sama persis, lengkap dengan langkah TDD berkotak-centang. Nyaris menjebak 2026-07-31. Selalu buka dengan path lengkap |
 | `.handoff/` | Kondisi antar-sesi | Di awal sesi lanjutan |
 | `CLAUDE.md` (root repo) | Aturan repo + checklist rilis plugin lama | Sebelum menyentuh `plugins/**` |
 | `mirza-bots/README.md` | Apa yang benar-benar ada di kode + prosedur pasang/update `cc-plugin` | Sebelum menjalankan atau merilis |

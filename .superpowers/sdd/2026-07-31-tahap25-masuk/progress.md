@@ -1,5 +1,21 @@
 # SDD ledger — plan: /Users/mirza/Workspace/mirza-marketplace/docs/superpowers/plans/2026-07-31-tahap25-masuk.md
 
+> ## ⚠️ READ THIS BEFORE OPENING ANY BRIEF
+>
+> **There are TWO sets of `task-N-brief.md` in this repo, with identical filenames.**
+>
+> - ✅ **Correct:** `.superpowers/sdd/2026-07-31-tahap25-masuk/task-N-brief.md` — this folder
+> - ❌ **Stale:** `.superpowers/sdd/task-N-brief.md` — repo root of `sdd/`, left over from an
+>   unrelated project (`packages/shared`, `bot-03`, "fase 0", a 9-table SQLite draft)
+>
+> The stale ones are **not** obviously wrong. They are well-formed TDD briefs with
+> the same structure, the same checkbox steps, the same tone. Opening
+> `.superpowers/sdd/task-3-brief.md` on 2026-07-31 produced a fully plausible brief
+> for building a SQLite schema in `packages/shared` — a package that does not exist
+> in `mirza-bots` at all. Nothing about it announces that it belongs elsewhere.
+>
+> Always open briefs by their FULL path including `2026-07-31-tahap25-masuk/`.
+
 Code repo: /Users/mirza/Workspace/mirza-bots (no remote — local commits only)
 Branch: main (human partner consented; same as B-9 execution earlier this session)
 MERGE_BASE for final review: fbe7543
