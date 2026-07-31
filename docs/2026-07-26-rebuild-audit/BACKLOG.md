@@ -22,7 +22,7 @@
 | **Tahap berjalan** | Tahap 2.5 — sub-proyek **MASUK** (kelengkapan jalur pesan masuk) |
 | **Spec aktif** | `docs/superpowers/specs/2026-07-31-tahap25-masuk-design.md` |
 | **Rencana aktif** | `docs/superpowers/plans/2026-07-31-tahap25-masuk.md` |
-| **Status** | Task 1 & 2 SELESAI (kode `c82de8f`, review bersih). **Task 0 (verifikasi Windows) SELESAI 2026-07-31** — `fleetd` **jalan di Windows**, `doctor` `"ok": true`. Temuan harness diperbaiki di `0605ebe` (test-only), cacat kode W-4 diperbaiki di `b0cc2f5`. **fleetd 73/73, cc-plugin 22/22 hijau di Windows** (baseline naik 69 → 73). Sisa W-3 & W-7 di Bagian 7, dua-duanya tidak memblokir. Sisa Task 3-8. |
+| **Status** | Task 1 & 2 SELESAI (kode `c82de8f`, review bersih). **Task 0 (verifikasi Windows) SELESAI 2026-07-31** — `fleetd` **jalan di Windows**, `doctor` `"ok": true`. Temuan harness diperbaiki di `0605ebe` (test-only), cacat kode W-4 diperbaiki di `b0cc2f5`. **Task 3 (quote-reply masuk, TG-111) SELESAI** — `8009178`, fleetd **82/82**, cc-plugin 22/22 hijau di Windows. ⚠️ Brief Task 4-7 menyebut target test dari baseline lama 69; baseline sesungguhnya 73, jadi **semua angka target di brief tersisa harus dibaca +4**. Sisa W-3 & W-7 di Bagian 7, dua-duanya tidak memblokir. Sisa Task 4-8. |
 | **Handoff terakhir** | `.handoff/202607311803-prompt-lanjutkan-tahap25-masuk-di-windows.md` — estafet ke PC Windows |
 | **Selesai terakhir** | Tahap 2 Task 10 (uji live) · B-9 giliran ringkas (`cc-plugin` 0.2.1, terverifikasi hidup) |
 | **Berikutnya setelah MASUK** | 2.5-KELUAR, lalu 2.5-GUARD, lalu Tahap 3 |
