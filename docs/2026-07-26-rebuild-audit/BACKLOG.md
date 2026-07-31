@@ -22,8 +22,8 @@
 | **Tahap berjalan** | Tahap 2.5 — sub-proyek **MASUK** (kelengkapan jalur pesan masuk) |
 | **Spec aktif** | `docs/superpowers/specs/2026-07-31-tahap25-masuk-design.md` |
 | **Rencana aktif** | `docs/superpowers/plans/2026-07-31-tahap25-masuk.md` |
-| **Status** | Spec **dan** rencana selesai (8 task, 88 langkah). Belum ada kode 2.5-MASUK yang ditulis. Task 1 (verifikasi sumber `session_id`) **butuh partisipasi user** — buka sesi baru, baca `/status`. |
-| **Handoff terakhir** | `.handoff/202607301502-prompt-lanjutkan-tahap2-live-check-mirza-bots.md` |
+| **Status** | Task 1 & 2 SELESAI (kode `c82de8f`, fleetd 69 / cc-plugin 22, review bersih). Sisa Task 3-8. Pekerjaan **berpindah ke PC Windows** — lihat handoff terakhir; portabilitas unix socket `fleetd.sock` **belum pernah diuji di sana**. |
+| **Handoff terakhir** | `.handoff/202607311803-prompt-lanjutkan-tahap25-masuk-di-windows.md` — estafet ke PC Windows |
 | **Selesai terakhir** | Tahap 2 Task 10 (uji live) · B-9 giliran ringkas (`cc-plugin` 0.2.1, terverifikasi hidup) |
 | **Berikutnya setelah MASUK** | 2.5-KELUAR, lalu 2.5-GUARD, lalu Tahap 3 |
 
