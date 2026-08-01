@@ -258,10 +258,17 @@ dan dari pemanggilan langsung `read_history` / `search_history`, bukan dari test
 | 4 | Navigasi riwayat (§9.2, paling menentukan) | ✅ **TERKONFIRMASI** | Baris #9 adalah permintaannya ("Setelah pesan dari message ini apa saja yang baru kita obrolkan"), baris #10 adalah user memastikan AI menjawabnya ("Wah mantap! Kamu bisa telusuri pesanku ya.."). Diulang manual: `read_history(38, after=3)` mengembalikan anchor + 3 pesan berikutnya, urut kronologis |
 | 5 | Pencarian kata kunci, bot sendiri | ✅ **TERKONFIRMASI** | `search_history("berkenalan")` mengembalikan tepat satu baris, `bot=bot-01` |
 | 6 | Pencarian lintas bot | ⬜ **BELUM DIUJI** | Mesin ini hanya punya satu bot di `config.json`. Tidak bisa diuji di sini, dan **tidak boleh dianggap lolos** hanya karena #5 lolos |
-| 7 | Kirim PDF dan `.md` | ⬜ **BELUM DIUJI — dilewati atas keputusan user** | Tidak ada baris ber-`attachments` di database |
+| 7 | Kirim PDF dan `.md` | ✅ **TERKONFIRMASI 2026-08-01, dengan satu catatan** | User: *"kirim PDF: OK"*. Berkasnya terunduh ke `inbox/bot-01/` dan AI mendapat path-nya. **Tapi membaca isinya gagal di jalur bawaan**: `pdftoppm` (poppler-utils) tidak terpasang di mesin ini — dependensi lingkungan, bukan celah kode. Lihat **U-6** |
 | 8 | Dokumen >20 MB | ⬜ **BELUM DIUJI — dilewati atas keputusan user** | — |
-| 9 | Album 3 foto | ⬜ **BELUM DIUJI — dilewati atas keputusan user** | — |
+| 9 | Album 3 foto | ✅ **TERKONFIRMASI 2026-08-01** | User: *"kirim album 3 foto: OK"* |
 | 10 | Album >10 foto | ⬜ **BELUM DIUJI — dilewati atas keputusan user** | — |
+
+**Uji lanjutan 2026-08-01 (di luar sepuluh kriteria asli):**
+
+| Hal | Status | Bukti |
+|---|---|---|
+| **U-2** keyboard dicopot setelah ditap | ✅ **TERKONFIRMASI** | User: *"tombol hilang saat saya klik"*. Ini menutup satu-satunya batas yang tersisa dari `90d9b0a`, yang saat itu **belum pernah menyentuh Telegram sungguhan** |
+| **U-4** orientasi timezone | ✅ **TERKONFIRMASI** | User: *"timezone ok"* |
 
 **Keputusan user 2026-08-01:** #7-#10 **sengaja dilewati**, bukan terlupa —
 *"untuk beberapa test mungkin bisa kita skip saja seperti 7, 8, 9, 10. Kamu boleh
