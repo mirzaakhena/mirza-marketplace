@@ -241,3 +241,44 @@ dipakai untuk `claude --resume`**. Kalau Tahap 4 kelak butuh menautkan
 percakapan ke transkrip yang bisa dilanjutkan, ia perlu sumber lain — jalur
 hook `SessionStart` (V-2, direstui K-10) adalah kandidat berikutnya. Kolomnya
 sudah siap menerima nilai yang lebih baik tanpa migrasi.
+
+---
+
+## 11. Hasil uji live (2026-08-01, Windows 11)
+
+Dijalankan user terhadap bot uji `8912773865`, `fleetd` 0.2.0 + `cc-plugin` 0.3.0.
+Bukti diambil dari `~/.claude/mirza-bots/conversations.db` yang sungguhan (12 baris)
+dan dari pemanggilan langsung `read_history` / `search_history`, bukan dari test.
+
+| # | Kriteria §9 | Status | Bukti |
+|---|---|---|---|
+| 1 | Quote-reply seluruh pesan | ✅ **TERKONFIRMASI** | Baris #6: `reply_to=34`, `metadata` berisi `quote_text` + `quote_is_manual:false` |
+| 2 | Quote-reply seleksi sebagian | ✅ **TERKONFIRMASI** | Baris #8: `quote_text:"ayam lamo"`, `quote_is_manual:true` |
+| 3 | Mengutip pesan bot sendiri | ✅ **TERKONFIRMASI, berikut batasnya** | Baris #6 mengutip kalimat bot sendiri dan teksnya sampai. `read_history("34")` mengembalikan kosong — balasan bot memang belum disimpan sampai 2.5-KELUAR. **Sesuai rancangan, bukan cacat** |
+| 4 | Navigasi riwayat (§9.2, paling menentukan) | ✅ **TERKONFIRMASI** | Baris #9 adalah permintaannya ("Setelah pesan dari message ini apa saja yang baru kita obrolkan"), baris #10 adalah user memastikan AI menjawabnya ("Wah mantap! Kamu bisa telusuri pesanku ya.."). Diulang manual: `read_history(38, after=3)` mengembalikan anchor + 3 pesan berikutnya, urut kronologis |
+| 5 | Pencarian kata kunci, bot sendiri | ✅ **TERKONFIRMASI** | `search_history("berkenalan")` mengembalikan tepat satu baris, `bot=bot-01` |
+| 6 | Pencarian lintas bot | ⬜ **BELUM DIUJI** | Mesin ini hanya punya satu bot di `config.json`. Tidak bisa diuji di sini, dan **tidak boleh dianggap lolos** hanya karena #5 lolos |
+| 7 | Kirim PDF dan `.md` | ⬜ **BELUM DIUJI** | Tidak ada baris ber-`attachments` di database |
+| 8 | Dokumen >20 MB | ⬜ **BELUM DIUJI** | — |
+| 9 | Album 3 foto | ⬜ **BELUM DIUJI** | — |
+| 10 | Album >10 foto | ⬜ **BELUM DIUJI** | — |
+
+**Terkonfirmasi di luar daftar:** `session_id` terisi di **seluruh** 12 baris (akar
+Task 1 & 2, hidup). Indeks FTS tersinkron dengan data nyata — 12 baris `messages`,
+12 baris `messages_fts` — jadi `ALTER TABLE` tidak melepaskan indeksnya. Ketiga
+trigger sinkronisasi (`messages_ai`, `messages_ad`, `messages_au`) selamat.
+
+**Enam dari sepuluh belum diuji, dan itu ditulis di sini justru supaya tidak hilang.**
+Semuanya menyangkut lampiran dan lintas-bot. Empat yang lolos adalah empat yang
+paling menentukan bagi 2.5-MASUK — termasuk §9.2, satu-satunya yang membuktikan
+`message_id` berguna dan bukan sekadar tersimpan.
+
+**Temuan baru dari uji ini (W-10, BACKLOG Bagian 7):** user melaporkan sebagian
+pesannya sempat tidak dibalas. Diselidiki dan dibuktikan **bukan** 409 (hanya satu
+proses `fleetd`, dan tokennya berbeda dari bot percakapan lain) serta **bukan**
+`fleetd` menjatuhkan pesan (`bot_inbox` 0 baris, `incidents` 0, ke-12 pesan
+tersimpan dan tersampaikan). Tersangka yang tersisa adalah sesi AI-nya sendiri —
+dan `cc-plugin` **belum punya Stop hook**, penjaga yang di sistem lama memblokir
+sekali bila percakapan Telegram berakhir tanpa `reply`. Protokol terse-turn
+memperburuknya karena "sudah membalas lalu tutup dengan titik" dan "lupa membalas
+lalu tutup dengan titik" jadi tak terbedakan dari luar.
