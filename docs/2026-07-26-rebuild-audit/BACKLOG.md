@@ -19,11 +19,11 @@
 
 | | |
 |---|---|
-| **Tahap berjalan** | Tahap 2.5 — sub-proyek **MASUK** (kelengkapan jalur pesan masuk) |
+| **Tahap berjalan** | Tahap 2.5 — **MASUK SELESAI** (kode + rilis + uji live sebagian). Berikutnya **KELUAR**, tapi pertimbangkan **W-10** dulu |
 | **Spec aktif** | `docs/superpowers/specs/2026-07-31-tahap25-masuk-design.md` |
 | **Rencana aktif** | `docs/superpowers/plans/2026-07-31-tahap25-masuk.md` |
 | **Status** | Task 1 & 2 SELESAI (kode `c82de8f`, review bersih). **Task 0 (verifikasi Windows) SELESAI 2026-07-31** — `fleetd` **jalan di Windows**, `doctor` `"ok": true`. Temuan harness diperbaiki di `0605ebe` (test-only), cacat kode W-4 diperbaiki di `b0cc2f5`. **Task 3 (quote-reply masuk, TG-111) SELESAI** — `8009178`. **Task 4 (toleransi unduhan gagal, TG-105) SELESAI** — `a94da07`. **Task 5 (pengerasan album) SELESAI** — `1123446`. **Task 6 (handler dokumen) SELESAI** — `300bf0c`. **Task 7 (dua tool MCP: `read_history` + `search_history`) SELESAI** — `48197b6`; ini juga **menutup B-1 `peek_conversation`** lebih awal dari Tahap 6. fleetd **116/116**, cc-plugin **27/27** hijau di Windows. Sisa W-3, W-7, W-9 di Bagian 7, ketiganya tidak memblokir. **Sisa hanya Task 8** (rilis + uji live bersama user — butuh user, tidak bisa didelegasikan). |
-| **Handoff terakhir** | `.handoff/202607311803-prompt-lanjutkan-tahap25-masuk-di-windows.md` — estafet ke PC Windows |
+| **Handoff terakhir** | `.handoff/202608010131-status-tahap25-masuk-selesai-di-windows.md` — 2.5-MASUK selesai, sisa 5 pemeriksaan live + W-10 |
 | **Selesai terakhir** | Tahap 2 Task 10 (uji live) · B-9 giliran ringkas (`cc-plugin` 0.2.1, terverifikasi hidup) |
 | **Berikutnya setelah MASUK** | 2.5-KELUAR, lalu 2.5-GUARD, lalu Tahap 3 |
 
