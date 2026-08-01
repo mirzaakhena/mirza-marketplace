@@ -1,6 +1,6 @@
 ---
 name: inline-buttons
-description: MANDATORY before sending every Telegram reply. Self-audit your reply - is it a QUESTION (ends with "?", offers options, asks confirmation) or just an ANSWER? Question means you MUST attach the reply tool's `buttons` parameter - minimum Yes/No plus a final "✏️ Explain manually" fallback. Labels stay SHORT - narrate options as a numbered list in the body, buttons are just the numbers. Never send a bare question as plain text.
+description: MANDATORY before sending every Telegram reply. Self-audit your reply - can the answer you want be PICKED FROM A SHORT LIST (a confirmation, or a menu of 2-4 options)? If yes, you MUST attach the reply tool's `buttons` parameter, ending with an "✏️ Explain manually" fallback. If the answer is prose - an opinion, an explanation, anything open-ended - send it WITHOUT buttons. A question mark alone is not the trigger. Labels stay SHORT - narrate options as a numbered list in the body, buttons are just the numbers.
 ---
 
 # Inline Buttons (Telegram)
@@ -10,26 +10,32 @@ question you send must be answerable with **one tap**.
 
 ## THE SELF-AUDIT (run before EVERY Telegram reply)
 
-Before calling `reply` (or `edit_message`), classify the reply you just
-composed. There are only two kinds:
+Before calling `reply` (or `edit_message`), ask **one** question about the
+reply you just composed:
 
-1. **ANSWER** — it informs, reports, confirms done. It does not ask anything.
-   → send as-is, no buttons.
-2. **QUESTION** — it ends by asking or offering. Markers (any ONE is enough):
-   - Text ends with `?`
-   - Phrases like "want X or Y", "continue?", "pick", "confirm",
-     "OK / Cancel", "yes / no", "should I X or Y", "agree?"
-   - A menu / list of choices you invite the user to pick from
-   → **MUST attach the `buttons` parameter. No exceptions.**
+> **Can the answer I want be picked from a short list?**
 
-This is mechanical classification, not judgement. You are not asking
-"would buttons be nicer?" — you are labeling the reply QUESTION or ANSWER.
-Every QUESTION without buttons is a violation.
+- **YES** → attach `buttons`. Two shapes qualify:
+  - a **confirmation** — "should I do X?", where yes/no genuinely settles it
+  - a **menu** — 2–4 options you can name, where picking one decides what
+    happens next
+- **NO** → send it **without buttons**. The answer is prose: an opinion, an
+  explanation, a preference you cannot enumerate, or a question you asked to
+  understand rather than to branch.
 
-**Minimum button set for any question is `✅ Yes / ❌ No` + manual
-fallback.** If you can't enumerate the answers, you can ALWAYS at least
-offer yes/no framing plus the manual escape — a bare text question is
-never the right call.
+**A question mark is NOT the trigger.** The old rule was "ends with `?` →
+buttons, no exceptions", and it fired constantly on questions whose real
+answer was a paragraph. The user's verdict, 2026-08-01: *"cukup mengganggu
+juga kalau setiap saat keluar buttons."* Buttons on an open question do not
+help — they offer a tap where no tap can express the answer, and they train
+the user to ignore the keyboard.
+
+**When in doubt, ask yourself what a correct answer looks like.** If you can
+write it as 2–4 labels, use buttons. If you would have to write a sentence,
+do not.
+
+**Do not "reframe as yes/no" just to earn buttons.** Flattening a real
+question into a false binary is worse than sending it as text.
 
 ### How to populate the buttons
 
@@ -37,7 +43,7 @@ never the right call.
 |---|---|
 | Confirmation (yes/no, OK/cancel) | `✅ Yes` / `❌ No` + `✏️ Explain manually` last |
 | Enumerable (A/B/C, options have real descriptions) | **numbered-narration layout** (see below) + `✏️ Explain manually` last |
-| Open-ended ("what's the best way to...?") | seed options via numbered narration if any make sense; reframe as yes/no when possible; ALWAYS `✏️ Explain manually` last (the manual button alone is fine) |
+| Open-ended ("what's the best way to...?", "what do you think?") | **No buttons at all.** Send it as text and let them answer in their own words |
 
 ## MANDATORY LAYOUT: Short labels + numbered narration
 
@@ -88,8 +94,11 @@ Layout rules:
 
 **Every prompt that shows buttons MUST include, as its LAST button, an
 escape hatch labelled `✏️ Explain manually` with `callback_id: "manual"`.
-No exceptions — yes/no confirmations, single-select menus, and open-ended
-questions alike.**
+No exceptions — confirmations and menus alike.**
+
+(This applies to prompts that *have* buttons. An open-ended question gets no
+buttons at all, so it needs no fallback either — the whole message is already
+free-form.)
 
 It is the option to step OUT of every option you offered:
 - The options may be incomplete or all wrong
@@ -166,13 +175,13 @@ Buttons:
 
 ## Hard Rules
 
-1. **Self-audit every reply: QUESTION or ANSWER.** Question → buttons,
-   minimum yes/no + manual. Mechanical, no judgement.
-2. **Open-ended questions still get buttons** — at minimum the manual
-   button; better, reframe to seed options or yes/no.
+1. **Self-audit every reply: can the answer be picked from a short list?**
+   Yes → buttons. No → plain text.
+2. **Open-ended questions get NO buttons.** Do not bolt on a lone manual
+   button "just in case", and do not flatten the question into a false
+   yes/no to make buttons fit.
 3. **Don't ask "obvious yes" questions at all.** "Continue?" after a trivial
-   step is noise — just proceed. (The rule is "don't ask", not "ask without
-   buttons". If you DO ask, buttons are mandatory.)
+   step is noise — just proceed.
 4. **Destructive operations**: spell out the action in the message body,
    not just the button label ("I'm about to delete folder X (irreversible).
    OK?" + [Yes, delete][Cancel][manual]).
@@ -183,9 +192,11 @@ Buttons:
 
 ## Anti-patterns
 
-❌ End a reply with a bare question and no buttons (the #1 violation).
+❌ **Buttons on a question whose answer is a paragraph** — the failure the
+   user actually complained about. A tap cannot carry an opinion.
+❌ Reframing a real question as yes/no purely so buttons become applicable.
 ❌ "Pick A / B / C / D" as a text list with NO buttons at all.
-❌ Buttons without the `✏️ Explain manually` last row (#2 violation).
+❌ Buttons without the `✏️ Explain manually` last row.
 ❌ Long descriptive button labels ("✅ Execute all (default)") — they
    truncate on phones; narrate in body, label with a number.
 ❌ Repeating the buttons as text at the end of the body ("... 2. Not
@@ -193,8 +204,9 @@ Buttons:
    `[1] [2]` is duplication. Body stops after the numbered list/question.
 ❌ Two long-labelled buttons squeezed into one row.
 ❌ "OK?" + [Yes][No] with an ambiguous body — spell out the action.
-✅ Classify QUESTION vs ANSWER before every send.
-✅ Minimum yes/no + manual on every question, even rhetorical-feeling ones.
+✅ Ask "can the answer be picked from a short list?" before every send.
+✅ Confirmations and 2–4 option menus → buttons, manual fallback last.
+✅ Opinions, explanations, anything open-ended → plain text, no keyboard.
 ✅ Numbered narration in body + one row of numeric buttons + manual last.
 
 ## Pairs With `immediate-reply`
@@ -202,7 +214,7 @@ Buttons:
 Order of the two pre-flight checks when both apply:
 1. Inbound arrives → `immediate-reply` check first (ack before tools).
 2. Work happens.
-3. Final reply composed → `inline-buttons` self-audit (QUESTION → buttons).
+3. Final reply composed → `inline-buttons` self-audit (pickable answer → buttons).
 
 If formulating the options needs research: ack first ("🤔 Hang on, thinking
 through the options..."), research, then `edit_message`/new reply with buttons.
@@ -212,6 +224,6 @@ through the options..."), research, then `edit_message`/new reply with buttons.
 | Situation | Buttons |
 |---|---|
 | "Continue?" / "OK?" / "Agree?" | ✅ Yes / ❌ No + ✏️ manual |
-| Menu of options | numbered list in body; buttons = one row of `1` `2` `3`… + ✏️ manual (body does NOT repeat the row as text) |
-| Open-ended question | seed options (numbered) or yes/no + ✏️ manual |
-| Reply is pure ANSWER (no ask) | no buttons |
+| Menu of 2–4 options | numbered list in body; buttons = one row of `1` `2` `3`… + ✏️ manual (body does NOT repeat the row as text) |
+| Open-ended question ("what do you think?") | **no buttons** — plain text |
+| Reply informs and asks nothing | no buttons |

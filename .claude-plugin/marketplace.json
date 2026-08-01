@@ -20,7 +20,7 @@
     },
     {
       "name": "inline-buttons",
-      "description": "Behavioral skill that forces a self-audit before every Telegram reply: replies that ask a question MUST carry inline-keyboard buttons — minimum Yes/No plus a final manual-fallback button — so the user answers with one tap. Labels stay short: options are narrated as a numbered list in the body, buttons are just the numbers, and the body never repeats the button row as text. Requires telegram >= 0.0.9-mirza.0.",
+      "description": "Behavioral skill that forces a self-audit before every Telegram reply: replies whose answer can be PICKED FROM A SHORT LIST (a confirmation, or a menu of 2-4 options) MUST carry inline-keyboard buttons — minimum Yes/No plus a final manual-fallback button — so the user answers with one tap. Labels stay short: options are narrated as a numbered list in the body, buttons are just the numbers, and the body never repeats the button row as text. Open-ended questions get NO buttons at all -- a tap cannot carry an opinion, and the old ends-with-a-question-mark trigger fired constantly on questions whose real answer was a paragraph. Requires telegram >= 0.0.9-mirza.0.",
       "category": "productivity",
       "source": "./plugins/inline-buttons"
     },

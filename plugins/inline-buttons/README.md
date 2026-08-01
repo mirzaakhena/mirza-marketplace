@@ -1,27 +1,39 @@
 # inline-buttons
 
-A skill-only plugin that forces Claude to run a **self-audit** before sending every Telegram reply: is this reply a **QUESTION** or just an **ANSWER**? If it's a question → it must use inline-keyboard buttons, so the user can answer with **one tap** — not typing.
+A skill-only plugin that forces Claude to run a **self-audit** before sending every Telegram reply: **can the answer I want be picked from a short list?** If yes → inline-keyboard buttons, so the user answers with **one tap**. If no → plain text.
 
 This plugin has no MCP server, no commands, just a single skill: `inline-buttons`.
 
 ## Why
 
-Users read Telegram on their phones. Typing "B" or "yes" is friction. If Claude's reply ends with a question or offers choices, the options should show up as buttons. Tap > type.
+Users read Telegram on their phones. Typing "B" or "yes" is friction. When the answer is a choice, it should be a tap.
 
-## Core rule — mechanical self-audit
+## Core rule — one question, asked before every reply
 
-Before sending **every** Telegram reply, Claude classifies the text as one of two kinds:
+> **Can the answer be picked from a short list?**
 
-1. **ANSWER** — informs, reports, confirms done. Doesn't ask anything → send as-is, no buttons.
-2. **QUESTION** — ends by asking or offering. Signals (any single one is enough): text ends with `?`, phrases like "want X or Y" / "continue?" / "pick" / "confirm" / "OK / Cancel" / "yes / no" / "agree?", or there's a menu of choices → the **`buttons` parameter MUST be attached. No exceptions.**
+- **YES** → attach buttons. Two shapes qualify: a **confirmation** (yes/no genuinely settles it) or a **menu** of 2–4 named options.
+- **NO** → send it as plain text. Opinions, explanations, preferences you cannot enumerate: a tap cannot carry them.
 
-**Minimum button set for any question: `✅ Yes / ❌ No` + a manual fallback.** If the answer can't be enumerated, you can at least always offer a yes/no framing plus a manual button — a plain-text question is never the right choice.
+**A question mark is not the trigger.**
 
-This check is deliberately mechanical (classify QUESTION vs ANSWER), not judgement-based ("would buttons be nicer?") — the old version that relied on mid-compose awareness proved to forget exactly at the end of long replies.
+### What changed in 0.0.10, and why
+
+The rule used to be purely mechanical: *"reply ends with `?` → buttons, no exceptions."* That was chosen deliberately, because a judgement-based version had proved to forget exactly at the end of long replies.
+
+It over-corrected. The trigger could not tell *"lanjut Task 8?"* (one tap settles it) from *"menurutmu gimana?"* (the answer is a paragraph), so buttons appeared on nearly every message. The user's verdict, 2026-08-01: *"cukup mengganggu juga kalau setiap saat keluar buttons."*
+
+Buttons on an open question are worse than merely useless — they offer a tap where no tap can express the answer, and the noise trains the user to stop looking at the keyboard at all, including when it *does* matter.
+
+The replacement is still one question with a yes/no answer, so it stays checkable rather than vibes-based. It just asks about the **shape of the answer** instead of the punctuation of the question.
+
+**Do not reframe a real question as yes/no just to make buttons apply** — flattening it into a false binary is worse than sending text.
 
 ## Mandatory: manual fallback button
 
-**EVERY prompt that shows buttons — yes/no, single-select, or open-ended — MUST have a final button labeled `✏️ Explain manually` with `callback_id: "manual"`. No exceptions.**
+**EVERY prompt that shows buttons — confirmation or menu — MUST have a final button labeled `✏️ Explain manually` with `callback_id: "manual"`. No exceptions.**
+
+(An open-ended question shows no buttons, so it needs no fallback: the whole message is already free-form.)
 
 The reasons:
 
@@ -97,7 +109,7 @@ The [`telegram`](../telegram/) plugin (>= `0.0.9-mirza.0`), which exposes the `b
 
 ## Pairs well with
 
-[`immediate-reply`](../immediate-reply/) — the ordering of the two checks when both apply: (1) inbound arrives → check immediate-reply first (ack before tools), (2) work, (3) final reply is composed → inline-buttons self-audit (QUESTION → buttons). If formulating the options needs research first: instant ack ("🤔 Hang on, thinking through the options…"), research, then send the question + `buttons`.
+[`immediate-reply`](../immediate-reply/) — the ordering of the two checks when both apply: (1) inbound arrives → check immediate-reply first (ack before tools), (2) work, (3) final reply is composed → inline-buttons self-audit (pickable answer → buttons). If formulating the options needs research first: instant ack ("🤔 Hang on, thinking through the options…"), research, then send the question + `buttons`.
 
 ## Installation
 
