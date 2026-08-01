@@ -258,10 +258,21 @@ dan dari pemanggilan langsung `read_history` / `search_history`, bukan dari test
 | 4 | Navigasi riwayat (§9.2, paling menentukan) | ✅ **TERKONFIRMASI** | Baris #9 adalah permintaannya ("Setelah pesan dari message ini apa saja yang baru kita obrolkan"), baris #10 adalah user memastikan AI menjawabnya ("Wah mantap! Kamu bisa telusuri pesanku ya.."). Diulang manual: `read_history(38, after=3)` mengembalikan anchor + 3 pesan berikutnya, urut kronologis |
 | 5 | Pencarian kata kunci, bot sendiri | ✅ **TERKONFIRMASI** | `search_history("berkenalan")` mengembalikan tepat satu baris, `bot=bot-01` |
 | 6 | Pencarian lintas bot | ⬜ **BELUM DIUJI** | Mesin ini hanya punya satu bot di `config.json`. Tidak bisa diuji di sini, dan **tidak boleh dianggap lolos** hanya karena #5 lolos |
-| 7 | Kirim PDF dan `.md` | ⬜ **BELUM DIUJI** | Tidak ada baris ber-`attachments` di database |
-| 8 | Dokumen >20 MB | ⬜ **BELUM DIUJI** | — |
-| 9 | Album 3 foto | ⬜ **BELUM DIUJI** | — |
-| 10 | Album >10 foto | ⬜ **BELUM DIUJI** | — |
+| 7 | Kirim PDF dan `.md` | ⬜ **BELUM DIUJI — dilewati atas keputusan user** | Tidak ada baris ber-`attachments` di database |
+| 8 | Dokumen >20 MB | ⬜ **BELUM DIUJI — dilewati atas keputusan user** | — |
+| 9 | Album 3 foto | ⬜ **BELUM DIUJI — dilewati atas keputusan user** | — |
+| 10 | Album >10 foto | ⬜ **BELUM DIUJI — dilewati atas keputusan user** | — |
+
+**Keputusan user 2026-08-01:** #7-#10 **sengaja dilewati**, bukan terlupa —
+*"untuk beberapa test mungkin bisa kita skip saja seperti 7, 8, 9, 10. Kamu boleh
+catat bahwasanya itu belum di test."* #6 tidak bisa diuji karena mesin ini hanya
+punya satu bot. Keempat jalur itu tetap tercakup unit test, tapi **belum pernah
+dibuktikan sampai ke Telegram** — dan itulah yang unit test tidak bisa buktikan.
+
+**Lima catatan user dari uji live ini** dicatat sebagai U-1..U-4 dan W-10 di
+BACKLOG Bagian 7: buttons terlalu sering muncul, keyboard tidak dicopot setelah
+ditap di sistem baru, AI tidak boleh meminta `message_id` ke user, orientasi
+timezone, dan Stop hook yang belum ada di `cc-plugin`.
 
 **Terkonfirmasi di luar daftar:** `session_id` terisi di **seluruh** 12 baris (akar
 Task 1 & 2, hidup). Indeks FTS tersinkron dengan data nyata — 12 baris `messages`,
