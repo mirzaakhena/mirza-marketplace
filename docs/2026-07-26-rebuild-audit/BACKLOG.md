@@ -27,7 +27,7 @@
 | **Status** | Task 0–8 semuanya mendarat (`0605ebe` `b0cc2f5` `8009178` `a94da07` `1123446` `300bf0c` `48197b6` `e26acb9`). Task 7 sekaligus **menutup B-1 `peek_conversation`** lebih awal dari Tahap 6. Sesudahnya, di sesi yang sama: **W-10** Stop hook `cc-plugin` (`91d9df7`), **W-11** BOM (`e0cc2da`), dan keempat catatan user **U-1** buttons (`2d902af`), **U-2** keyboard dicopot (`90d9b0a`), **U-3** larangan minta `message_id`, **U-4** timezone (`c70a9cc`). |
 | **Masih terbuka** | **W-3** batas panjang path socket · **W-7** BOM di `config.json` (= SCAR-026) · **W-9** nama `album_failed_count` menyesatkan · **W-12** flake `messages_fts` di e2e. Keempatnya **tidak memblokir**. Detail + peringatan cara memperbaikinya ada di Bagian 7 |
 | **Belum diuji hidup** | 5 dari 10 kriteria uji live: lintas-bot (tidak bisa — mesin ini hanya punya satu bot), PDF/`.md`, dokumen >20 MB, album 3 foto, album >10 foto. **Plus U-2**, yang belum pernah menyentuh Telegram sungguhan. Lihat `2026-08-01-status-kapabilitas-terverifikasi.md` untuk daftar lengkap ✅/🧪/⬜ |
-| **Handoff terakhir** | `.handoff/202608010131-status-tahap25-masuk-selesai-di-windows.md` ⚠️ **ditulis SEBELUM W-10/W-11/U-1..U-4**, jadi bagian "yang menggantung"-nya sudah basi — blok ini yang lebih baru |
+| **Handoff terakhir** | `.handoff/202608011930-prompt-lanjutkan-mirza-bots-setelah-25-masuk.md` — estafet ke bot-02, memuat blocker keputusan user soal auto-start `fleetd` |
 | **Berikutnya setelah MASUK** | 2.5-KELUAR, lalu 2.5-GUARD, lalu Tahap 3 |
 
 ## Utang yang harus dibayar sebelum tahap berikutnya
