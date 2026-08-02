@@ -22,13 +22,13 @@
 | **Tahap berjalan** | **Tahap 2.5-MASUK SELESAI seluruhnya** (Task 0–8). Berikutnya **2.5-KELUAR**, yang **belum punya spec maupun rencana** — baru daftar cakupan, jadi butuh sesi desain bersama user sebelum ngoding |
 | **Versi terpasang** | `fleetd` **0.2.0** · `cc-plugin` **0.3.3** · `inline-buttons` **0.0.10** · `telegram` (marketplace lama) **0.0.37-mirza.0** |
 | **Angka test** | `fleetd` **145** · `cc-plugin` **41** · semuanya hijau di Windows 11 / Bun 1.3.11 |
-| **Spec aktif** | `docs/superpowers/specs/2026-07-31-tahap25-masuk-design.md` — **§11 memuat hasil uji live**, termasuk yang belum diuji |
-| **Rencana aktif** | Tidak ada. Rencana 2.5-MASUK sudah tuntas; 2.5-KELUAR belum ditulis |
+| **Spec aktif** | ⚠️ **`docs/superpowers/specs/2026-08-02-penyatuan-engine-fleetd-design.md` — `fleetd` BERHENTI jadi daemon**, engine-nya disatukan ke `cc-plugin`; state tetap terpusat. Disepakati user 2026-08-02, belum punya rencana implementasi. Baca ini dulu sebelum menyentuh `fleetd/src/socket/**` atau `cc-plugin/src/fleetd-client.ts` — keduanya akan dibuang. · `2026-07-31-tahap25-masuk-design.md` §11 tetap berlaku untuk hasil uji live |
+| **Rencana aktif** | Tidak ada. Rencana 2.5-MASUK sudah tuntas; berikutnya rencana implementasi penyatuan engine, lalu 2.5-KELUAR |
 | **Status** | Task 0–8 semuanya mendarat (`0605ebe` `b0cc2f5` `8009178` `a94da07` `1123446` `300bf0c` `48197b6` `e26acb9`). Task 7 sekaligus **menutup B-1 `peek_conversation`** lebih awal dari Tahap 6. Sesudahnya, di sesi yang sama: **W-10** Stop hook `cc-plugin` (`91d9df7`), **W-11** BOM (`e0cc2da`), dan keempat catatan user **U-1** buttons (`2d902af`), **U-2** keyboard dicopot (`90d9b0a`), **U-3** larangan minta `message_id`, **U-4** timezone (`c70a9cc`). |
-| **Masih terbuka** | **W-3** batas panjang path socket · **W-7** BOM di `config.json` (= SCAR-026) · **W-9** nama `album_failed_count` menyesatkan · **W-12** flake `messages_fts` di e2e. Keempatnya **tidak memblokir**. Detail + peringatan cara memperbaikinya ada di Bagian 7 |
+| **Masih terbuka** | **W-18** perbaikan W-14 tidak terpasang (yang jalan 0.3.2) — **satu-satunya yang aktif merugikan sekarang** · **W-7** BOM di `config.json` (= SCAR-026) · **W-9** nama `album_failed_count` menyesatkan. **W-3** (path socket) dan **W-12** (flake e2e) **gugur bersama penyatuan engine** — keduanya milik lapisan socket/dua-proses. Detail + peringatan cara memperbaikinya ada di Bagian 7 |
 | **Belum diuji hidup** | 5 dari 10 kriteria uji live: lintas-bot (tidak bisa — mesin ini hanya punya satu bot), PDF/`.md`, dokumen >20 MB, album 3 foto, album >10 foto. **Plus U-2**, yang belum pernah menyentuh Telegram sungguhan. Lihat `2026-08-01-status-kapabilitas-terverifikasi.md` untuk daftar lengkap ✅/🧪/⬜ |
-| **Handoff terakhir** | `.handoff/202608011930-prompt-lanjutkan-mirza-bots-setelah-25-masuk.md` — estafet ke bot-02, memuat blocker keputusan user soal auto-start `fleetd` |
-| **Berikutnya setelah MASUK** | 2.5-KELUAR, lalu 2.5-GUARD, lalu Tahap 3 |
+| **Handoff terakhir** | `.handoff/202608011930-prompt-lanjutkan-mirza-bots-setelah-25-masuk.md` — estafet ke bot-02. **Blocker-nya sudah dijawab user dan jawabannya membatalkan pertanyaannya:** bukan auto-start `fleetd`, tapi bubarkan daemonnya |
+| **Berikutnya setelah MASUK** | Penyatuan engine (spec 2026-08-02), lalu 2.5-KELUAR, lalu 2.5-GUARD, lalu Tahap 3 |
 
 ## Utang yang harus dibayar sebelum tahap berikutnya
 
@@ -42,7 +42,11 @@ bukan bagian dari tahap manapun.)*
   FTS5, sudah ditutup 2026-07-31.)
 - **Penegakan permission `0600`** pada `config.json` oleh kode — sudah ditambal
   manual, penegakannya ada di 2.5-GUARD.
-- **⚠️ Celah desain baru (ditemukan 2026-07-31, belum tercatat di mana pun):**
+- **~~⚠️ Celah desain baru (ditemukan 2026-07-31)~~ — GUGUR 2026-08-02.** Seluruh
+  celah di bawah lahir dari adanya daemon; spec penyatuan engine membubarkan
+  daemonnya, jadi "siapa menyalakan `fleetd`" dan "`fleetd` mati di tengah jalan"
+  tidak punya tempat untuk terjadi lagi. Teks aslinya disimpan supaya alasan
+  gugurnya bisa ditelusuri:
   spec §5 baris 102 memutuskan `bot-cc` menyalakan `fleetd` **bila belum
   berjalan** — jadi pemulihannya terjadi **saat bot dibuka**. Itu tidak menutup
   kasus `fleetd` mati **di tengah jalan sementara bot tetap terbuka**: tidak ada
@@ -70,9 +74,10 @@ bukan bagian dari tahap manapun.)*
 | `CLAUDE.md` (root repo) | Aturan repo + checklist rilis plugin lama | Sebelum menyentuh `plugins/**` |
 | `mirza-bots/README.md` | Apa yang benar-benar ada di kode + prosedur pasang/update `cc-plugin` | Sebelum menjalankan atau merilis |
 
-**Repo:** dokumen di `/Users/mirza/Workspace/mirza-marketplace` (punya remote,
-push). Kode di `/Users/mirza/Workspace/mirza-bots` (**tanpa remote** — commit
-lokal saja, jangan pernah `git push` di sana).
+**Repo:** dokumen di `mirza-marketplace`, kode di `mirza-bots`. **Keduanya punya
+remote dan wajib di-push** (dikoreksi 2026-08-02; baris lama menyebut `mirza-bots`
+tanpa remote dan melarang `git push` di sana — itu sudah tidak benar sejak
+2026-08-01, dan handoff hari itu sudah menyebut keduanya ter-push).
 
 **JANGAN dibaca:** `docs/notes/` — sistem lama, tidak relevan.
 
@@ -635,6 +640,7 @@ tidak menambahkan satu pun — semuanya netral-platform.
 
 | ID | Temuan | Sifat | Bukti | Status |
 |---|---|---|---|---|
+| **W-18** ⚠️ | **Perbaikan W-14 tidak pernah terpasang di mesin ini — `cc-plugin` yang benar-benar berjalan adalah 0.3.2.** Stop hook 0.3.2 mendeteksi channel dengan `origin.kind === "channel"`, jadi ia memblokir tiap turn yang sudah dijawab benar lewat plugin `telegram` **lama**. `0.3.3` (`57aff24`) sudah menyempitkannya ke `PLUGIN_ID`, tapi cuma duduk di cache | **Celah rilis, bukan celah kode.** Kelasnya: "sudah diperbaiki" ≠ "sudah terpasang" | Diamati langsung 2026-08-02 di sesi bot-02: hook memblokir **7 turn berturut-turut** pada percakapan Telegram yang seluruhnya lewat plugin lama. Dipastikan bukan 0.3.3: tag masuk berbunyi `source="plugin:telegram:telegram"` dan `origin.server` = `plugin:telegram:telegram` — dua-duanya **tidak** memuat `cc-plugin`, jadi logika 0.3.3 mustahil menyala. `grep PLUGIN_ID` atas cache: 0.3.1 → 0, 0.3.2 → 0, 0.3.3 → 4 | BELUM — pasang 0.3.3. **Temuan kedua yang lebih besar:** tool MCP `cc-plugin` tidak ada sama sekali di sesi itu, sementara hook-nya tetap hidup dan memblokir demi tool yang tidak ada. Itu bentuk **W-16** — proses mati diam-diam, hook-nya tidak ikut mati. Keduanya saling memberi makan, dan `cc-plugin` tidak punya apa pun yang menautkan umur hook ke umur prosesnya |
 | **W-1** | `existsSync()` bohong untuk socket hidup di Windows (`stat` → EACCES). Menjatuhkan gerbang kesiapan `e2e.test.ts:192-206` → **1 test merah nyata**. Juga membuat pembersihan socket basi di `fleetd/src/socket/server.ts:28` jadi no-op permanen di Windows | Test-only | Probe: `readdir` melihat berkas, `existsSync` `false`, `lstat` EACCES. Restart di atas socket basi **diuji dan tetap berhasil** — jadi no-op itu tidak berbahaya | **SELESAI** `0605ebe` — gerbang diganti `readdir()` |
 | **W-2** | `rmSync(home, {recursive, force})` di `afterAll` e2e melempar **EBUSY**: `fleetdProc.kill()` kembali sebelum proses anak melepas handle SQLite/socket. **Sekelas SCAR-022** (retry EPERM/EBUSY), bukan temuan mandiri | Test-only | 3 galat teardown, ketiganya muncul sebagai test `(unnamed)` | **SELESAI** `0605ebe` — tunggu `proc.exited` sebelum `rmSync` |
 | **W-3** | Path socket dibatasi **~107 karakter** (`sockaddr_un.sun_path` = 108 byte). Lebih dari itu → `Failed to listen`. Path produksi (`~/.claude/mirza-bots/fleetd.sock`, 44 karakter) aman; `MIRZA_BOTS_HOME` yang dalam **tidak** aman | Batas nyata, belum menggigit | Bisect: 101 char OK, 111 char gagal. macOS lebih ketat lagi (104) | BUTUH KEPUTUSAN (validasi panjang path saat start?) |
