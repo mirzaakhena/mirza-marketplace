@@ -58,6 +58,34 @@ bukan bagian dari tahap manapun.)*
   Sementara itu: `fleetd` dijalankan manual dari terminal user sendiri, bukan
   dari sesi Claude Code — proses background sesi ikut mati saat sesi dibersihkan.
 
+## ⚠️ Penilaian ulang Tahap 4 (`bot-cc`) — 2026-08-02
+
+Spec penyatuan engine menulis bahwa alasan terbesar `bot-cc` — *"menyalakan
+`fleetd` bila belum berjalan"* — **hilang** bersama daemonnya, dan ruang
+lingkupnya **menyusut**. Itu masih benar, tapi setengah cerita, dan setengah
+yang hilang justru menaikkan prioritasnya.
+
+**Sebelum penyatuan:** bot hidup di daemon. Wrapper PTY adalah kenyamanan —
+sesi bisa mati dan bot tetap mendengar.
+
+**Sesudah penyatuan: umur sesi = umur bot.** Sesi mati → poller mati → bot bisu.
+Jadi wrapper yang bisa menyalakan ulang sesi dan memulihkan konteksnya bukan lagi
+kenyamanan; ia satu-satunya hal yang membuat bot bertahan melewati sesi yang
+crash atau terminal yang tertutup tidak sengaja.
+
+**Dua kapabilitas yang ada di sistem lama dan BELUM ada di sistem baru** —
+diperiksa 2026-08-02, `grep node-pty|conpty|resume` atas seluruh `mirza-bots`
+mengembalikan kosong:
+
+| Kapabilitas | Di sistem lama | Kenapa penting sekarang |
+|---|---|---|
+| Wrapper node-pty + injeksi perintah native | `plugins/pty-controller/wrapper/` | Satu-satunya jalan menjalankan `/clear`, `/rename`, dan sejenisnya dari luar sesi |
+| Resume ke sesi sebelumnya | `wrapper.ts:414` (`resumeArgs: ['--resume', latestId]`) + berkas `wrapper.current_session_id` | Memulihkan bot, bukan cuma memulihkan percakapan |
+
+**Diangkat user**, bukan ditemukan mekanisme apa pun — ia menanyakan keduanya
+setelah membaca spec penyatuan. Tanpa pertanyaan itu, catatan "ruang lingkupnya
+menyusut" akan terbaca sebagai "jadi bisa ditunda", dan kesimpulan itu keliru.
+
 ## Peta berkas — apa dibaca kapan
 
 | Berkas | Perannya | Kapan dibaca |
