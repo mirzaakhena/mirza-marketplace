@@ -20,10 +20,10 @@
 | | |
 |---|---|
 | **Tahap berjalan** | **Tahap 2.5-MASUK SELESAI seluruhnya** (Task 0–8). Berikutnya **2.5-KELUAR**, yang **belum punya spec maupun rencana** — baru daftar cakupan, jadi butuh sesi desain bersama user sebelum ngoding |
-| **Versi terpasang** | `fleetd` **0.2.0** · `cc-plugin` **0.3.3** · `inline-buttons` **0.0.10** · `telegram` (marketplace lama) **0.0.37-mirza.0** |
-| **Angka test** | `fleetd` **145** · `cc-plugin` **41** · semuanya hijau di Windows 11 / Bun 1.3.11 |
+| **Versi terpasang** | `cc-plugin` **0.4.0** (tidak ada lagi `fleetd`) · `inline-buttons` **0.0.10** · `telegram` (marketplace lama) **0.0.37-mirza.0** |
+| **Angka test** | `cc-plugin` **168** (satu paket sekarang) · hijau di Windows 11 / Bun 1.3.11 |
 | **Spec aktif** | ⚠️ **`docs/superpowers/specs/2026-08-02-penyatuan-engine-fleetd-design.md` — `fleetd` BERHENTI jadi daemon**, engine-nya disatukan ke `cc-plugin`; state tetap terpusat. Disepakati user 2026-08-02, belum punya rencana implementasi. Baca ini dulu sebelum menyentuh `fleetd/src/socket/**` atau `cc-plugin/src/fleetd-client.ts` — keduanya akan dibuang. · `2026-07-31-tahap25-masuk-design.md` §11 tetap berlaku untuk hasil uji live |
-| **Rencana aktif** | Tidak ada. Rencana 2.5-MASUK sudah tuntas; berikutnya rencana implementasi penyatuan engine, lalu 2.5-KELUAR |
+| **Rencana aktif** | `docs/superpowers/plans/2026-08-02-penyatuan-engine-fleetd.md` — **Task 1-8 SELESAI dan ter-merge ke `main` (`f4f0f77`)**. Sisa: Task 9, verifikasi hidup lewat Telegram sungguhan. Berikutnya 2.5-KELUAR |
 | **Status** | Task 0–8 semuanya mendarat (`0605ebe` `b0cc2f5` `8009178` `a94da07` `1123446` `300bf0c` `48197b6` `e26acb9`). Task 7 sekaligus **menutup B-1 `peek_conversation`** lebih awal dari Tahap 6. Sesudahnya, di sesi yang sama: **W-10** Stop hook `cc-plugin` (`91d9df7`), **W-11** BOM (`e0cc2da`), dan keempat catatan user **U-1** buttons (`2d902af`), **U-2** keyboard dicopot (`90d9b0a`), **U-3** larangan minta `message_id`, **U-4** timezone (`c70a9cc`). |
 | **Masih terbuka** | **W-18** perbaikan W-14 tidak terpasang (yang jalan 0.3.2) — **satu-satunya yang aktif merugikan sekarang** · **W-7** BOM di `config.json` (= SCAR-026) · **W-9** nama `album_failed_count` menyesatkan. **W-3** (path socket) dan **W-12** (flake e2e) **gugur bersama penyatuan engine** — keduanya milik lapisan socket/dua-proses. Detail + peringatan cara memperbaikinya ada di Bagian 7 |
 | **Belum diuji hidup** | 5 dari 10 kriteria uji live: lintas-bot (tidak bisa — mesin ini hanya punya satu bot), PDF/`.md`, dokumen >20 MB, album 3 foto, album >10 foto. **Plus U-2**, yang belum pernah menyentuh Telegram sungguhan. Lihat `2026-08-01-status-kapabilitas-terverifikasi.md` untuk daftar lengkap ✅/🧪/⬜ |
