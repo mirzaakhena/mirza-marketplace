@@ -40,82 +40,12 @@ di `~/.claude/mirza-bots/`; satu-penarik-per-token dijaga file PID di
 - Bahasa komentar kode: **Inggris** (konsisten dengan basis kode yang ada).
   Dokumen dan pesan commit: **Indonesia**.
 - Flake pre-existing **W-12** (`no such table: messages_fts`, ~1 dari 25 run
-  suite penuh) hilang sendiri begitu Task 8 selesai; sampai itu, ulangi run-nya
+  suite penuh) hilang sendiri begitu Task 7 selesai; sampai itu, ulangi run-nya
   dan jangan dikejar.
 
 ---
 
-### Task 1: Aktifkan `cc-plugin` 0.3.3 (W-18)
-
-Berdiri sendiri dari penyatuan, dikerjakan lebih dulu karena Stop hook 0.3.2
-memblokir tiap turn Telegram di sesi mana pun yang menjalankannya — 7 kali
-berturut-turut pada 2026-08-02.
-
-**Files:**
-- Tidak ada berkas kode yang diubah. Ini kerja lingkungan.
-
-**Interfaces:**
-- Consumes: —
-- Produces: sesi Claude Code yang menjalankan `cc-plugin` 0.3.3, sehingga
-  `reply-guard.ts` hanya bicara untuk channel-nya sendiri.
-
-- [ ] **Step 1: Pastikan versi mana yang benar-benar berjalan**
-
-```bash
-grep -c PLUGIN_ID ~/.claude/plugins/cache/mirza-bots/cc-plugin/0.3.2/hooks/reply-guard.ts
-grep -c PLUGIN_ID ~/.claude/plugins/cache/mirza-bots/cc-plugin/0.3.3/hooks/reply-guard.ts
-```
-
-Expected: `0` untuk 0.3.2, `4` untuk 0.3.3. Kalau hook memblokir turn yang datang
-dari `source="plugin:telegram:telegram"`, yang berjalan adalah 0.3.2.
-
-- [ ] **Step 2: Pastikan 0.3.3 memang sudah ada di cache**
-
-```bash
-ls -la --time-style=full-iso ~/.claude/plugins/cache/mirza-bots/cc-plugin/
-```
-
-Expected: direktori `0.3.3` ada. **Kalau ada, JANGAN pasang ulang** — masalahnya
-bukan instalasi. Claude Code mengunci versi plugin saat sesi dibuka; sesi yang
-mulai sebelum 0.3.3 ditulis akan terus menjalankan 0.3.2 sampai dibuka ulang.
-
-- [ ] **Step 3: Kalau 0.3.3 TIDAK ada di cache, baru jalankan prosedur update**
-
-Prosedur ini ada di `mirza-bots/README.md:211-233` dan ketiganya wajib —
-`claude plugin install` menjawab *"already installed"* dan diam-diam memakai
-build lama.
-
-```bash
-claude plugin marketplace update mirza-bots
-claude plugin update cc-plugin@mirza-bots
-```
-
-- [ ] **Step 4: Minta user me-restart sesi Claude Code yang terdampak**
-
-Ini **bukan** langkah yang boleh dijalankan agen sendiri — restart memutus sesi
-yang sedang dipakai user. Sampaikan lewat channel, tunggu persetujuan.
-
-- [ ] **Step 5: Verifikasi setelah restart**
-
-Kirim satu pesan Telegram lewat plugin **lama** dan akhiri turn. Expected: Stop
-hook `cc-plugin` **tidak** memblokir.
-
-- [ ] **Step 6: Tandai W-18 di BACKLOG**
-
-Ubah kolom Status W-18 (Bagian 7) menjadi `SELESAI` berikut tanggalnya, lalu:
-
-```bash
-cd ~/workspace/mirza-marketplace
-git add docs/2026-07-26-rebuild-audit/BACKLOG.md
-git commit -m "docs(backlog): W-18 selesai -- sesi di-restart, 0.3.3 aktif
-
-Agent: <bot-name>"
-git push
-```
-
----
-
-### Task 2: Pindahkan engine ke `cc-plugin/src/engine/` tanpa mengubah perilaku
+### Task 1: Pindahkan engine ke `cc-plugin/src/engine/` tanpa mengubah perilaku
 
 Perpindahan mekanis murni. Tidak ada logika yang berubah; kalau ada satu test pun
 yang merah, itu kesalahan perpindahan, bukan desain.
@@ -136,7 +66,7 @@ yang merah, itu kesalahan perpindahan, bukan desain.
 - Move: test padanannya dari `fleetd/test/**` → `cc-plugin/test/engine/**`
 - Modify: `cc-plugin/package.json` — tambah dependency `grammy`
 - **JANGAN dipindah:** `fleetd/src/socket/**`, `fleetd/src/db/bot-inbox.ts`,
-  `fleetd/src/main.ts` — semuanya dibuang di Task 7.
+  `fleetd/src/main.ts` — semuanya dibuang di Task 6.
 
 **Interfaces:**
 - Consumes: —
@@ -144,7 +74,7 @@ yang merah, itu kesalahan perpindahan, bukan desain.
   `cc-plugin/src/engine/...` dengan **nama dan tanda tangan identik**.
   `poller.ts` untuk sementara masih meng-import `ConnectionRegistry` dan
   `queueMessage` lewat path relatif ke `fleetd/` — sengaja dibiarkan pincang di
-  task ini dan diputus di Task 3.
+  task ini dan diputus di Task 2.
 
 - [ ] **Step 1: Tambahkan grammy ke `cc-plugin`**
 
@@ -183,7 +113,7 @@ git mv fleetd/test/telegram/quote.test.ts cc-plugin/test/engine/telegram/quote.t
 
 Ulangi untuk setiap berkas test di `fleetd/test/` yang menguji modul yang
 dipindah. **Biarkan** test yang menguji `socket/**`, `bot-inbox`, atau
-`fleetd/src/main.ts` di tempatnya — semuanya ikut terhapus di Task 7.
+`fleetd/src/main.ts` di tempatnya — semuanya ikut terhapus di Task 6.
 
 - [ ] **Step 4: Perbaiki path import di berkas yang dipindah**
 
@@ -192,7 +122,7 @@ Import antar-modul engine tetap relatif dan tidak berubah bentuknya (mis.
 import yang menunjuk keluar engine, yaitu di `poller.ts`:
 
 ```ts
-// SEMENTARA -- diputus di Task 3.
+// SEMENTARA -- diputus di Task 2.
 import type { ConnectionRegistry } from "../../../../fleetd/src/socket/registry";
 import type { PushMessage } from "../../../../fleetd/src/socket/protocol";
 import { queueMessage } from "../../../../fleetd/src/db/bot-inbox";
@@ -223,7 +153,7 @@ Agent: <bot-name>"
 
 ---
 
-### Task 3: Ganti `ConnectionRegistry` dengan sink sempit
+### Task 2: Ganti `ConnectionRegistry` dengan sink sempit
 
 Ini titik di mana engine berhenti tahu-menahu soal socket. `PollerDeps` sekarang
 menuntut `ConnectionRegistry` — kelas yang mengelola N koneksi per bot. Dalam
@@ -241,7 +171,7 @@ punya arti lagi, karena Telegram sendiri yang menahan update sampai 24 jam.
 - Modify: setiap test yang membangun `PollerDeps`
 
 **Interfaces:**
-- Consumes: `NormalizedMessage`, `handleIncomingMessage` (Task 2)
+- Consumes: `NormalizedMessage`, `handleIncomingMessage` (Task 1)
 - Produces:
   ```ts
   export type PushMessage = { type: "push_message"; text: string; meta: Record<string, string> };
@@ -395,7 +325,7 @@ membaca `sink.sent`.
 
 Run: `cd cc-plugin && bun test`
 Expected: seluruhnya hijau. Test `bot-inbox`/`registry` di `fleetd/test/` boleh
-tetap hijau untuk sementara — keduanya dihapus di Task 7.
+tetap hijau untuk sementara — keduanya dihapus di Task 6.
 
 - [ ] **Step 8: Commit**
 
@@ -414,7 +344,7 @@ Agent: <bot-name>"
 
 ---
 
-### Task 4: Kunci satu-penarik-per-token
+### Task 3: Kunci satu-penarik-per-token
 
 Menjaga satu kasus, dan hanya satu: **satu bot, dua penarik**. Enam bot dengan
 enam token berbeda tidak pernah bertabrakan (spec §3), jadi kunci ini bercakupan
@@ -427,7 +357,7 @@ per bot, bukan per mesin.
   dan sertakan `locks` di `ensureStateDirs()`
 
 **Interfaces:**
-- Consumes: `stateRoot()` (Task 2)
+- Consumes: `stateRoot()` (Task 1)
 - Produces:
   ```ts
   // paths.ts
@@ -677,7 +607,7 @@ Agent: <bot-name>"
 
 ---
 
-### Task 5: Identitas bot + kegagalan yang terdengar
+### Task 4: Identitas bot + kegagalan yang terdengar
 
 `resolveBotByCwd` sekarang terkubur di `socket/server.ts` dan hanya bisa
 menjawab `null`. Dalam desain baru, jawabannya harus bisa **dibaca manusia**:
@@ -687,10 +617,10 @@ inilah yang menutup sisa W-16.
 - Create: `cc-plugin/src/engine/identity.ts`
 - Create: `cc-plugin/test/engine/identity.test.ts`
 - Modify: `fleetd/src/socket/server.ts` — hapus `resolveBotByCwd` lokalnya,
-  import dari engine (sementara; seluruh berkas dibuang di Task 7)
+  import dari engine (sementara; seluruh berkas dibuang di Task 6)
 
 **Interfaces:**
-- Consumes: `Config` (Task 2)
+- Consumes: `Config` (Task 1)
 - Produces:
   ```ts
   export type IdentityResult =
@@ -806,7 +736,7 @@ import { resolveBotByCwd } from "../../../cc-plugin/src/engine/identity";
           const bot = identity.ok ? identity.bot : null;
 ```
 
-Ini jembatan sementara supaya suite `fleetd` tetap hijau sampai Task 7
+Ini jembatan sementara supaya suite `fleetd` tetap hijau sampai Task 6
 membuang berkasnya.
 
 - [ ] **Step 6: Jalankan kedua suite**
@@ -835,11 +765,11 @@ Agent: <bot-name>"
 
 ---
 
-### Task 6: `startEngine()` — perakit
+### Task 5: `startEngine()` — perakit
 
 Satu tempat yang merakit config + database + satu bot + poller + kunci, dan
 mengekspos permukaan yang **sama persis** dengan `FleetdClient` sekarang. Itu
-yang membuat `server.ts` nyaris tidak berubah di Task 7.
+yang membuat `server.ts` nyaris tidak berubah di Task 6.
 
 **Penting: satu proses memoll SATU bot**, bukan semua bot di config. Ini
 perbedaan terbesar terhadap `fleetd/src/main.ts`, yang mengiterasi
@@ -852,9 +782,9 @@ perbedaan terbesar terhadap `fleetd/src/main.ts`, yang mengiterasi
 **Interfaces:**
 - Consumes: `loadConfig`, `openConversationsDb`, `openFleetDb`, `ensureStateDirs`,
   `configPath`, `conversationsDbPath`, `fleetDbPath`, `stateRoot`, `lockPath`
-  (Task 2/4), `acquireBotLock`, `releaseBotLock` (Task 4), `resolveBotByCwd`
-  (Task 5), `MessageSink`, `PushMessage` (Task 3), `handleIncomingMessage`,
-  `startPolling`, `NormalizedMessage` (Task 2), dan fungsi yang dipindah dari
+  (Task 1/4), `acquireBotLock`, `releaseBotLock` (Task 3), `resolveBotByCwd`
+  (Task 4), `MessageSink`, `PushMessage` (Task 2), `handleIncomingMessage`,
+  `startPolling`, `NormalizedMessage` (Task 1), dan fungsi yang dipindah dari
   `fleetd/src/main.ts`: `normalizeMessage`, `buildAlbumMessage`,
   `buildTappedMessageEdit`, `findMissingButtonNarration`, `handleHistoryRequest`,
   `handleSearchRequest`
@@ -1106,7 +1036,7 @@ Agent: <bot-name>"
 
 ---
 
-### Task 7: Sambungkan `cc-plugin`, buang socket dan daemon
+### Task 6: Sambungkan `cc-plugin`, buang socket dan daemon
 
 Task pembongkaran. Setelah ini `fleetd/` tidak ada lagi.
 
@@ -1116,12 +1046,12 @@ Task pembongkaran. Setelah ini `fleetd/` tidak ada lagi.
 - Delete: `cc-plugin/src/fleetd-client.ts` (178)
 - Delete: `fleetd/src/socket/protocol.ts` (115), `server.ts` (133), `registry.ts` (44)
 - Delete: `fleetd/src/db/bot-inbox.ts` (24)
-- Delete: `fleetd/src/main.ts` (sisa setelah Task 6)
+- Delete: `fleetd/src/main.ts` (sisa setelah Task 5)
 - Delete: `fleetd/test/**` yang menguji berkas di atas
 - Delete: `fleetd/` seluruhnya bila sudah kosong
 
 **Interfaces:**
-- Consumes: `startEngine` (Task 6)
+- Consumes: `startEngine` (Task 5)
 - Produces: `buildServer(engine: Engine)` — nama fungsi dan perilakunya tidak
   berubah; hanya nama tipe parameternya (`FleetdClient` → `Engine`).
 
@@ -1256,7 +1186,7 @@ Agent: <bot-name>"
 
 ---
 
-### Task 8: `busy_timeout` untuk database yang dibuka banyak proses
+### Task 7: `busy_timeout` untuk database yang dibuka banyak proses
 
 Dulu hanya `fleetd` yang membuka kedua database. Sekarang sampai enam proses
 sekaligus.
@@ -1267,7 +1197,7 @@ sekaligus.
 - Create: `cc-plugin/test/engine/db/busy-timeout.test.ts`
 
 **Interfaces:**
-- Consumes: `openConversationsDb`, `openFleetDb` (Task 2)
+- Consumes: `openConversationsDb`, `openFleetDb` (Task 1)
 - Produces: keduanya menyetel `busy_timeout` = 5000 ms; tanda tangan tidak
   berubah.
 
@@ -1338,9 +1268,9 @@ Agent: <bot-name>"
 
 ---
 
-### Task 9: `doctor` jadi perkakas `cc-plugin`
+### Task 8: `doctor` jadi perkakas `cc-plugin`
 
-`bun run doctor` sekarang milik `fleetd/package.json`, yang dihapus di Task 7.
+`bun run doctor` sekarang milik `fleetd/package.json`, yang dihapus di Task 6.
 
 **Files:**
 - Move: `fleetd/bin/fleetd-doctor.ts` → `cc-plugin/bin/doctor.ts`
@@ -1349,7 +1279,7 @@ Agent: <bot-name>"
 - Modify: test doctor yang ada
 
 **Interfaces:**
-- Consumes: `buildDoctorReport` (Task 2)
+- Consumes: `buildDoctorReport` (Task 1)
 - Produces: `buildDoctorReport(config, fleetDb, conversationsDb, version)` —
   parameter `sockPath` hilang; laporan memuat daftar `locks/<bot>.pid` berikut
   hidup/tidaknya PID di dalamnya, menggantikan status socket.
@@ -1395,7 +1325,7 @@ Agent: <bot-name>"
 
 ---
 
-### Task 10: Dokumen, versi, dan verifikasi hidup
+### Task 9: Dokumen, versi, dan verifikasi hidup
 
 **Files:**
 - Modify: `mirza-bots/README.md`
@@ -1422,7 +1352,7 @@ tanpa kenaikan versi, `update` tidak melihat ada yang perlu diambil.
 - [ ] **Step 3: Perbarui BACKLOG**
 
 Blok "Kondisi sekarang": versi, angka test baru, spec aktif. Tandai **W-3** dan
-**W-12** gugur, dan **W-16** selesai lewat Task 5 + Task 7.
+**W-12** gugur, dan **W-16** selesai lewat Task 4 + Task 6.
 
 - [ ] **Step 4: Pasang dan restart**
 
@@ -1469,6 +1399,15 @@ Agent: <bot-name>" && git push
 ---
 
 ## Yang sengaja TIDAK ada di rencana ini
+
+- **Membereskan penjaga basi `cc-plugin` di enam folder bot LAMA (W-18).** Sempat
+  ditulis sebagai Task 1 dan **dicabut 2026-08-02**: pekerjaan itu melayani
+  sistem **lama**, bukan penyatuan, dan menaruhnya di sini membuat user mengira
+  konteksnya tercampur — sampai mempertimbangkan membuang seluruh proyek.
+  Detailnya tetap hidup sebagai W-18 di BACKLOG Bagian 7. Ringkasnya: `cc-plugin`
+  aktif di **semua** folder bot karena `enabledPlugins` bersifat user-level; di
+  enam folder lama ia tidak punya bot, mati diam-diam, dan meninggalkan Stop
+  hook-nya. Pilihannya (matikan di folder lama / biarkan) belum diputuskan user.
 
 - **Mengganti nama `fleetd`.** Akhiran `d` memang sudah berbohong, tapi
   mengganti nama sambil membongkar arsitekturnya membuat tiap diff jadi dua
