@@ -34,9 +34,39 @@ sesi Claude Code. Kerumitan itu yang jadi keluhanmu.
 
 ## Yang sudah terbukti hidup di sistem baru
 
+> **Dikoreksi 2026-08-02 sore.** Daftar aslinya memuat tiga hal yang belum pernah
+> kamu konfirmasi, dan satu di antaranya **tidak ada kodenya sama sekali**.
+> Koreksinya ditulis terbuka di bawah, bukan ditimpa diam-diam — daftar yang
+> salah sudah sempat dipakai, jadi jejaknya perlu bisa ditelusuri.
+
 Terkonfirmasi langsung olehmu di Telegram: kirim/terima teks, quote-reply,
-navigasi riwayat, pencarian kata kunci, kirim PDF, album tiga foto, tombol
-inline, orientasi waktu lokal, dan antrean pesan saat tidak ada sesi terbuka.
+navigasi riwayat, pencarian kata kunci, tombol inline, dan orientasi waktu
+lokal. Ditambah, sesudah pekerjaan siang tadi: balasan bot ikut tersimpan, bot
+bisa mengutip pesanmu **dan** pesannya sendiri, markdown dirapikan otomatis
+tanpa saklar apa pun, dan tombolnya dicopot setelah ditap.
+
+**Tiga hal yang dicoret dari daftar itu, berikut alasannya:**
+
+- **"Kirim PDF" — tidak ada.** Bukan belum diuji: **tidak ada kodenya.**
+  Mencari `sendDocument`, `sendPhoto`, dan `InputFile` di seluruh kode sistem
+  baru mengembalikan nol, dan satu-satunya jalan mengirim balasan cuma menerima
+  teks, tombol, dan id pesan yang dikutip — tidak ada tempat untuk berkas.
+  Kemungkinan besar yang dulu kamu konfirmasi berjalan di era daemon yang
+  sekarang sudah dibubarkan. **Ini sekarang tercatat sebagai celah**, salah satu
+  dari tiga yang kamu pilih untuk dikerjakan.
+- **"Album tiga foto" — belum kamu lihat.** Kodenya ada dan lulus test, tapi
+  belum pernah menyentuh Telegram sungguhan. Dokumen status yang lain memang
+  sudah menandainya begitu sejak 2026-08-01; halaman ini yang keliru.
+- **"Antrean pesan saat tidak ada sesi terbuka" — bukan milik kita lagi.**
+  Tabel antreannya masih ada di database tapi tidak lagi dipakai. Yang menahan
+  pesanmu sekarang **Telegram sendiri, sampai 24 jam** — persis seperti yang
+  ditulis paragraf "Konsekuensi" di bawah. Jadi halaman ini sempat berdebat
+  dengan dirinya sendiri di dua tempat.
+
+**Kenapa koreksi ini penting melebihi tiga barisnya:** daftar "sudah terbukti"
+adalah daftar yang dipakai untuk memutuskan apa yang **tidak perlu** dibangun.
+Satu baris yang keliru di sana tidak bikin ribut — ia diam-diam menghapus
+pekerjaan dari rencana.
 
 ## Apa yang sebenarnya sudah dibangun
 
