@@ -129,7 +129,28 @@ konkret untuk aturan yang dibawa handoff ini: **ukur dulu sebelum membangun.**
 
 ---
 
-## 6. Catatan untuk yang membaca sesudah ini
+## 6. Urutan yang dipilih user (2026-08-02, lewat inline button)
+
+**Pilihan: "yang termurah dulu" — tiga celah yang seluruhnya hidup di dalam
+engine, tanpa menyentuh wrapper PTY sama sekali.**
+
+| Urutan | Celah | Nomor di tabel | Frekuensi |
+|---|---|---|---|
+| 1 | Chunking balasan panjang | #3 | 10,6/hari — **satu-satunya yang memblokir** di paket ini |
+| 2 | Indikator typing | #1 | 36,7/hari — paling sering, paling murah |
+| 3 | Kirim lampiran keluar (`files`) | #7 | 2,7/hari |
+
+**Kenapa pilihan ini koheren, bukan sekadar "yang gampang":** ketiganya berada di
+dalam `cc-plugin/src/engine/` dan tidak bergantung pada satu pun dari rantai
+#5 → #6 → #11 (agent-bus → wrapper PTY → handoff), yang merupakan potongan
+terbesar dan paling berisiko dari seluruh daftar. Artinya paket ini bisa
+selesai, diuji live, dan dirilis **tanpa** memutuskan apa pun soal masa depan
+wrapper — keputusan itu tetap terbuka dan tidak jadi lebih mahal karena ditunda.
+
+**Yang secara sadar TIDAK dipilih sekarang:** #2 (nama sesi), #4 (system-outbox),
+#5, #6, #8, #12 — semuanya membutuhkan wrapper PTY atau state sisi Telegram.
+
+## 7. Catatan untuk yang membaca sesudah ini
 
 - **Frekuensi ≠ urutan bangun.** Baris #1 (typing) paling sering tapi kosmetik;
   #3, #5, #6 lebih jarang tapi **memblokir**. Kolom "kalau tidak ada" ada supaya
