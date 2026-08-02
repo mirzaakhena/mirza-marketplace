@@ -50,7 +50,7 @@ membubarkannya terasa aman.
 | ✅ | Penekanan tombol tersimpan, tepat satu baris | id 34 @ 02:42:55Z, teks persis `🌋 Gunung Merapi` — cocok dengan opsi 3, tanpa duplikat. Urutannya terbukti benar: baris tersimpan **sebelum** keyboard diedit, jadi penolakan edit dari Telegram tidak bisa menghilangkan tap-nya |
 | 🧪 | Penekanan tombol tidak punya `message_id` | `message_id = null` di baris 34. Bukan kerusakan hari ini — terbawa dari desain lama — tapi berarti sebuah tap **tidak bisa di-quote atau ditelusuri** lewat riwayat belakangan. Dicatat untuk 2.5-KELUAR |
 | ⬜ | Riwayat & pencarian dari tool MCP | Belum diuji |
-| ⬜ | **Perilaku saat `/clear`** | Belum diuji, dan **belum pernah diukur siapa pun** — satu-satunya risiko terbuka di spec §10 |
+| ✅ | **Perilaku saat `/clear`** | **Risiko terbuka terakhir di spec §10, sekarang tertutup.** Diukur 2026-08-02: `/clear` **tidak** me-restart proses MCP — PID tetap 58112, berkas kunci tidak bergerak, dan pesan berikutnya (`"tes setelah clear"`, id 35 @ 02:55:06Z) masuk dan muncul di sesi. Tidak ada jendela bisu. **Efek samping terukur:** `session_id` ikut tidak berubah, jadi baris sesudah `/clear` distempel id sesi lama — W-20 |
 | ⬜ | Sesi kedua mengambil alih token | Belum diuji |
 
 ## Tahap 1 — Fondasi
