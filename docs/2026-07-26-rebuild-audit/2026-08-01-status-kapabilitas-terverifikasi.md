@@ -44,9 +44,11 @@ membubarkannya terasa aman.
 | ✅ | Database tetap **yang lama dan terpusat**, bukan salinan baru | Baris baru berdampingan dengan riwayat 2026-08-01 di berkas yang sama |
 | ✅ | Atribusi sesi jalan lewat jalur baru | `session_id` = `f850dfd0-…`, berbeda dari sesi kemarin |
 | ✅ | Notifikasi sampai ke sesi Claude Code | Dikonfirmasi user langsung: pesannya muncul sebagai giliran baru |
-| ⬜ | Balasan keluar (`reply`) pada arsitektur baru | Belum diuji |
-| ⬜ | Penolakan tombol bernomor tanpa keterangan (U-5) | Belum diuji |
-| ⬜ | Keyboard dicopot setelah ditap (U-2) | Belum diuji |
+| ✅ | Balasan keluar (`reply`), termasuk yang bertombol | Screenshot user 2026-08-02 09:37: pesan bertombol 1-4 mendarat di Telegram |
+| ✅ | Konvensi tombol bernomor (U-5) dipatuhi | Tombol `1 2 3 4` datang berikut daftar bernomornya di badan pesan, plus jalan keluar `✏️ Jelasin manual`. **Catatan jujur:** tidak bisa dibedakan apakah AI patuh sejak awal atau sempat ditolak lalu memperbaiki — penolakan tidak tersimpan di mana pun (W-19 dari sisi lain) |
+| ✅ | **Keyboard dicopot setelah ditap (U-2)** | Screenshot user 2026-08-02 09:43 — **kali pertama U-2 menyentuh Telegram sungguhan.** Tombol hilang seluruhnya, `→ 🌋 Gunung Merapi` menempel di AKHIR, dan daftar bernomor + emoji + paragraf aslinya utuh (entities dikirim ulang; tanpa itu format terhapus diam-diam) |
+| ✅ | Penekanan tombol tersimpan, tepat satu baris | id 34 @ 02:42:55Z, teks persis `🌋 Gunung Merapi` — cocok dengan opsi 3, tanpa duplikat. Urutannya terbukti benar: baris tersimpan **sebelum** keyboard diedit, jadi penolakan edit dari Telegram tidak bisa menghilangkan tap-nya |
+| 🧪 | Penekanan tombol tidak punya `message_id` | `message_id = null` di baris 34. Bukan kerusakan hari ini — terbawa dari desain lama — tapi berarti sebuah tap **tidak bisa di-quote atau ditelusuri** lewat riwayat belakangan. Dicatat untuk 2.5-KELUAR |
 | ⬜ | Riwayat & pencarian dari tool MCP | Belum diuji |
 | ⬜ | **Perilaku saat `/clear`** | Belum diuji, dan **belum pernah diukur siapa pun** — satu-satunya risiko terbuka di spec §10 |
 | ⬜ | Sesi kedua mengambil alih token | Belum diuji |
