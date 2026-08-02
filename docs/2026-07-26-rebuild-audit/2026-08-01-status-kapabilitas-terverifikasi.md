@@ -50,6 +50,11 @@ membubarkannya terasa aman.
 | ✅ | Penekanan tombol tersimpan, tepat satu baris | id 34 @ 02:42:55Z, teks persis `🌋 Gunung Merapi` — cocok dengan opsi 3, tanpa duplikat. Urutannya terbukti benar: baris tersimpan **sebelum** keyboard diedit, jadi penolakan edit dari Telegram tidak bisa menghilangkan tap-nya |
 | 🧪 | Penekanan tombol tidak punya `message_id` | `message_id = null` di baris 34. Bukan kerusakan hari ini — terbawa dari desain lama — tapi berarti sebuah tap **tidak bisa di-quote atau ditelusuri** lewat riwayat belakangan. Dicatat untuk 2.5-KELUAR |
 | ⬜ | Riwayat & pencarian dari tool MCP | Belum diuji |
+| ✅ | **Balasan keluar tersimpan** (2.5-KELUAR item 1) | Baris 39, 41, 43 di `conversations.db` ber-`source='assistant'`. Sebelum ini nol dari 32 baris |
+| ✅ | **Id sesi tidak lagi basi setelah `/clear`** (item 0) | Hook: `04:49:24 wrote bot-uji = b6641cab-… (source=clear)`; baris 42–43 membawa `b6641cab-…`, bukan `3707cb47-…` yang berlaku sebelum `/clear` |
+| ✅ | **Konversi markdown otomatis** (item 3) | Terbukti dua arah: tampil rapi, DAN menemukan W-21 saat tabel ditolak Telegram |
+| ⬜ | **Bot mengutip pesan** (item 2) | Kode ada, belum disentuh Telegram sungguhan |
+| ✅ | **Kolom kosong, bukan kolom salah, saat mekanismenya rusak** | Baris 38–41 ber-`session_id = NULL` — persis jam ketika hook-nya menyala tapi tidak pernah cocok. Keputusan spec ("tidak tahu" > "tahu, dan salah") terlihat hasilnya di data sungguhan: empat baris jujur yang mudah dikenali sebagai periode rusak, alih-alih empat baris yang tampak valid dan berbohong |
 | ✅ | **Perilaku saat `/clear`** | **Risiko terbuka terakhir di spec §10, sekarang tertutup.** Diukur 2026-08-02: `/clear` **tidak** me-restart proses MCP — PID tetap 58112, berkas kunci tidak bergerak, dan pesan berikutnya (`"tes setelah clear"`, id 35 @ 02:55:06Z) masuk dan muncul di sesi. Tidak ada jendela bisu. **Efek samping terukur:** `session_id` ikut tidak berubah, jadi baris sesudah `/clear` distempel id sesi lama — W-20 |
 | ⬜ | Sesi kedua mengambil alih token | Belum diuji |
 
