@@ -116,7 +116,7 @@ selesai** — tidak ada pemotongan, tidak ada margin, tidak ada perubahan
 perilaku. Ini yang terjadi pada **90% balasan**, dan jalurnya harus persis
 seperti hari ini supaya fitur ini tidak menyentuh apa yang sudah bekerja.
 
-Baru kalau hasil konversinya melebihi 4096, §6.2–6.3 berlaku.
+Baru kalau hasil konversinya melebihi 4096, §6.2–6.5 berlaku.
 
 Ini juga yang membuat janji di §4 benar secara harfiah: balasan 1200 karakter
 tetap **satu** pesan, karena konversinya masih jauh di bawah 4096.
