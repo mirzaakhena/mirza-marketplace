@@ -23,6 +23,34 @@ Alasan pembedaan ini bukan kehati-hatian berlebihan, melainkan preseden nyata
 proyek ini sendiri: **457 test hijau sementara `answerCallbackQuery` hilang di
 produksi.** 🧪 bukan ✅.
 
+## ⚠️ Pembaruan 2026-08-02 — daemon dibubarkan
+
+`fleetd` **tidak ada lagi**, sebagai paket maupun sebagai proses. Engine-nya
+hidup di dalam `cc-plugin` 0.4.0, satu proses per sesi Claude Code. Spec:
+`docs/superpowers/specs/2026-08-02-penyatuan-engine-fleetd-design.md`.
+
+Baris di bawah yang menyebut daemon, socket, atau antrean offline **tetap
+ditulis apa adanya sebagai catatan sejarah** — dicoret akan menghapus jejak
+bahwa hal-hal itu pernah terbukti bekerja, dan itu justru bagian dari alasan
+membubarkannya terasa aman.
+
+### Yang diverifikasi hidup pada arsitektur baru (2026-08-02, `bot-uji`)
+
+| | Kapabilitas | Bukti |
+|---|---|---|
+| ✅ | Engine menyala **tanpa daemon apa pun** | PID 58112 menjalankan `cc-plugin/0.4.0/src/main.ts`; tidak ada proses `fleetd` di mesin |
+| ✅ | Kunci satu-penarik-per-token diklaim saat start | `locks/bot-uji.pid` = `58112`, cocok persis dengan PID prosesnya |
+| ✅ | Pesan Telegram masuk, lolos allowlist, tersimpan | Baris `"Hello bro"` @ `2026-08-02T02:15:33Z` di `conversations.db` |
+| ✅ | Database tetap **yang lama dan terpusat**, bukan salinan baru | Baris baru berdampingan dengan riwayat 2026-08-01 di berkas yang sama |
+| ✅ | Atribusi sesi jalan lewat jalur baru | `session_id` = `f850dfd0-…`, berbeda dari sesi kemarin |
+| ✅ | Notifikasi sampai ke sesi Claude Code | Dikonfirmasi user langsung: pesannya muncul sebagai giliran baru |
+| ⬜ | Balasan keluar (`reply`) pada arsitektur baru | Belum diuji |
+| ⬜ | Penolakan tombol bernomor tanpa keterangan (U-5) | Belum diuji |
+| ⬜ | Keyboard dicopot setelah ditap (U-2) | Belum diuji |
+| ⬜ | Riwayat & pencarian dari tool MCP | Belum diuji |
+| ⬜ | **Perilaku saat `/clear`** | Belum diuji, dan **belum pernah diukur siapa pun** — satu-satunya risiko terbuka di spec §10 |
+| ⬜ | Sesi kedua mengambil alih token | Belum diuji |
+
 ## Tahap 1 — Fondasi
 
 | | Kapabilitas |
