@@ -14,6 +14,13 @@ dependency dan satu modul 20-baris.
 
 **Spec:** `docs/superpowers/specs/2026-08-02-tahap25-keluar-design.md`
 
+
+> **Status 2026-08-02: Task 1-5 SELESAI, ter-merge ke `main`, dan seluruhnya
+> terverifikasi hidup lewat Telegram sungguhan** (`cc-plugin` 0.5.3, 204 test).
+> Dua bug ditemukan justru oleh verifikasi hidup itu dan sudah ditutup: **W-21**
+> (konverter markdown menolak tabel) dan **W-22** (path dieja dua cara, hook
+> menyala tapi tidak pernah cocok). Sisa Task 6 tinggal dokumen.
+
 ## Global Constraints
 
 - **Baseline test saat ini: `cc-plugin` 168, hijau di Windows 11 / Bun 1.3.11.**
@@ -50,7 +57,7 @@ kalau asumsinya salah, lebih baik ketahuan sebelum ada yang dibangun.
 - Consumes: —
 - Produces: jawaban ya/tidak, ditulis ke handoff atau langsung ke Task 2.
 
-- [ ] **Step 1: Tulis probe yang hanya mencatat**
+- [x] **Step 1: Tulis probe yang hanya mencatat**
 
 ```ts
 // cc-plugin/hooks/session-probe.ts -- TEMPORARY, dibuang di Task 2.
@@ -72,7 +79,7 @@ appendFileSync(
 );
 ```
 
-- [ ] **Step 2: Daftarkan sebagai `SessionStart`**
+- [x] **Step 2: Daftarkan sebagai `SessionStart`**
 
 ```json
 {
@@ -87,7 +94,7 @@ appendFileSync(
 }
 ```
 
-- [ ] **Step 3: Naikkan versi, pasang, minta user restart sesi `bot-uji`**
+- [x] **Step 3: Naikkan versi, pasang, minta user restart sesi `bot-uji`**
 
 ```bash
 claude plugin marketplace update mirza-bots
@@ -96,7 +103,7 @@ claude plugin update cc-plugin@mirza-bots
 
 Restart **wajib** diminta ke user, bukan dilakukan sendiri.
 
-- [ ] **Step 4: Minta user menjalankan `/clear`, lalu baca log-nya**
+- [x] **Step 4: Minta user menjalankan `/clear`, lalu baca log-nya**
 
 ```bash
 cat ~/.claude/mirza-bots/logs/session-probe.log
@@ -105,14 +112,14 @@ cat ~/.claude/mirza-bots/logs/session-probe.log
 Expected bila asumsinya benar: **dua baris** — satu saat sesi dibuka, satu lagi
 saat `/clear`, dengan `env=` atau isi stdin memuat id sesi yang **berbeda**.
 
-- [ ] **Step 5: Catat hasilnya, apa pun jawabannya**
+- [x] **Step 5: Catat hasilnya, apa pun jawabannya**
 
 Tulis ke `2026-08-01-status-kapabilitas-terverifikasi.md`. **Kalau `SessionStart`
 TIDAK menyala pada `/clear`, hentikan item 0 di sini** dan pakai jalan
 cadangan spec §3: berhenti menstempel `session_id` dan biarkan NULL, karena
 "tidak tahu" lebih benar daripada "tahu, dan salah". Lalu lanjut ke Task 3.
 
-- [ ] **Step 6: Commit temuannya**
+- [x] **Step 6: Commit temuannya**
 
 ```bash
 git add -A && git commit -m "chore(probe): ukur apakah SessionStart menyala pada /clear
@@ -149,7 +156,7 @@ Hanya dikerjakan bila Task 1 menjawab **ya**.
   // engine.ts -- sink.sessionId() berubah implementasi, TIDAK berubah tanda tangan
   ```
 
-- [ ] **Step 1: Tulis test yang gagal untuk pembacaan berkas**
+- [x] **Step 1: Tulis test yang gagal untuk pembacaan berkas**
 
 ```ts
 // cc-plugin/test/engine/session-file.test.ts
@@ -188,12 +195,12 @@ test("an empty or whitespace file is treated as absent", () => {
 });
 ```
 
-- [ ] **Step 2: Jalankan, pastikan gagal**
+- [x] **Step 2: Jalankan, pastikan gagal**
 
 Run: `cd cc-plugin && bun test test/engine/session-file.test.ts`
 Expected: FAIL — `Cannot find module '../../src/engine/session-file'`
 
-- [ ] **Step 3: Implementasikan pembacaannya**
+- [x] **Step 3: Implementasikan pembacaannya**
 
 ```ts
 // cc-plugin/src/engine/session-file.ts
@@ -237,12 +244,12 @@ export function currentSessionPath(bot: string): string {
 
 Sertakan `sessionsDir()` di daftar `ensureStateDirs()`.
 
-- [ ] **Step 4: Jalankan, pastikan lulus**
+- [x] **Step 4: Jalankan, pastikan lulus**
 
 Run: `cd cc-plugin && bun test test/engine/session-file.test.ts`
 Expected: PASS (3 test)
 
-- [ ] **Step 5: Tulis test yang gagal untuk hook-nya**
+- [x] **Step 5: Tulis test yang gagal untuk hook-nya**
 
 ```ts
 // cc-plugin/test/hooks/session-start.test.ts
@@ -274,12 +281,12 @@ test("returns null for genuinely malformed input rather than throwing", () => {
 });
 ```
 
-- [ ] **Step 6: Jalankan, pastikan gagal**
+- [x] **Step 6: Jalankan, pastikan gagal**
 
 Run: `cd cc-plugin && bun test test/hooks/session-start.test.ts`
 Expected: FAIL — module tidak ada
 
-- [ ] **Step 7: Tulis hook-nya**
+- [x] **Step 7: Tulis hook-nya**
 
 ```ts
 #!/usr/bin/env bun
@@ -342,12 +349,12 @@ function main(): void {
 if (import.meta.main) main();
 ```
 
-- [ ] **Step 8: Jalankan, pastikan lulus**
+- [x] **Step 8: Jalankan, pastikan lulus**
 
 Run: `cd cc-plugin && bun test test/hooks/session-start.test.ts`
 Expected: PASS (5 test)
 
-- [ ] **Step 9: Sambungkan engine ke berkas itu**
+- [x] **Step 9: Sambungkan engine ke berkas itu**
 
 Di `engine.ts`, ganti isi `sessionId` pada sink — **tanda tangannya tidak
 berubah**, hanya sumbernya:
@@ -363,15 +370,15 @@ berubah**, hanya sumbernya:
 Hapus parameter `sessionId` dari `startEngine`, dan hapus `resolveSessionId()`
 dari `main.ts` berikut test-nya — nilainya sekarang datang dari hook.
 
-- [ ] **Step 10: Ganti probe dengan hook sungguhan di `hooks.json`, hapus probe**
+- [x] **Step 10: Ganti probe dengan hook sungguhan di `hooks.json`, hapus probe**
 
-- [ ] **Step 11: Jalankan seluruh suite**
+- [x] **Step 11: Jalankan seluruh suite**
 
 Run: `cd cc-plugin && bun test`
 Expected: hijau. Test yang mengikat `resolveSessionId` ke `startEngine` akan
 gugur — hapus, dan **hitung selisihnya** di pesan commit.
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add -A
@@ -402,7 +409,7 @@ Agent: <bot-name>"
 - Produces: `engine.reply()` menyimpan satu baris `source: "assistant"` setelah
   kirim berhasil. Tanda tangannya tidak berubah.
 
-- [ ] **Step 1: Tulis test yang gagal**
+- [x] **Step 1: Tulis test yang gagal**
 
 ```ts
 // cc-plugin/test/engine/reply-storage.test.ts
@@ -444,12 +451,12 @@ Catatan: bila query FTS di atas tidak cocok dengan bentuk tabel FTS yang ada,
 pakai `searchMessages(db, "xyzzy", { bot: "bot-uji" })` — yang penting
 assertion-nya: **balasan ikut terjaring pencarian.**
 
-- [ ] **Step 2: Jalankan, pastikan gagal**
+- [x] **Step 2: Jalankan, pastikan gagal**
 
 Run: `cd cc-plugin && bun test test/engine/reply-storage.test.ts`
 Expected: FAIL — `storeOutgoing` tidak ada
 
-- [ ] **Step 3: Implementasikan**
+- [x] **Step 3: Implementasikan**
 
 ```ts
 // engine.ts
@@ -503,12 +510,12 @@ Dan di dalam `reply()`, sesudah `sendMessage`:
         }
 ```
 
-- [ ] **Step 4: Jalankan, pastikan lulus**
+- [x] **Step 4: Jalankan, pastikan lulus**
 
 Run: `cd cc-plugin && bun test test/engine/reply-storage.test.ts`
 Expected: PASS (2 test)
 
-- [ ] **Step 5: Jalankan seluruh suite dan commit**
+- [x] **Step 5: Jalankan seluruh suite dan commit**
 
 ```bash
 git add -A
@@ -547,7 +554,7 @@ Agent: <bot-name>"
   ```
   Tool MCP `reply` mendapat parameter opsional `reply_to: z.string().min(1)`.
 
-- [ ] **Step 1: Tulis test yang gagal**
+- [x] **Step 1: Tulis test yang gagal**
 
 ```ts
 // cc-plugin/test/engine/reply-quote.test.ts
@@ -581,12 +588,12 @@ test("a non-numeric id is refused before anything is sent", () => {
 });
 ```
 
-- [ ] **Step 2: Jalankan, pastikan gagal**
+- [x] **Step 2: Jalankan, pastikan gagal**
 
 Run: `cd cc-plugin && bun test test/engine/reply-quote.test.ts`
 Expected: FAIL — `buildSendOptions` tidak ada
 
-- [ ] **Step 3: Implementasikan**
+- [x] **Step 3: Implementasikan**
 
 ```ts
 /**
@@ -617,12 +624,12 @@ export function buildSendOptions(
 }
 ```
 
-- [ ] **Step 4: Jalankan, pastikan lulus**
+- [x] **Step 4: Jalankan, pastikan lulus**
 
 Run: `cd cc-plugin && bun test test/engine/reply-quote.test.ts`
 Expected: PASS (4 test)
 
-- [ ] **Step 5: Sambungkan ke `reply()` dan ke tool MCP**
+- [x] **Step 5: Sambungkan ke `reply()` dan ke tool MCP**
 
 Di `server.ts`, tambahkan ke `inputSchema` tool `reply`:
 
@@ -638,7 +645,7 @@ user for an id -- they never see one. If you do not have it, ask them to quote
 the message instead; quoting delivers the id to you automatically.
 ```
 
-- [ ] **Step 6: Jalankan seluruh suite dan commit**
+- [x] **Step 6: Jalankan seluruh suite dan commit**
 
 ```bash
 git add -A
@@ -669,13 +676,13 @@ Agent: <bot-name>"
 - Consumes: —
 - Produces: `export function commonMarkToMarkdownV2(input: string): string`
 
-- [ ] **Step 1: Tambahkan dependency**
+- [x] **Step 1: Tambahkan dependency**
 
 ```bash
 cd cc-plugin && bun add telegramify-markdown
 ```
 
-- [ ] **Step 2: Tulis test yang gagal**
+- [x] **Step 2: Tulis test yang gagal**
 
 ```ts
 // cc-plugin/test/engine/markdown.test.ts
@@ -707,12 +714,12 @@ test("a fenced code block survives intact", () => {
 });
 ```
 
-- [ ] **Step 3: Jalankan, pastikan gagal**
+- [x] **Step 3: Jalankan, pastikan gagal**
 
 Run: `cd cc-plugin && bun test test/engine/markdown.test.ts`
 Expected: FAIL — module tidak ada
 
-- [ ] **Step 4: Implementasikan**
+- [x] **Step 4: Implementasikan**
 
 ```ts
 // cc-plugin/src/engine/markdown.ts
@@ -737,12 +744,12 @@ export function commonMarkToMarkdownV2(input: string): string {
 }
 ```
 
-- [ ] **Step 5: Jalankan, pastikan lulus**
+- [x] **Step 5: Jalankan, pastikan lulus**
 
 Run: `cd cc-plugin && bun test test/engine/markdown.test.ts`
 Expected: PASS (4 test)
 
-- [ ] **Step 6: Pakai di `reply()`**
+- [x] **Step 6: Pakai di `reply()`**
 
 Konversi **sesudah** gerbang `findMissingButtonNarration` (gerbang itu membaca
 teks yang ditulis AI, bukan hasil escape-nya) dan **sebelum** `sendMessage`,
@@ -750,7 +757,7 @@ dengan `parse_mode: "MarkdownV2"`. **Yang disimpan ke database adalah teks
 ASLI**, bukan hasil konversi — yang dibaca ulang AI harus berupa apa yang ia
 tulis, bukan bentuk kawatnya.
 
-- [ ] **Step 7: Jalankan seluruh suite dan commit**
+- [x] **Step 7: Jalankan seluruh suite dan commit**
 
 ```bash
 git add -A

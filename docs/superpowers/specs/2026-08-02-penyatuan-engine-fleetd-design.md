@@ -227,6 +227,11 @@ menutup itu, karena tidak ada yang membacanya sebelum curiga.
 - **`bot-cc` (Tahap 4).** Alasan terbesarnya adalah "menyalakan `fleetd` bila
   belum berjalan" (spec lama §5 baris 102). Alasan itu hilang. Sisa perannya
   (injeksi PTY) tetap sah, tapi ruang lingkupnya menyusut dan harus dinilai ulang.
+  **Dikoreksi 2026-08-02 (BACKLOG Bagian 0):** ruang lingkupnya memang menyusut,
+  tapi **bobotnya naik**. Sejak penyatuan, umur sesi = umur bot; wrapper yang bisa
+  menyalakan ulang sesi dan memulihkan konteksnya berhenti menjadi kenyamanan dan
+  mulai menjadi satu-satunya hal yang membuat bot bertahan melewati sesi yang
+  crash. Membaca "menyusut" sebagai "bisa ditunda" akan keliru.
 - **Celah "`fleetd` mati di tengah jalan"** yang tercatat di BACKLOG Bagian 0
   ikut gugur bersama daemonnya — perlu dicoret, bukan dibawa.
 
