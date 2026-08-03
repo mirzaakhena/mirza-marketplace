@@ -1181,7 +1181,59 @@ pty.onExit(({ exitCode }) => {
 Run: `cd C:/Users/Mirza/workspace/mirza-bots/cc-wrapper && bun test`
 Expected: PASS, 32 test (typer 6 + queue 6 + registry 6 + inbox 9 + pty 4 + asap 1).
 
-- [ ] **Step 7: Uji hidup — dan ini yang menentukan, bukan test hijau**
+- [x] **Step 7: Uji hidup — dan ini yang menentukan, bukan test hijau**
+
+> ✅ **DIJALANKAN 2026-08-03, 5/5 kriteria lulus.** User menjalankan wrapper di
+> `mirza-bots/cc-wrapper` dengan flag aslinya
+> (`--dangerously-skip-permissions --dangerously-load-development-channels
+> "plugin:cc-plugin@mirza-bots"`); bot-02 menjatuhkan payload dari sesi lain.
+>
+> | # | Kriteria | Hasil | Bukti |
+> |---|---|---|---|
+> | 1 | Terasa seperti `claude` biasa | ✅ | Screenshot: banner, statusline, ketikan tangan normal |
+> | 2 | Perintah tunggal mendarat | ✅ | `/rename uji-tunggal` → CC membalas `└ Session renamed to: uji-tunggal` |
+> | 3 | Batch berurutan, tidak disela | ✅ | `[/clear, /rename uji-batch]` → keduanya mendarat, sesi baru bernama benar |
+> | 4 | Berkas `pending/` terhapus | ✅ | Hilang dalam <4 detik tiap kali |
+> | 5 | Peringatan transcript TIDAK muncul | ✅ | Tidak ada di screenshot — `childEnv()` bekerja |
+>
+> **Flag diteruskan utuh:** `bypass permissions on` dan baris
+> `Channels (experimental) … plugin:cc-plugin@mirza-bots` keduanya terlihat.
+>
+> **Kriteria 3 diperkirakan GAGAL dan ternyata LULUS.** Diuji dua kali:
+> sekali pada sesi kosong, sekali **saat CC sedang sibuk** memproses giliran
+> panjang. Keduanya mendarat.
+>
+> ### Temuan yang lebih berharga daripada lulusnya
+>
+> Pada percobaan "CC sibuk", **`/rename` tidak meninggalkan jejak di layar** —
+> pesan `Session renamed to:` tidak muncul, kemungkinan tergulung saat render
+> ulang pasca-`/clear`. Membaca dari layar saja akan menyimpulkan **gagal**.
+>
+> Yang membuktikan sebaliknya adalah meteran kedua: berkas sesi CC sendiri,
+> `~/.claude/projects/C--Users-Mirza-workspace-mirza-bots-cc-wrapper/`
+>
+> ```
+> 81176a4d-….jsonl  →  {"type":"custom-title","customTitle":"uji-sibuk", …}
+> ```
+>
+> `customTitle` **ditulis oleh CC**, bukan oleh wrapper — wrapper tidak punya
+> akses tulis ke berkas sesi sama sekali. Kehadirannya adalah bukti `/rename`
+> benar-benar **diproses**, bukan sekadar diketik.
+>
+> **Kalau hanya layar yang dipercaya, sesi ini akan membangun barrier untuk
+> masalah yang tidak ada** — dan menambal sesuatu yang tidak rusak adalah
+> bentuk kerja paling mahal di proyek ini.
+>
+> ### Konsekuensi untuk rencana berikutnya
+>
+> **Lapis 3 turun prioritas.** Lubang yang jadi alasan utamanya (`/clear` →
+> `/rename` terlalu cepat) **tidak menganga** pada dua percobaan, termasuk
+> kasus sulitnya. Angka jujurnya: **2 dari 2 percobaan mendarat**, bukan
+> "aman" — yang belum diuji antara lain sesi berkonteks besar dan `/clear`
+> yang keystroke-nya sendiri hilang.
+
+<details>
+<summary>Instruksi asli Step 7 (dipertahankan untuk pengulangan)</summary>
 
 Test unit membuktikan rencananya benar. Yang belum terbukti: apakah CC sungguhan menerima ketikannya. Jalankan wrapper di sebuah folder bot uji, lalu **dari terminal lain** jatuhkan berkas ke `pending/`:
 
@@ -1206,6 +1258,8 @@ Empat kriteria, dan **catat hasil apa adanya, bukan kesimpulannya**:
 5. **Peringatan `⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker` TIDAK muncul.** Task 0 menemukan peringatan itu pada sesi anak yang mewarisi environment; `childEnv()` seharusnya menutupnya. Jangan diasumsikan — dilihat sendiri. Kalau masih muncul, cari variabel `CLAUDE_CODE_*` lain yang ikut terwaris; PROBE.md mencatat bahwa yang lain **belum diukur**.
 
 **Kriteria 3 kemungkinan besar GAGAL untuk `/clear` diikuti `/rename`, dan itu hasil yang benar** — `/clear` melahirkan sesi baru, dan tanpa bukti bahwa sesi itu sudah ada, `/rename` bisa mendarat terlalu cepat (spec §4.2.2). Itu persis lubang yang ditutup Lapis 3. Catat gejalanya; jangan menambal dengan jeda tetap.
+
+</details>
 
 - [ ] **Step 8: Commit dan push**
 
@@ -1233,7 +1287,7 @@ Lubang yang **sengaja** ditinggalkan, dan rumahnya:
 
 | Lubang | Rumahnya |
 |---|---|
-| `/clear` → `/rename` bisa terlalu cepat (kriteria 3 Task 6) | Plan Lapis 3 — `postCheck` berbukti lewat hook CC |
+| ~~`/clear` → `/rename` bisa terlalu cepat~~ **tidak terbukti menganga** — 2 dari 2 percobaan mendarat, termasuk saat CC sibuk. **Jangan bangun barrier untuk ini tanpa bukti baru** | Plan Lapis 3, **prioritas turun** |
 | Wrapper tidak bisa melaporkan kegagalan | Plan Lapis 4 — `system-outbox` |
 | Tidak ada bukti proses lama sudah mati saat restart | Plan Lapis 3 — spec §3.4, dan angkanya **belum diukur** |
 | `POST_INJECTION_DELAY_MS` lama yang melayani dua maksud, harus dipisah jadi dua | Plan Lapis 3 — konstanta itu milik rantai post-`/clear`, yang belum ada di sini (spec §4.1.2) |
