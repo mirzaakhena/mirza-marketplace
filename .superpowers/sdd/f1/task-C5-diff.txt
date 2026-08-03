@@ -1,0 +1,1159 @@
+diff --git a/packages/shared/src/index.ts b/packages/shared/src/index.ts
+index 34de0d6..e5142ed 100644
+--- a/packages/shared/src/index.ts
++++ b/packages/shared/src/index.ts
+@@ -1,4 +1,5 @@
+ export * from "./ipc";
+ export * from "./schema";
+ export * from "./bus";
+ export * from "./access";
++export * from "./outbound-command";
+diff --git a/packages/shared/src/outbound-command.ts b/packages/shared/src/outbound-command.ts
+new file mode 100644
+index 0000000..45d911d
+--- /dev/null
++++ b/packages/shared/src/outbound-command.ts
+@@ -0,0 +1,81 @@
++import { z } from "zod";
++
++/**
++ * Zod discriminated union for the telegram-adapter outbound tool commands
++ * (`reply` / `react` / `download_attachment` / `get_message_by_id`).
++ *
++ * Ported from the hand-rolled `parseOutboundCommand` that used to live in
++ * `packages/telegram-adapter/src/outbound.ts` (Task C5 fix pass 1). That
++ * parser existed only because `zod` was not a declared dependency of
++ * telegram-adapter at the time; now that the project convention is "zod at
++ * every boundary, schemas sourced from one place in shared", the shape/type/
++ * required/enum checks live here and telegram-adapter imports the schema
++ * (and its inferred types) instead of importing `zod` directly.
++ *
++ * Deliberately NOT covered here (stays runtime-context validation in
++ * outbound.ts, same as before):
++ *  - `buttons` deep shape (row/column caps, callback_id regex, label length,
++ *    uniqueness) — handled by `validateButtons()`.
++ *  - reaction emoji whitelist — handled by `REACTION_EMOJI_WHITELIST`.
++ *  - file existence / size (50MB cap) — handled by `assertSendable` + `statSync`.
++ *  - chat allowlist gate — handled by `assertAllowedChat`.
++ * This schema only asserts: is `buttons` shaped like an array of rows (its
++ * elements are opaque here), are the other fields the right primitive
++ * type/enum, and are required fields present.
++ */
++
++export const ReplyFormatSchema = z.enum(["text", "markdown", "markdownv2"]);
++export const ReplySourceSchema = z.enum(["assistant", "system"]);
++
++export const ReplyCommandSchema = z
++  .object({
++    op: z.literal("reply"),
++    chat_id: z.string(),
++    text: z.string(),
++    reply_to: z.string().optional(),
++    files: z.array(z.string()).optional(),
++    format: ReplyFormatSchema.optional(),
++    source: ReplySourceSchema.optional(),
++    /** Shape-checked here (array of rows); deep-validated by validateButtons(). */
++    buttons: z.array(z.unknown()).optional(),
++  })
++  .strict();
++
++export const ReactCommandSchema = z
++  .object({
++    op: z.literal("react"),
++    chat_id: z.string(),
++    message_id: z.string(),
++    emoji: z.string(),
++  })
++  .strict();
++
++export const DownloadAttachmentCommandSchema = z
++  .object({
++    op: z.literal("download_attachment"),
++    file_id: z.string(),
++  })
++  .strict();
++
++export const GetMessageByIdCommandSchema = z
++  .object({
++    op: z.literal("get_message_by_id"),
++    chat_id: z.string(),
++    message_id: z.string(),
++  })
++  .strict();
++
++export const OutboundCommandSchema = z.discriminatedUnion("op", [
++  ReplyCommandSchema,
++  ReactCommandSchema,
++  DownloadAttachmentCommandSchema,
++  GetMessageByIdCommandSchema,
++]);
++
++export type ReplyFormat = z.infer<typeof ReplyFormatSchema>;
++export type ReplySource = z.infer<typeof ReplySourceSchema>;
++export type ReplyCommand = z.infer<typeof ReplyCommandSchema>;
++export type ReactCommand = z.infer<typeof ReactCommandSchema>;
++export type DownloadAttachmentCommand = z.infer<typeof DownloadAttachmentCommandSchema>;
++export type GetMessageByIdCommand = z.infer<typeof GetMessageByIdCommandSchema>;
++export type OutboundCommand = z.infer<typeof OutboundCommandSchema>;
+diff --git a/packages/shared/test/outbound-command.test.ts b/packages/shared/test/outbound-command.test.ts
+new file mode 100644
+index 0000000..0f63bf0
+--- /dev/null
++++ b/packages/shared/test/outbound-command.test.ts
+@@ -0,0 +1,80 @@
++import { describe, expect, test } from "bun:test";
++import { OutboundCommandSchema, type OutboundCommand } from "../src/outbound-command";
++
++describe("OutboundCommandSchema — valid commands parse per op", () => {
++  test("reply: minimal (only required fields)", () => {
++    const parsed = OutboundCommandSchema.parse({ op: "reply", chat_id: "u1", text: "hi" });
++    expect(parsed).toEqual({ op: "reply", chat_id: "u1", text: "hi" });
++  });
++
++  test("reply: full (every optional field present)", () => {
++    const input: OutboundCommand = {
++      op: "reply",
++      chat_id: "u1",
++      text: "hi",
++      reply_to: "42",
++      files: ["/tmp/a.txt"],
++      format: "markdown",
++      source: "system",
++      buttons: [[{ label: "Yes", callback_id: "yes" }]],
++    };
++    expect(OutboundCommandSchema.parse(input)).toEqual(input);
++  });
++
++  test("react: parses with required fields", () => {
++    const input: OutboundCommand = { op: "react", chat_id: "u1", message_id: "42", emoji: "\u{1F44D}" };
++    expect(OutboundCommandSchema.parse(input)).toEqual(input);
++  });
++
++  test("download_attachment: parses with required fields", () => {
++    const input: OutboundCommand = { op: "download_attachment", file_id: "f1" };
++    expect(OutboundCommandSchema.parse(input)).toEqual(input);
++  });
++
++  test("get_message_by_id: parses with required fields", () => {
++    const input: OutboundCommand = { op: "get_message_by_id", chat_id: "u1", message_id: "42" };
++    expect(OutboundCommandSchema.parse(input)).toEqual(input);
++  });
++});
++
++describe("OutboundCommandSchema — rejects bad shape", () => {
++  test("unknown op is rejected", () => {
++    expect(() => OutboundCommandSchema.parse({ op: "edit_message" })).toThrow();
++  });
++
++  test("reply missing required 'text' is rejected", () => {
++    expect(() => OutboundCommandSchema.parse({ op: "reply", chat_id: "u1" })).toThrow();
++  });
++
++  test("reply with wrong-typed field is rejected", () => {
++    expect(() => OutboundCommandSchema.parse({ op: "reply", chat_id: "u1", text: 123 })).toThrow();
++  });
++
++  test("reply with invalid 'format' enum value is rejected", () => {
++    expect(() =>
++      OutboundCommandSchema.parse({ op: "reply", chat_id: "u1", text: "hi", format: "html" }),
++    ).toThrow();
++  });
++
++  test("react missing required 'emoji' is rejected", () => {
++    expect(() => OutboundCommandSchema.parse({ op: "react", chat_id: "u1", message_id: "42" })).toThrow();
++  });
++
++  test("strict: an unrecognized key on an otherwise-valid reply is rejected", () => {
++    expect(() =>
++      OutboundCommandSchema.parse({ op: "reply", chat_id: "u1", text: "hi", extra_field: true }),
++    ).toThrow();
++  });
++
++  test("strict: an unrecognized key on an otherwise-valid react is rejected", () => {
++    expect(() =>
++      OutboundCommandSchema.parse({
++        op: "react",
++        chat_id: "u1",
++        message_id: "42",
++        emoji: "\u{1F44D}",
++        extra_field: true,
++      }),
++    ).toThrow();
++  });
++});
+diff --git a/packages/telegram-adapter/src/index.ts b/packages/telegram-adapter/src/index.ts
+index 437f543..1a4239c 100644
+--- a/packages/telegram-adapter/src/index.ts
++++ b/packages/telegram-adapter/src/index.ts
+@@ -2,8 +2,12 @@
+ export * from "./album-buffer";
+ export * from "./buttons";
+ export * from "./markdown";
+ export * from "./paginated-picker";
+ export * from "./chunk";
+ // Task C3, Fase 1 — poller lifecycle grammy supervised.
+ export * from "./poller";
+ export * from "./gate";
++// Task C4, Fase 1 — inbound pipeline gate->media/album/callback->store->bus.
++export * from "./inbound";
++// Task C5, Fase 1 — outbound sender (reply/react/download_attachment/get_message_by_id).
++export * from "./outbound";
+diff --git a/packages/telegram-adapter/src/outbound.ts b/packages/telegram-adapter/src/outbound.ts
+new file mode 100644
+index 0000000..a2209d4
+--- /dev/null
++++ b/packages/telegram-adapter/src/outbound.ts
+@@ -0,0 +1,382 @@
++// Port of the `reply` / `react` / `download_attachment` / `get_message_by_id`
++// MCP tool handlers, `plugins/telegram/server.ts:695-901` (mirza-marketplace,
++// Task C5 brief). `edit_message` is NOT ported (design doc §10.5).
++//
++// Unlike the source (one giant MCP server module with module-scope `bot`,
++// `TOKEN`, `STATE_DIR`, `messagesStore`), this is a pure factory:
++// `createOutboundSender(opts)` takes every dependency as a parameter so it
++// can be driven from a bus command (`kind:'outbound-send'`) instead of an
++// MCP request, and tested without any network access.
++//
++// `OutboundCommand` shape/type/required/enum validation is a zod
++// discriminated union sourced from `@mirza-harness/shared`
++// (`outbound-command.ts`) — one schema, reused later by cc-stub (Task D2).
++// `zod` itself is NOT imported directly here (per-package dependency
++// isolation; only `@mirza-harness/shared` declares it) — only the schema and
++// its inferred types cross the package boundary, hoisted transitively via
++// shared. Validation that depends on runtime context rather than shape
++// (button deep-shape, emoji whitelist, file existence/size, chat allowlist)
++// stays here, unchanged.
++
++import { InlineKeyboard, InputFile } from "grammy";
++import { mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
++import { extname, join, sep } from "node:path";
++import {
++  OutboundCommandSchema,
++  type Access,
++  type DownloadAttachmentCommand,
++  type GetMessageByIdCommand,
++  type OutboundCommand,
++  type ReactCommand,
++  type ReplyCommand,
++} from "@mirza-harness/shared";
++import { buildKeyboard, validateButtons } from "./buttons";
++import { MAX_CHUNK_LIMIT, planOutbound, type ChunkMode, type ReplyFormat } from "./chunk";
++
++// ---------------------------------------------------------------------------
++// Constants ported verbatim from the reference (server.ts:248-249,500).
++// ---------------------------------------------------------------------------
++
++/** SCAR-054: upload attachments are capped at 50MB (self-imposed; Telegram's own limit is higher). */
++export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
++
++/** .jpg/.jpeg/.png/.gif/.webp go as photos (inline preview); everything else as documents. */
++export const PHOTO_EXTS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp"]);
++
++/**
++ * SCAR-053: Telegram's Bot API only accepts a fixed whitelist of reaction
++ * emoji — anything outside this set is rejected by the API. List copied
++ * verbatim from `plugins/telegram/ACCESS.md` (mirza-marketplace), the
++ * "full Bot API list" the reference docs it against.
++ */
++export const REACTION_EMOJI_WHITELIST = new Set([
++  "👍", "👎", "❤", "🔥", "🥰", "👏", "😁", "🤔", "🤯", "😱", "🤬", "😢", "🎉", "🤩",
++  "🤮", "💩", "🙏", "👌", "🕊", "🤡", "🥱", "🥴", "😍", "🐳", "❤‍🔥", "🌚", "🌭",
++  "💯", "🤣", "⚡", "🍌", "🏆", "💔", "🤨", "😐", "🍓", "🍾", "💋", "🖕", "😈",
++  "😴", "😭", "🤓", "👻", "👨‍💻", "👀", "🎃", "🙈", "😇", "😨", "🤝", "✍", "🤗",
++  "🫡", "🎅", "🎄", "☃", "💅", "🤪", "🗿", "🆒", "💘", "🙉", "🦄", "😘", "💊",
++  "🙊", "😎", "👾", "🤷‍♂", "🤷", "🤷‍♀", "😡",
++]);
++
++// ---------------------------------------------------------------------------
++// OutboundCommand — shape/type/required/enum validation lives in
++// @mirza-harness/shared (outbound-command.ts) as a zod discriminated union;
++// re-exported types kept here for call-site convenience.
++// ---------------------------------------------------------------------------
++
++export type { DownloadAttachmentCommand, GetMessageByIdCommand, OutboundCommand, ReactCommand, ReplyCommand };
++
++/** Parse-or-throw entry point — throws `ZodError` on bad shape (see OutboundCommandSchema). */
++export function parseOutboundCommand(raw: unknown): OutboundCommand {
++  return OutboundCommandSchema.parse(raw);
++}
++
++// ---------------------------------------------------------------------------
++// Injectable collaborators.
++// ---------------------------------------------------------------------------
++
++/**
++ * Minimal subset of grammy's `Bot.api` actually used here — declared
++ * explicitly (rather than importing grammy's own `Api` type) so tests can
++ * inject a pure in-memory fake with zero network access, mirroring the
++ * pattern already used by `poller.ts`'s `PollerBot`.
++ */
++export interface OutboundApi {
++  sendMessage(
++    chat_id: string,
++    text: string,
++    other?: {
++      reply_parameters?: { message_id: number };
++      parse_mode?: "MarkdownV2";
++      reply_markup?: InlineKeyboard;
++    },
++  ): Promise<{ message_id: number }>;
++  sendPhoto(
++    chat_id: string,
++    photo: InputFile,
++    other?: { reply_parameters?: { message_id: number } },
++  ): Promise<{ message_id: number }>;
++  sendDocument(
++    chat_id: string,
++    document: InputFile,
++    other?: { reply_parameters?: { message_id: number } },
++  ): Promise<{ message_id: number }>;
++  setMessageReaction(
++    chat_id: string,
++    message_id: number,
++    reaction: Array<{ type: "emoji"; emoji: string }>,
++  ): Promise<unknown>;
++  getFile(file_id: string): Promise<{ file_path?: string; file_unique_id?: string }>;
++}
++
++/**
++ * Subset of hostd's `MessagesStore` (packages/hostd/src/state/messages-store.ts,
++ * Task A2) actually used by the outbound sender. Declared locally — not
++ * imported — because telegram-adapter must not depend on hostd (hostd
++ * already depends on telegram-adapter; importing back would be a package
++ * cycle). Any object satisfying this shape (in particular a real
++ * `createMessagesStore(...)` instance) works.
++ */
++export interface OutboundStore {
++  logOutbound(input: {
++    ts: number;
++    chat_id: string;
++    message_id?: string;
++    source: "assistant" | "system";
++    body?: string;
++    attachments?: unknown[];
++    reply_to?: string;
++    metadata?: Record<string, unknown>;
++  }): void;
++  getMessage(chat_id: string, message_id: string): unknown | null;
++}
++
++export interface CreateOutboundSenderOptions {
++  botId: string;
++  api: OutboundApi;
++  store: OutboundStore;
++  access: () => Access;
++  /** Per-bot channel state dir — anti-exfil boundary for `files` (see assertSendable) and download target for download_attachment. */
++  stateDir: string;
++  /**
++   * Bot token — needed to build the `https://api.telegram.org/file/bot<token>/<file_path>`
++   * download URL (grammy's `getFile` response carries no URL, only `file_path`).
++   * Not listed in the brief's abbreviated constructor signature but required
++   * for `download_attachment` to actually work; kept separate from `api` so
++   * `api` stays a plain send/receive surface.
++   */
++  token: string;
++  /** Injectable fetch — default global `fetch`. Lets tests avoid real network. */
++  fetchImpl?: typeof fetch;
++  /** Injectable clock for outbound log timestamps — default `Date.now`. */
++  now?: () => number;
++}
++
++export interface OutboundSender {
++  handle(cmd: unknown): Promise<string>;
++}
++
++// ---------------------------------------------------------------------------
++// Helpers ported from the reference.
++// ---------------------------------------------------------------------------
++
++/** Port of server.ts:315-320 — gate for reply/react (distinct from inbound gate.ts). */
++function assertAllowedChat(chat_id: string, access: Access): void {
++  if (access.allowFrom.includes(chat_id)) return;
++  if (chat_id in access.groups) return;
++  throw new Error(`chat ${chat_id} is not allowlisted`);
++}
++
++/**
++ * Port of server.ts:255-265 (assertSendable) — anti-exfil: refuse to send any
++ * file that resolves inside stateDir, UNLESS it's inside stateDir/inbox (the
++ * one directory download_attachment writes to, which is fine to re-send).
++ */
++export function assertSendable(f: string, stateDir: string): void {
++  let real: string;
++  let stateReal: string;
++  try {
++    real = realpathSync(f);
++    stateReal = realpathSync(stateDir);
++  } catch {
++    return; // statSync (caller) will fail properly; or stateDir absent -> nothing to leak
++  }
++  const inbox = join(stateReal, "inbox");
++  if (real.startsWith(stateReal + sep) && !real.startsWith(inbox + sep)) {
++    throw new Error(`refusing to send channel state: ${f}`);
++  }
++}
++
++/**
++ * Duck-typed detection of Telegram's "can't parse entities" error (SCAR-048).
++ * The reference checks `err instanceof GrammyError && /parse entities/i.test(err.description)`;
++ * here we check for a `description` string instead of `instanceof GrammyError`
++ * so the fallback also works against injected test doubles that aren't real
++ * grammy errors (real `GrammyError` instances also carry `.description`, so
++ * production behavior is unchanged).
++ */
++function isParseEntitiesError(err: unknown): boolean {
++  if (typeof err === "object" && err !== null && "description" in err) {
++    const d = (err as { description?: unknown }).description;
++    return typeof d === "string" && /parse entities/i.test(d);
++  }
++  return false;
++}
++
++// ---------------------------------------------------------------------------
++// Factory.
++// ---------------------------------------------------------------------------
++
++export function createOutboundSender(opts: CreateOutboundSenderOptions): OutboundSender {
++  const { api, store, access, stateDir, token } = opts;
++  const fetchImpl = opts.fetchImpl ?? fetch;
++  const now = opts.now ?? (() => Date.now());
++
++  async function doReply(cmd: ReplyCommand): Promise<string> {
++    const acc = access();
++    assertAllowedChat(cmd.chat_id, acc);
++
++    const files = cmd.files ?? [];
++
++    let keyboard: InlineKeyboard | undefined;
++    if (cmd.buttons !== undefined) {
++      const v = validateButtons(cmd.buttons);
++      if (!v.ok) throw new Error(`invalid buttons: ${v.error}`);
++      // SCAR-062: buttons and files are mutually exclusive in a single reply call.
++      if (files.length > 0) {
++        throw new Error("buttons and files cannot be combined in a single reply call");
++      }
++      keyboard = buildKeyboard(v.rows);
++    }
++
++    for (const f of files) {
++      assertSendable(f, stateDir);
++      const st = statSync(f);
++      if (st.size > MAX_ATTACHMENT_BYTES) {
++        throw new Error(`file too large: ${f} (${(st.size / 1024 / 1024).toFixed(1)}MB, max 50MB)`);
++      }
++    }
++
++    const limit = Math.max(1, Math.min(acc.textChunkLimit ?? MAX_CHUNK_LIMIT, MAX_CHUNK_LIMIT));
++    const mode: ChunkMode = acc.chunkMode ?? "length";
++    const replyMode = acc.replyToMode ?? "first";
++    const format: ReplyFormat = cmd.format ?? "text";
++    const source = cmd.source ?? "assistant";
++    const reply_to = cmd.reply_to != null ? Number(cmd.reply_to) : undefined;
++
++    const { parts, fallback } = planOutbound(cmd.text, format, limit, mode);
++
++    const sentIds: number[] = [];
++    const sentTexts: string[] = [];
++
++    try {
++      for (let i = 0; i < parts.length; i++) {
++        const part = parts[i]!;
++        const shouldReplyTo = reply_to != null && replyMode !== "off" && (replyMode === "all" || i === 0);
++        // Buttons attach to the LAST chunk only — if attached to earlier
++        // chunks, the keyboard sits orphaned above continuation text.
++        const isLastChunk = i === parts.length - 1;
++        const buildOpts = (mv2: boolean) => ({
++          ...(shouldReplyTo ? { reply_parameters: { message_id: reply_to! } } : {}),
++          ...(mv2 ? { parse_mode: "MarkdownV2" as const } : {}),
++          ...(keyboard && isLastChunk ? { reply_markup: keyboard } : {}),
++        });
++
++        let sent: { message_id: number };
++        try {
++          sent = await api.sendMessage(cmd.chat_id, part.text, buildOpts(part.parse_mode === "MarkdownV2"));
++          sentTexts.push(part.text);
++        } catch (err) {
++          // Last-resort degrade for format:'markdown': if Telegram still
++          // refuses the entities, resend the raw CommonMark as plain text.
++          const parseError = isParseEntitiesError(err);
++          if (!(part.parse_mode === "MarkdownV2" && format === "markdown" && parseError)) throw err;
++          const raw = fallback(part);
++          sent = await api.sendMessage(cmd.chat_id, raw, buildOpts(false));
++          sentTexts.push(raw);
++        }
++        sentIds.push(sent.message_id);
++      }
++    } catch (err) {
++      const msg = err instanceof Error ? err.message : String(err);
++      throw new Error(`reply failed after ${sentIds.length} of ${parts.length} chunk(s) sent: ${msg}`);
++    }
++
++    // Files go as separate messages after all text chunks (Telegram doesn't
++    // mix text+file in one sendMessage call).
++    for (const f of files) {
++      const ext = extname(f).toLowerCase();
++      const input = new InputFile(f);
++      const fileOpts =
++        reply_to != null && replyMode !== "off" ? { reply_parameters: { message_id: reply_to } } : undefined;
++      const sent = PHOTO_EXTS.has(ext)
++        ? await api.sendPhoto(cmd.chat_id, input, fileOpts)
++        : await api.sendDocument(cmd.chat_id, input, fileOpts);
++      sentIds.push(sent.message_id);
++    }
++
++    // Log every sent message: one row per text chunk + one row per file.
++    const ts = now();
++    for (let i = 0; i < parts.length; i++) {
++      const chunkReplyTo =
++        reply_to != null && replyMode !== "off" && (replyMode === "all" || i === 0)
++          ? String(reply_to)
++          : undefined;
++      store.logOutbound({
++        ts: ts + i,
++        chat_id: cmd.chat_id,
++        message_id: String(sentIds[i]),
++        source,
++        body: sentTexts[i],
++        reply_to: chunkReplyTo,
++        metadata: format !== "text" ? { format } : undefined,
++      });
++    }
++    for (let j = 0; j < files.length; j++) {
++      const f = files[j]!;
++      const ext = extname(f).toLowerCase();
++      const type = PHOTO_EXTS.has(ext) ? "photo" : "document";
++      store.logOutbound({
++        ts: ts + parts.length + j,
++        chat_id: cmd.chat_id,
++        message_id: String(sentIds[parts.length + j]),
++        source,
++        attachments: [{ type, path: f }],
++      });
++    }
++
++    return sentIds.length === 1 ? `sent (id: ${sentIds[0]})` : `sent ${sentIds.length} parts`;
++  }
++
++  async function doReact(cmd: ReactCommand): Promise<string> {
++    assertAllowedChat(cmd.chat_id, access());
++    if (!REACTION_EMOJI_WHITELIST.has(cmd.emoji)) {
++      throw new Error(`emoji "${cmd.emoji}" is not in Telegram's reaction whitelist`);
++    }
++    await api.setMessageReaction(cmd.chat_id, Number(cmd.message_id), [
++      { type: "emoji", emoji: cmd.emoji },
++    ]);
++    return "reacted";
++  }
++
++  async function doDownloadAttachment(cmd: DownloadAttachmentCommand): Promise<string> {
++    const file = await api.getFile(cmd.file_id);
++    if (!file.file_path) throw new Error("Telegram returned no file_path — file may have expired");
++    const url = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
++    const res = await fetchImpl(url);
++    if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
++    const buf = Buffer.from(await res.arrayBuffer());
++    // file_path is from Telegram (trusted), but strip to safe chars anyway so
++    // nothing downstream can be tricked by an unexpected extension.
++    const rawExt = file.file_path.includes(".") ? file.file_path.split(".").pop()! : "bin";
++    const ext = rawExt.replace(/[^a-zA-Z0-9]/g, "") || "bin";
++    const uniqueId = (file.file_unique_id ?? "").replace(/[^a-zA-Z0-9_-]/g, "") || "dl";
++    const inboxDir = join(stateDir, "inbox");
++    mkdirSync(inboxDir, { recursive: true });
++    const path = join(inboxDir, `${now()}-${uniqueId}.${ext}`);
++    writeFileSync(path, buf);
++    return path;
++  }
++
++  function doGetMessageById(cmd: GetMessageByIdCommand): string {
++    const row = store.getMessage(cmd.chat_id, cmd.message_id);
++    if (!row) throw new Error(`no message ${cmd.message_id} in chat ${cmd.chat_id}`);
++    return JSON.stringify(row, null, 2);
++  }
++
++  return {
++    async handle(raw: unknown): Promise<string> {
++      const cmd = parseOutboundCommand(raw);
++      switch (cmd.op) {
++        case "reply":
++          return doReply(cmd);
++        case "react":
++          return doReact(cmd);
++        case "download_attachment":
++          return doDownloadAttachment(cmd);
++        case "get_message_by_id":
++          return doGetMessageById(cmd);
++      }
++    },
++  };
++}
+diff --git a/packages/telegram-adapter/test/outbound.test.ts b/packages/telegram-adapter/test/outbound.test.ts
+new file mode 100644
+index 0000000..2d5f5d8
+--- /dev/null
++++ b/packages/telegram-adapter/test/outbound.test.ts
+@@ -0,0 +1,565 @@
++// New test suite for outbound.ts — Task C5, Fase 1. Ports the behavior of
++// `plugins/telegram/server.ts:695-901` (mirza-marketplace, reply/react/
++// download_attachment/get_message_by_id handlers) into a pure factory test.
++// No real network, no real Telegram bot — `OutboundApi` is faked entirely in
++// memory; the filesystem is exercised for real (anti-exfil + download write)
++// against a unique temp dir, same convention as
++// packages/hostd/test/access-store.test.ts.
++
++import { describe, expect, test } from "bun:test";
++import { Database } from "bun:sqlite";
++import fs from "node:fs";
++import os from "node:os";
++import path from "node:path";
++import { InputFile } from "grammy";
++import { applySchema, defaultAccess, type Access } from "@mirza-harness/shared";
++import {
++  assertSendable,
++  createOutboundSender,
++  REACTION_EMOJI_WHITELIST,
++  type OutboundApi,
++  type OutboundStore,
++} from "../src/outbound";
++
++function tmpDir(name: string): string {
++  const dir = path.join(
++    os.tmpdir(),
++    `mirza-outbound-test-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}-${name}`,
++  );
++  fs.mkdirSync(dir, { recursive: true });
++  return dir;
++}
++
++function makeAccess(overrides: Partial<Access> = {}): Access {
++  return { ...defaultAccess(), allowFrom: ["u1"], ...overrides };
++}
++
++// ---------------------------------------------------------------------------
++// Fakes.
++// ---------------------------------------------------------------------------
++
++interface SendMessageCall {
++  chat_id: string;
++  text: string;
++  other?: { parse_mode?: "MarkdownV2"; reply_markup?: unknown; reply_parameters?: { message_id: number } };
++}
++
++class FakeApi implements OutboundApi {
++  sendMessageCalls: SendMessageCall[] = [];
++  sendPhotoCalls: { chat_id: string; input: InputFile; other?: unknown }[] = [];
++  sendDocumentCalls: { chat_id: string; input: InputFile; other?: unknown }[] = [];
++  reactionCalls: { chat_id: string; message_id: number; reaction: unknown }[] = [];
++  getFileResult: { file_path?: string; file_unique_id?: string } = {};
++  /** 0-based indices into sendMessageCalls that should throw a parse-entities error, once. */
++  failParseAt = new Set<number>();
++  private nextId = 1;
++
++  async sendMessage(chat_id: string, text: string, other?: SendMessageCall["other"]) {
++    const idx = this.sendMessageCalls.length;
++    this.sendMessageCalls.push({ chat_id, text, other });
++    if (this.failParseAt.has(idx)) {
++      this.failParseAt.delete(idx);
++      throw { description: "Bad Request: can't parse entities: some converter edge case" };
++    }
++    return { message_id: this.nextId++ };
++  }
++
++  async sendPhoto(chat_id: string, input: InputFile, other?: unknown) {
++    this.sendPhotoCalls.push({ chat_id, input, other });
++    return { message_id: this.nextId++ };
++  }
++
++  async sendDocument(chat_id: string, input: InputFile, other?: unknown) {
++    this.sendDocumentCalls.push({ chat_id, input, other });
++    return { message_id: this.nextId++ };
++  }
++
++  async setMessageReaction(chat_id: string, message_id: number, reaction: unknown) {
++    this.reactionCalls.push({ chat_id, message_id, reaction });
++    return true;
++  }
++
++  async getFile(_file_id: string) {
++    return this.getFileResult;
++  }
++}
++
++class FakeStore implements OutboundStore {
++  logs: Array<{
++    ts: number;
++    chat_id: string;
++    message_id?: string;
++    source: "assistant" | "system";
++    body?: string;
++    attachments?: unknown[];
++    reply_to?: string;
++    metadata?: Record<string, unknown>;
++  }> = [];
++
++  logOutbound(input: FakeStore["logs"][number]): void {
++    this.logs.push(input);
++  }
++
++  getMessage(): unknown | null {
++    return null;
++  }
++}
++
++/** A real store backed by a real in-memory SQLite db (packages/shared schema, A1). */
++function realStore(botId: string, channel: string): OutboundStore {
++  const db = new Database(":memory:");
++  applySchema(db);
++  return {
++    logOutbound(input) {
++      const meta: Record<string, unknown> = { ...(input.metadata ?? {}) };
++      if (input.reply_to != null) meta.reply_to = input.reply_to;
++      const metaJson = Object.keys(meta).length > 0 ? JSON.stringify(meta) : null;
++      db.prepare(
++        `INSERT INTO messages (bot_id, channel, chat_id, message_id, direction, source, ts, body, attachments, metadata)
++         VALUES (?, ?, ?, ?, 'out', ?, ?, ?, ?, ?)`,
++      ).run(
++        botId,
++        channel,
++        input.chat_id,
++        input.message_id ?? null,
++        input.source,
++        input.ts,
++        input.body ?? "",
++        input.attachments ? JSON.stringify(input.attachments) : null,
++        metaJson,
++      );
++    },
++    getMessage(chat_id: string, message_id: string) {
++      const row = db
++        .prepare(
++          `SELECT chat_id, message_id, direction, source, ts, body, user_id, user_name, attachments, metadata
++             FROM messages
++            WHERE bot_id = ? AND channel = ? AND chat_id = ? AND message_id = ?
++            ORDER BY ts DESC LIMIT 1`,
++        )
++        .get(botId, channel, chat_id, message_id) as
++        | {
++            chat_id: string;
++            message_id: string | null;
++            direction: string;
++            source: string | null;
++            ts: number;
++            body: string;
++            user_id: string | null;
++            user_name: string | null;
++            attachments: string | null;
++            metadata: string | null;
++          }
++        | null;
++      if (!row) return null;
++      return {
++        ...row,
++        attachments: row.attachments ? JSON.parse(row.attachments) : null,
++        metadata: row.metadata ? JSON.parse(row.metadata) : null,
++      };
++    },
++  };
++}
++
++function makeSender<S extends OutboundStore = FakeStore>(opts: {
++  access?: Access;
++  api?: FakeApi;
++  store?: S;
++  stateDir?: string;
++  fetchImpl?: typeof fetch;
++}) {
++  const access = opts.access ?? makeAccess();
++  const api = opts.api ?? new FakeApi();
++  const store = (opts.store ?? new FakeStore()) as S;
++  const stateDir = opts.stateDir ?? tmpDir("state");
++  const sender = createOutboundSender({
++    botId: "bot-03",
++    api,
++    store,
++    access: () => access,
++    stateDir,
++    token: "TEST:TOKEN",
++    fetchImpl: opts.fetchImpl,
++  });
++  return { sender, api, store, stateDir, access };
++}
++
++// ---------------------------------------------------------------------------
++// reply: chunking, order, buttons on last chunk only, per-chunk logging.
++// ---------------------------------------------------------------------------
++
++describe("outbound: reply chunking + buttons + logging", () => {
++  test("long text splits into ordered chunks; buttons attach only to the last chunk; each chunk is logged", async () => {
++    const access = makeAccess({ textChunkLimit: 20, chunkMode: "length" });
++    const { sender, api, store } = makeSender({ access });
++
++    const text = "x".repeat(45); // -> 20 + 20 + 5
++    const result = await sender.handle({
++      op: "reply",
++      chat_id: "u1",
++      text,
++      buttons: [[{ label: "Yes", callback_id: "yes" }]],
++    });
++
++    expect(result).toBe("sent 3 parts");
++    expect(api.sendMessageCalls.map(c => c.text)).toEqual(["x".repeat(20), "x".repeat(20), "x".repeat(5)]);
++
++    // Buttons only on the last call.
++    expect(api.sendMessageCalls[0]!.other?.reply_markup).toBeUndefined();
++    expect(api.sendMessageCalls[1]!.other?.reply_markup).toBeUndefined();
++    expect(api.sendMessageCalls[2]!.other?.reply_markup).toBeDefined();
++
++    // One store.logOutbound call per chunk, same order, increasing ts.
++    expect(store.logs).toHaveLength(3);
++    expect(store.logs.map(l => l.body)).toEqual(["x".repeat(20), "x".repeat(20), "x".repeat(5)]);
++    expect(store.logs[0]!.ts).toBeLessThan(store.logs[1]!.ts);
++    expect(store.logs[1]!.ts).toBeLessThan(store.logs[2]!.ts);
++    for (const l of store.logs) expect(l.source).toBe("assistant");
++  });
++
++  test("single-chunk reply returns 'sent (id: N)'", async () => {
++    const { sender, api } = makeSender({});
++    const result = await sender.handle({ op: "reply", chat_id: "u1", text: "hi" });
++    expect(result).toBe("sent (id: 1)");
++    expect(api.sendMessageCalls).toHaveLength(1);
++  });
++
++  test("files are sent after all text chunks, in order", async () => {
++    const stateDir = tmpDir("state-files");
++    fs.mkdirSync(path.join(stateDir, "inbox"), { recursive: true });
++    const photo = path.join(stateDir, "inbox", "pic.jpg");
++    const doc = path.join(stateDir, "inbox", "notes.txt");
++    fs.writeFileSync(photo, "fake-jpg-bytes");
++    fs.writeFileSync(doc, "fake-doc-bytes");
++
++    const { sender, api, store } = makeSender({ stateDir });
++    const result = await sender.handle({
++      op: "reply",
++      chat_id: "u1",
++      text: "see attached",
++      files: [photo, doc],
++    });
++
++    expect(api.sendMessageCalls).toHaveLength(1);
++    expect(api.sendPhotoCalls).toHaveLength(1);
++    expect(api.sendPhotoCalls[0]!.input).toBeInstanceOf(InputFile);
++    expect(api.sendDocumentCalls).toHaveLength(1);
++    expect(result).toBe("sent 3 parts");
++
++    // logs: 1 text chunk + 2 files, files carry attachments not body.
++    expect(store.logs).toHaveLength(3);
++    expect(store.logs[1]!.attachments).toEqual([{ type: "photo", path: photo }]);
++    expect(store.logs[2]!.attachments).toEqual([{ type: "document", path: doc }]);
++  });
++});
++
++// ---------------------------------------------------------------------------
++// reply: format markdown -> MarkdownV2 + per-chunk parse-error fallback.
++// ---------------------------------------------------------------------------
++
++describe("outbound: reply format:'markdown' MV2 convert + SCAR-048 fallback", () => {
++  test("markdown converts to MarkdownV2 and sends with parse_mode", async () => {
++    const { sender, api } = makeSender({});
++    await sender.handle({ op: "reply", chat_id: "u1", text: "*bold* and _em_", format: "markdown" });
++
++    expect(api.sendMessageCalls).toHaveLength(1);
++    expect(api.sendMessageCalls[0]!.other?.parse_mode).toBe("MarkdownV2");
++    // Converted text differs from the raw CommonMark input (escaping applied).
++    expect(api.sendMessageCalls[0]!.text).not.toBe("*bold* and _em_");
++  });
++
++  test("when Telegram rejects entities, the chunk is resent as plain text (SCAR-048)", async () => {
++    const { sender, api, store } = makeSender({});
++    api.failParseAt.add(0); // first sendMessage call throws a parse-entities error
++
++    const result = await sender.handle({
++      op: "reply",
++      chat_id: "u1",
++      text: "*bold*",
++      format: "markdown",
++    });
++
++    expect(result).toBe("sent (id: 1)");
++    expect(api.sendMessageCalls).toHaveLength(2); // failed MV2 attempt + plain retry
++    expect(api.sendMessageCalls[0]!.other?.parse_mode).toBe("MarkdownV2");
++    expect(api.sendMessageCalls[1]!.other?.parse_mode).toBeUndefined();
++    expect(api.sendMessageCalls[1]!.text).toBe("*bold*"); // raw CommonMark, unescaped
++
++    // Only ONE log row for this one logical chunk (not one per API attempt).
++    expect(store.logs).toHaveLength(1);
++    expect(store.logs[0]!.body).toBe("*bold*");
++  });
++
++  test("a non-parse-entities error from sendMessage is not swallowed", async () => {
++    const api = new FakeApi();
++    const original = api.sendMessage.bind(api);
++    api.sendMessage = async (...args: Parameters<OutboundApi["sendMessage"]>) => {
++      await original(...args);
++      throw new Error("network blip");
++    };
++    const { sender } = makeSender({ api });
++
++    await expect(
++      sender.handle({ op: "reply", chat_id: "u1", text: "hello", format: "markdown" }),
++    ).rejects.toThrow(/network blip/);
++  });
++});
++
++// ---------------------------------------------------------------------------
++// reply: SCAR-062 buttons ⊕ files mutual exclusion.
++// ---------------------------------------------------------------------------
++
++describe("outbound: reply — SCAR-062 buttons/files mutual exclusion", () => {
++  test("buttons + files together are rejected", async () => {
++    const stateDir = tmpDir("state-mutex");
++    fs.mkdirSync(path.join(stateDir, "inbox"), { recursive: true });
++    const file = path.join(stateDir, "inbox", "a.txt");
++    fs.writeFileSync(file, "data");
++
++    const { sender } = makeSender({ stateDir });
++    await expect(
++      sender.handle({
++        op: "reply",
++        chat_id: "u1",
++        text: "hi",
++        files: [file],
++        buttons: [[{ label: "Yes", callback_id: "yes" }]],
++      }),
++    ).rejects.toThrow(/cannot be combined/);
++  });
++
++  test("invalid button shape is rejected (callback_id regex / row-column caps)", async () => {
++    const { sender } = makeSender({});
++    await expect(
++      sender.handle({
++        op: "reply",
++        chat_id: "u1",
++        text: "hi",
++        buttons: [[{ label: "Yes", callback_id: "NOT VALID!" }]],
++      }),
++    ).rejects.toThrow(/invalid buttons/);
++  });
++
++  test("reply to a chat outside allowFrom/groups is rejected", async () => {
++    const { sender } = makeSender({});
++    await expect(sender.handle({ op: "reply", chat_id: "stranger", text: "hi" })).rejects.toThrow(
++      /not allowlisted/,
++    );
++  });
++});
++
++// ---------------------------------------------------------------------------
++// react: SCAR-053 emoji whitelist.
++// ---------------------------------------------------------------------------
++
++describe("outbound: react — SCAR-053 emoji whitelist", () => {
++  test("whitelisted emoji is accepted and forwarded to setMessageReaction", async () => {
++    const { sender, api } = makeSender({});
++    const result = await sender.handle({ op: "react", chat_id: "u1", message_id: "42", emoji: "👍" });
++    expect(result).toBe("reacted");
++    expect(api.reactionCalls).toHaveLength(1);
++    expect(api.reactionCalls[0]).toEqual({
++      chat_id: "u1",
++      message_id: 42,
++      reaction: [{ type: "emoji", emoji: "👍" }],
++    });
++  });
++
++  test("emoji outside the whitelist is rejected before calling the API", async () => {
++    const { sender, api } = makeSender({});
++    await expect(
++      sender.handle({ op: "react", chat_id: "u1", message_id: "42", emoji: "🚀" }),
++    ).rejects.toThrow(/whitelist/);
++    expect(api.reactionCalls).toHaveLength(0);
++  });
++
++  test("whitelist sanity: contains the documented common set and excludes an arbitrary emoji", () => {
++    expect(REACTION_EMOJI_WHITELIST.has("👍")).toBe(true);
++    expect(REACTION_EMOJI_WHITELIST.has("🔥")).toBe(true);
++    expect(REACTION_EMOJI_WHITELIST.has("🚀")).toBe(false);
++  });
++});
++
++// ---------------------------------------------------------------------------
++// anti-exfil: assertSendable — files inside stateDir root are refused,
++// files inside stateDir/inbox are allowed.
++// ---------------------------------------------------------------------------
++
++describe("outbound: anti-exfil (assertSendable)", () => {
++  test("a file at the stateDir root is refused", () => {
++    const stateDir = tmpDir("state-exfil-root");
++    const secret = path.join(stateDir, "access.json");
++    fs.writeFileSync(secret, "{}");
++    expect(() => assertSendable(secret, stateDir)).toThrow(/refusing to send channel state/);
++  });
++
++  test("a file inside stateDir/inbox is allowed", () => {
++    const stateDir = tmpDir("state-exfil-inbox");
++    const inbox = path.join(stateDir, "inbox");
++    fs.mkdirSync(inbox, { recursive: true });
++    const downloaded = path.join(inbox, "1234-abc.jpg");
++    fs.writeFileSync(downloaded, "data");
++    expect(() => assertSendable(downloaded, stateDir)).not.toThrow();
++  });
++
++  test("a file entirely outside stateDir is allowed", () => {
++    const stateDir = tmpDir("state-exfil-outside");
++    const outside = tmpDir("outside-file-holder");
++    const f = path.join(outside, "report.pdf");
++    fs.writeFileSync(f, "data");
++    expect(() => assertSendable(f, stateDir)).not.toThrow();
++  });
++
++  test("reply() end-to-end: file at stateDir root is rejected via handle()", async () => {
++    const stateDir = tmpDir("state-exfil-e2e");
++    const secret = path.join(stateDir, "access.json");
++    fs.writeFileSync(secret, "{}");
++    const { sender } = makeSender({ stateDir });
++    await expect(
++      sender.handle({ op: "reply", chat_id: "u1", text: "leak?", files: [secret] }),
++    ).rejects.toThrow(/refusing to send channel state/);
++  });
++
++  test("reply() end-to-end: file inside stateDir/inbox is accepted via handle()", async () => {
++    const stateDir = tmpDir("state-exfil-e2e-ok");
++    const inbox = path.join(stateDir, "inbox");
++    fs.mkdirSync(inbox, { recursive: true });
++    const downloaded = path.join(inbox, "1234-abc.jpg");
++    fs.writeFileSync(downloaded, "data");
++    const { sender, api } = makeSender({ stateDir });
++    const result = await sender.handle({ op: "reply", chat_id: "u1", text: "here", files: [downloaded] });
++    expect(result).toBe("sent 2 parts");
++    expect(api.sendPhotoCalls).toHaveLength(1);
++  });
++});
++
++// ---------------------------------------------------------------------------
++// download_attachment: writes to <stateDir>/inbox/<ts>-<unique>.<ext>.
++// ---------------------------------------------------------------------------
++
++describe("outbound: download_attachment", () => {
++  test("downloads via injected fetchImpl and writes into stateDir/inbox", async () => {
++    const stateDir = tmpDir("state-download");
++    const api = new FakeApi();
++    api.getFileResult = { file_path: "photos/file_1.jpg", file_unique_id: "AQAD-unique_1" };
++
++    const fakeFetch = (async (url: string | URL) => {
++      expect(String(url)).toBe("https://api.telegram.org/file/botTEST:TOKEN/photos/file_1.jpg");
++      return {
++        ok: true,
++        status: 200,
++        arrayBuffer: async () => new TextEncoder().encode("hello-bytes").buffer,
++      } as Response;
++    }) as typeof fetch;
++
++    const { sender } = makeSender({ stateDir, api, fetchImpl: fakeFetch });
++    const resultPath = await sender.handle({ op: "download_attachment", file_id: "f1" });
++
++    expect(resultPath.startsWith(path.join(stateDir, "inbox"))).toBe(true);
++    expect(resultPath.endsWith(".jpg")).toBe(true);
++    expect(resultPath).toContain("AQAD-unique_1");
++    expect(fs.readFileSync(resultPath, "utf8")).toBe("hello-bytes");
++  });
++
++  test("a failed HTTP download throws", async () => {
++    const stateDir = tmpDir("state-download-fail");
++    const api = new FakeApi();
++    api.getFileResult = { file_path: "docs/f.pdf", file_unique_id: "u1" };
++    const fakeFetch = (async (_url: string | URL) => ({ ok: false, status: 404 }) as Response) as typeof fetch;
++
++    const { sender } = makeSender({ stateDir, api, fetchImpl: fakeFetch });
++    await expect(sender.handle({ op: "download_attachment", file_id: "f1" })).rejects.toThrow(
++      /download failed: HTTP 404/,
++    );
++  });
++
++  test("missing file_path from Telegram throws a clear error", async () => {
++    const stateDir = tmpDir("state-download-nopath");
++    const api = new FakeApi();
++    api.getFileResult = {};
++    const { sender } = makeSender({ stateDir, api });
++    await expect(sender.handle({ op: "download_attachment", file_id: "f1" })).rejects.toThrow(
++      /no file_path/,
++    );
++  });
++});
++
++// ---------------------------------------------------------------------------
++// get_message_by_id: real store (in-memory SQLite) roundtrip.
++// ---------------------------------------------------------------------------
++
++describe("outbound: get_message_by_id — real store roundtrip", () => {
++  test("a message sent via reply() can be looked up afterwards", async () => {
++    const store = realStore("bot-03", "telegram");
++    const { sender } = makeSender({ store });
++
++    const sendResult = await sender.handle({ op: "reply", chat_id: "u1", text: "hello world" });
++    const idMatch = /sent \(id: (\d+)\)/.exec(sendResult);
++    expect(idMatch).not.toBeNull();
++    const messageId = idMatch![1]!;
++
++    const raw = await sender.handle({ op: "get_message_by_id", chat_id: "u1", message_id: messageId });
++    const row = JSON.parse(raw);
++    expect(row.chat_id).toBe("u1");
++    expect(row.message_id).toBe(messageId);
++    expect(row.body).toBe("hello world");
++    expect(row.direction).toBe("out");
++    expect(row.source).toBe("assistant");
++  });
++
++  test("looking up a message that was never sent throws a clear error", async () => {
++    const store = realStore("bot-03", "telegram");
++    const { sender } = makeSender({ store });
++    await expect(
++      sender.handle({ op: "get_message_by_id", chat_id: "u1", message_id: "999" }),
++    ).rejects.toThrow(/no message 999 in chat u1/);
++  });
++});
++
++// ---------------------------------------------------------------------------
++// OutboundCommandSchema shape validation (zod discriminated union, sourced
++// from @mirza-harness/shared) — bad shape throws a ZodError. Asserted via
++// duck-typing (`.name` / `.issues`) rather than `instanceof ZodError`,
++// because `zod` is not a direct dependency of telegram-adapter (only
++// @mirza-harness/shared is) and importing it here would fail to resolve.
++// ---------------------------------------------------------------------------
++
++describe("outbound: command shape validation (OutboundCommandSchema)", () => {
++  test("unknown op is rejected with a ZodError", async () => {
++    const { sender } = makeSender({});
++    let caught: unknown;
++    try {
++      await sender.handle({ op: "edit_message", chat_id: "u1", text: "hi" });
++    } catch (err) {
++      caught = err;
++    }
++    expect(caught).toBeDefined();
++    expect((caught as { name?: string }).name).toBe("ZodError");
++    expect(Array.isArray((caught as { issues?: unknown }).issues)).toBe(true);
++  });
++
++  test("missing required field is rejected with a ZodError", async () => {
++    const { sender } = makeSender({});
++    let caught: unknown;
++    try {
++      await sender.handle({ op: "reply", chat_id: "u1" });
++    } catch (err) {
++      caught = err;
++    }
++    expect(caught).toBeDefined();
++    expect((caught as { name?: string }).name).toBe("ZodError");
++    expect(Array.isArray((caught as { issues?: unknown }).issues)).toBe(true);
++  });
++
++  test("unrecognized key on an otherwise-valid reply command is rejected (strict schema)", async () => {
++    const { sender } = makeSender({});
++    let caught: unknown;
++    try {
++      await sender.handle({ op: "reply", chat_id: "u1", text: "hi", unexpected_field: 1 });
++    } catch (err) {
++      caught = err;
++    }
++    expect(caught).toBeDefined();
++    expect((caught as { name?: string }).name).toBe("ZodError");
++  });
++});

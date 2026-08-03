@@ -54,6 +54,12 @@ tanpa saklar apa pun, dan tombolnya dicopot setelah ditap.
   Kemungkinan besar yang dulu kamu konfirmasi berjalan di era daemon yang
   sekarang sudah dibubarkan. **Ini sekarang tercatat sebagai celah**, salah satu
   dari tiga yang kamu pilih untuk dikerjakan.
+  **Pembaruan 2026-08-03 — sekarang benar-benar ada** (`cc-plugin` 0.8.0, merge
+  `298f5af`): `reply` menerima `files`, gambar mendarat sebagai foto dan sisanya
+  sebagai dokumen. Terverifikasi lewat Telegram sungguhan, keempat kriteria
+  lulus. Perhatikan bentuk kalimatnya: yang dulu ditulis sebagai *"sudah terbukti
+  hidup"* tanpa bukti kini punya nomor merge, nomor versi, dan nomor baris
+  database — dan baru karena itu ia boleh berdiri di daftar ini.
 - **"Album tiga foto" — belum kamu lihat.** Kodenya ada dan lulus test, tapi
   belum pernah menyentuh Telegram sungguhan. Dokumen status yang lain memang
   sudah menandainya begitu sejak 2026-08-01; halaman ini yang keliru.

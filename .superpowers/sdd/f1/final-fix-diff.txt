@@ -1,0 +1,387 @@
+diff --git a/packages/hostd/E1-RUNBOOK.md b/packages/hostd/E1-RUNBOOK.md
+new file mode 100644
+index 0000000..19404c2
+--- /dev/null
++++ b/packages/hostd/E1-RUNBOOK.md
+@@ -0,0 +1,128 @@
++# E1 — Runbook uji live (Fase 1, hostd)
++
++Ringkas, operasional. Tujuan: verifikasi jalur pairing -> approve -> delivery
++(DM, album, buttons, agent_send) sungguh jalan end-to-end lewat permukaan
++produk (bukan cuma unit test), pakai bot-07 + cc-stub di workspace uji.
++
++## 0. Prasyarat
++
++- `bun install` sudah jalan di root repo (`mirza-harness`).
++- Config `hostd.config.json` (root, atau path via `MIRZA_HOSTD_CONFIG`) berisi
++  entri bot-07 dgn `telegram_token` asli (lihat `hostd.config.example.json`).
++  Contoh:
++  ```json
++  { "bots": [{ "id": "bot-07", "telegram_token": "<token asli>", "workspace": "<path workspace uji>" }] }
++  ```
++- Pilih path DB eksplisit untuk sesi uji ini (jangan pakai `./hostd.db` default
++  supaya gampang dibuang setelah selesai):
++  `MIRZA_HOSTD_DB=./e1-hostd.db`
++- Pipe default `PIPE_NAME_DEFAULT` (shared) dipakai kalau `MIRZA_HOSTD_PIPE`
++  tak di-set — cukup untuk satu instance hostd + satu cc-stub lokal.
++
++## 1. Boot hostd
++
++```
++MIRZA_HOSTD_DB=./e1-hostd.db MIRZA_HOSTD_CONFIG=./hostd.config.json \
++  bun run packages/hostd/src/main.ts
++```
++
++Tunggu log `[hostd] vX.Y.Z siap — pipe: ... (pid ...)`. Biarkan proses ini
++jalan di terminal sendiri sepanjang sesi uji.
++
++## 2. Boot cc-stub di workspace uji
++
++Di terminal kedua, di dalam workspace uji (path yang sama dgn `workspace`
++bot-07 di config):
++
++```
++MIRZA_HOSTD_PIPE=<pipe yang sama dgn hostd> bun run packages/cc-stub/src/server.ts
++```
++
++cc-stub konek ke pipe hostd yang sama dan mendaftar sbg penerima delivery
++untuk bot-07.
++
++## 3. Pairing: dapatkan kode
++
++Dari akun Telegram uji, kirim DM ke bot-07 (dmPolicy default = `pairing`,
++belum ada siapa pun di `allowFrom`). Bot akan membalas kode pairing
++(pairing-reply lewat `Api.sendMessage` langsung — lihat komentar main.ts
++soal ini bypass `OutboundSender`). Catat `user_id` pengirim (angka Telegram
++user id, BUKAN username) dan kode — bisa juga dicek langsung:
++
++```
++bun run packages/hostd/src/cli.ts access show bot-07
++```
++
++`pending` di output JSON berisi map `code -> {senderId, chatId, ...}` —
++`senderId` itu `user_id` yang dipakai di langkah 4.
++
++## 4. Approve pairing (jalur produk — BLOCKER yang baru di-fix)
++
++```
++bun run packages/hostd/src/cli.ts access approve bot-07 <user_id>
++```
++
++Ini memanggil `approvePairing` (state/access-store.ts) atas DB yang SAMA
++yang dibaca hostd (`openDb` yang sama, WAL + busy_timeout — aman ditulis
++dari proses CLI terpisah selagi hostd jalan). Cetak ringkas `allowFrom` +
++sisa `pending` setelah approve.
++
++Verifikasi cepat:
++
++```
++bun run packages/hostd/src/cli.ts access show bot-07
++```
++
++`allowFrom` harus memuat `<user_id>`, `pending` harus tak lagi memuat kode
++tsb.
++
++Jalur darurat (skip kode pairing sepenuhnya, mis. testing cepat atau
++approve tanpa menunggu user kirim DM lagi):
++
++```
++bun run packages/hostd/src/cli.ts access allow bot-07 <user_id>
++```
++
++## 5. Verifikasi delivery setelah approve — TANPA restart
++
++- **DM**: kirim DM lagi dari akun yang baru di-approve -> harus deliver
++  (masuk ke `messages` store + terlihat cc-stub, tanpa perlu kirim ulang
++  kode). Ini yang membuktikan hostd baca `access` FRESH per pesan (lihat
++  komentar cli.ts: closure `() => getAccess(db, botId, "telegram")` di
++  main.ts query ulang tabel tiap dipanggil, bukan snapshot di-cache saat
++  startup) — tidak perlu restart hostd setelah CLI approve.
++- **Album**: kirim beberapa foto sekaligus (media group) dari akun yang
++  sama -> cek diterima sbg satu unit di sisi cc-stub/messages store.
++- **Buttons**: picu path yang mengirim inline keyboard (via cc-stub
++  `telegram.outbound` reply dgn buttons) -> tekan salah satu -> callback
++  harus balik ke hostd dan diproses.
++- **agent_send**: dari cc-stub, panggil tool `agent_send` (bus enqueue) ke
++  bot lain yang terdaftar -> cek `bus`/`delivery` stats via doctor (langkah 6)
++  naik sesuai.
++
++## 6. Doctor — cara baca yang benar
++
++```
++bun run packages/hostd/src/cli.ts doctor
++```
++
++**JANGAN** jadikan field `ok` sebagai sinyal kesehatan — `ok: true`
++di-hardcode di `doctor.ts` (limitasi tercatat, bukan bug baru). Yang
++benar-benar informatif:
++
++- `components.adapters` — harus JSON `{<bot_id>: "running"}` per bot
++  terkonfigurasi, BUKAN string `"stub"` (stub berarti adapter belum wired /
++  belum start).
++- `components.bus` — harus JSON stats (`queued`, `dead`,
++  `oldest_unacked_s`, dan field `delivery` kalau delivery loop jalan),
++  BUKAN string `"stub"`.
++
++Kalau salah satu masih `"stub"` setelah hostd boot, itu tanda wiring belum
++lengkap — cek log boot hostd dan config bot.
++
++## 7. Bersih-bersih
++
++- Hentikan cc-stub (`Ctrl+C`), lalu hostd (`SIGINT`/`Ctrl+C` — sudah ada
++  handler shutdown rapi di main.ts).
++- Hapus file DB uji: `rm -f e1-hostd.db e1-hostd.db-wal e1-hostd.db-shm`
++  (WAL menghasilkan file sidecar `-wal`/`-shm`).
+diff --git a/packages/hostd/src/cli.ts b/packages/hostd/src/cli.ts
+index 034aabc..dcc28c0 100644
+--- a/packages/hostd/src/cli.ts
++++ b/packages/hostd/src/cli.ts
+@@ -1,26 +1,127 @@
+ import net from "node:net";
++import { join } from "node:path";
++import type { Database } from "bun:sqlite";
+ import { PIPE_NAME_DEFAULT } from "@mirza-harness/shared";
++import { openDb } from "./state/db";
++import { approvePairing, getAccess, setAccess } from "./state/access-store";
+ 
+-const [cmd] = process.argv.slice(2);
+-if (cmd !== "doctor") {
+-  console.error("pakai: cli.ts doctor");
+-  process.exit(2);
++/**
++ * fix final-review (approve wiring) — sebelum ini `approvePairing`/`setAccess`
++ * (state/access-store.ts, sudah teruji) tak punya caller produksi: satu-
++ * satunya permukaan produk (`cli.ts`) cuma `doctor`. Akibatnya user tak
++ * pernah bisa masuk `allowFrom` lewat jalur nyata (lihat E1-RUNBOOK.md utk
++ * alur uji live lengkap).
++ *
++ * `access` subcommand membuka DB YANG SAMA yang dipakai proses hostd yang
++ * sedang jalan (`resolveDbPath()` — env `MIRZA_HOSTD_DB` atau `<cwd>/hostd.db`,
++ * identik main.ts) lewat `openDb` yang sama (WAL + busy_timeout=5000 —
++ * aman ditulis dari proses CLI terpisah selagi hostd jalan; JANGAN buka
++ * koneksi dgn pragma lain). `openDb` memanggil `applySchema`+`runRetention`
++ * tiap kali dibuka — keduanya idempotent, aman dipanggil ulang dari CLI.
++ *
++ * Fresh-read per pesan: `main.ts` mewire inbound pipeline & outbound sender
++ * dengan `access: () => getAccess(db, botId, "telegram")` — sebuah closure
++ * yang query ulang tabel `channel_access` tiap dipanggil (bukan snapshot
++ * yang di-cache in-memory sekali saat startup). Jadi begitu CLI ini commit
++ * baris `channel_access` (proses terpisah, DB file yang sama), pesan
++ * BERIKUTNYA yang diproses hostd akan melihatnya tanpa perlu restart.
++ */
++
++const USAGE = [
++  "pakai:",
++  "  cli.ts doctor",
++  "  cli.ts access approve <bot_id> <user_id>   # pindah dari pending -> allowFrom",
++  "  cli.ts access show <bot_id>                # cetak access JSON",
++  "  cli.ts access allow <bot_id> <user_id>     # jalur darurat: tambah allowFrom langsung, lewati kode pairing",
++].join("\n");
++
++function resolveDbPath(): string {
++  const fromEnv = process.env.MIRZA_HOSTD_DB?.trim();
++  if (fromEnv) return fromEnv;
++  return join(process.cwd(), "hostd.db");
++}
++
++export interface AccessCommandResult {
++  exitCode: number;
++  output: string;
++}
++
++/**
++ * Logika `access <sub>` diekstrak dari dispatch CLI supaya testable tanpa
++ * `Bun.spawnSync` (test bisa pakai `openDb(":memory:")` langsung). CLI tipis
++ * di bawah cuma resolve db path lalu panggil ini.
++ */
++export function runAccessCommand(db: Database, args: string[]): AccessCommandResult {
++  const [sub, botId, userId] = args;
++
++  if (sub === "show") {
++    if (!botId) return { exitCode: 2, output: `access show: butuh <bot_id>\n${USAGE}` };
++    return { exitCode: 0, output: JSON.stringify(getAccess(db, botId), null, 2) };
++  }
++
++  if (sub === "approve") {
++    if (!botId || !userId) return { exitCode: 2, output: `access approve: butuh <bot_id> <user_id>\n${USAGE}` };
++    const result = approvePairing(db, botId, userId);
++    return {
++      exitCode: 0,
++      output: `approved: ${userId} -> allowFrom (${botId}). allowFrom=${JSON.stringify(result.allowFrom)} pending=${JSON.stringify(Object.keys(result.pending))}`,
++    };
++  }
++
++  if (sub === "allow") {
++    if (!botId || !userId) return { exitCode: 2, output: `access allow: butuh <bot_id> <user_id>\n${USAGE}` };
++    const current = getAccess(db, botId);
++    if (!current.allowFrom.includes(userId)) current.allowFrom.push(userId);
++    const result = setAccess(db, botId, current);
++    return {
++      exitCode: 0,
++      output: `allowed (darurat, tanpa kode pairing): ${userId} -> allowFrom (${botId}). allowFrom=${JSON.stringify(result.allowFrom)}`,
++    };
++  }
++
++  return { exitCode: 2, output: `access: subcommand tak dikenal '${sub ?? ""}'\n${USAGE}` };
++}
++
++function runDoctor(): void {
++  const pipe = process.env.MIRZA_HOSTD_PIPE ?? PIPE_NAME_DEFAULT;
++  const sock = net.connect(pipe, () => {
++    sock.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "doctor" }) + "\n");
++  });
++  let buf = "";
++  sock.on("data", d => {
++    buf += d.toString("utf8");
++    const nl = buf.indexOf("\n");
++    if (nl >= 0) {
++      console.log(JSON.stringify(JSON.parse(buf.slice(0, nl)).result, null, 2));
++      sock.end();
++    }
++  });
++  sock.on("error", err => {
++    console.error(`hostd tidak terjangkau di ${pipe}: ${err.message}`);
++    process.exit(1);
++  });
+ }
+ 
+-const pipe = process.env.MIRZA_HOSTD_PIPE ?? PIPE_NAME_DEFAULT;
+-const sock = net.connect(pipe, () => {
+-  sock.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "doctor" }) + "\n");
+-});
+-let buf = "";
+-sock.on("data", d => {
+-  buf += d.toString("utf8");
+-  const nl = buf.indexOf("\n");
+-  if (nl >= 0) {
+-    console.log(JSON.stringify(JSON.parse(buf.slice(0, nl)).result, null, 2));
+-    sock.end();
++function main(): void {
++  const [cmd, sub2, ...rest] = process.argv.slice(2);
++
++  if (cmd === "doctor") {
++    runDoctor();
++    return;
++  }
++
++  if (cmd === "access") {
++    const db = openDb(resolveDbPath());
++    const result = runAccessCommand(db, [sub2, ...rest]);
++    console.log(result.output);
++    db.close();
++    process.exit(result.exitCode);
+   }
+-});
+-sock.on("error", err => {
+-  console.error(`hostd tidak terjangkau di ${pipe}: ${err.message}`);
+-  process.exit(1);
+-});
++
++  console.error(USAGE);
++  process.exit(2);
++}
++
++if (import.meta.main) {
++  main();
++}
+diff --git a/packages/hostd/test/cli-access.test.ts b/packages/hostd/test/cli-access.test.ts
+new file mode 100644
+index 0000000..1d0e203
+--- /dev/null
++++ b/packages/hostd/test/cli-access.test.ts
+@@ -0,0 +1,95 @@
++import { describe, expect, test } from "bun:test";
++import { openDb } from "../src/state/db";
++import { addPending, getAccess } from "../src/state/access-store";
++import { runAccessCommand } from "../src/cli";
++
++describe("runAccessCommand — access approve", () => {
++  test("memindahkan pending -> allowFrom, hapus entri pending", () => {
++    const db = openDb(":memory:");
++    addPending(db, "bot-07", "u1", "code1");
++    const result = runAccessCommand(db, ["approve", "bot-07", "u1"]);
++    expect(result.exitCode).toBe(0);
++    expect(result.output).toContain("u1");
++    const access = getAccess(db, "bot-07");
++    expect(access.allowFrom).toEqual(["u1"]);
++    expect(access.pending).toEqual({});
++    db.close();
++  });
++
++  test("bot_id hilang -> usage error exit 2", () => {
++    const db = openDb(":memory:");
++    const result = runAccessCommand(db, ["approve"]);
++    expect(result.exitCode).toBe(2);
++    expect(result.output).toContain("pakai");
++    db.close();
++  });
++
++  test("user_id hilang -> usage error exit 2", () => {
++    const db = openDb(":memory:");
++    const result = runAccessCommand(db, ["approve", "bot-07"]);
++    expect(result.exitCode).toBe(2);
++    db.close();
++  });
++});
++
++describe("runAccessCommand — access allow", () => {
++  test("menambah userId langsung ke allowFrom (tanpa pending)", () => {
++    const db = openDb(":memory:");
++    const result = runAccessCommand(db, ["allow", "bot-07", "u2"]);
++    expect(result.exitCode).toBe(0);
++    expect(getAccess(db, "bot-07").allowFrom).toEqual(["u2"]);
++    db.close();
++  });
++
++  test("idempotent: allow dua kali tidak duplikat", () => {
++    const db = openDb(":memory:");
++    runAccessCommand(db, ["allow", "bot-07", "u2"]);
++    runAccessCommand(db, ["allow", "bot-07", "u2"]);
++    expect(getAccess(db, "bot-07").allowFrom).toEqual(["u2"]);
++    db.close();
++  });
++
++  test("bot_id/user_id hilang -> usage error exit 2", () => {
++    const db = openDb(":memory:");
++    expect(runAccessCommand(db, ["allow"]).exitCode).toBe(2);
++    expect(runAccessCommand(db, ["allow", "bot-07"]).exitCode).toBe(2);
++    db.close();
++  });
++});
++
++describe("runAccessCommand — access show", () => {
++  test("mencetak access JSON (default bila belum ada baris)", () => {
++    const db = openDb(":memory:");
++    const result = runAccessCommand(db, ["show", "bot-07"]);
++    expect(result.exitCode).toBe(0);
++    expect(JSON.parse(result.output)).toEqual(getAccess(db, "bot-07"));
++    db.close();
++  });
++
++  test("mencetak access setelah approve", () => {
++    const db = openDb(":memory:");
++    addPending(db, "bot-07", "u1", "code1");
++    runAccessCommand(db, ["approve", "bot-07", "u1"]);
++    const result = runAccessCommand(db, ["show", "bot-07"]);
++    const parsed = JSON.parse(result.output);
++    expect(parsed.allowFrom).toEqual(["u1"]);
++    db.close();
++  });
++
++  test("bot_id hilang -> usage error exit 2", () => {
++    const db = openDb(":memory:");
++    const result = runAccessCommand(db, ["show"]);
++    expect(result.exitCode).toBe(2);
++    db.close();
++  });
++});
++
++describe("runAccessCommand — subcommand tak dikenal", () => {
++  test("exit 2 + pesan usage", () => {
++    const db = openDb(":memory:");
++    const result = runAccessCommand(db, ["bukan-subcommand"]);
++    expect(result.exitCode).toBe(2);
++    expect(result.output).toContain("pakai");
++    db.close();
++  });
++});

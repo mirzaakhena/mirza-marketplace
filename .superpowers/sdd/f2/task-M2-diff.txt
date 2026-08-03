@@ -1,0 +1,1413 @@
+diff --git a/packages/cc-stub/scripts/context-bridge.ts b/packages/cc-stub/scripts/context-bridge.ts
+new file mode 100644
+index 0000000..002d81a
+--- /dev/null
++++ b/packages/cc-stub/scripts/context-bridge.ts
+@@ -0,0 +1,198 @@
++#!/usr/bin/env bun
++/**
++ * Task M2, Fase 2 — statusLine bridge: extracts telemetry from Claude Code's
++ * statusLine stdin snapshot (design doc §10.5b / bot-01's masukan, CC
++ * >=2.1.199: `payload.context_window.{used_percentage, context_window_size}`
++ * + `payload.model`/`payload.effort`/`payload.cost`/`payload.session_id`),
++ * reports it to hostd's `telemetry.report` RPC (writes the telemetry columns
++ * of the matching `sessions` row — schema.ts, Task M2), then chains to
++ * whatever statusLine command was configured before this bridge (recon-hooks
++ * .md §E: "Sekarang: statusLine CC -> context-bridge.ts -> last-status.json
++ * ... Baru: context-bridge -> RPC hostd telemetry.report -> kolom telemetri
++ * baris sessions").
++ *
++ * Replaces `plugins/telegram/scripts/context-bridge.ts` (mirza-marketplace):
++ * that script wrote a local `last-status.json` snapshot file (with a
++ * deliberate `payload: null` on unparseable stdin) which `/context` read
++ * directly and dereferenced without a null guard — FUNC-1. Here there is no
++ * local snapshot file at all: hostd's `sessions` table (INFRA-5) is the
++ * single place telemetry lives, read by BOTH `/context`
++ * (telegram-adapter/src/context-command.ts) and `agent_status`
++ * (hostd/src/rpc-handlers.ts's `handleAgentStatus`) — one writer, so a
++ * "null vs missing" disagreement between readers can't happen. And this
++ * bridge structurally can't reproduce FUNC-1: `parseStatusLineInput` below
++ * returns `null` (skip the RPC call entirely) on unparseable/keyless stdin
++ * instead of ever calling `telemetry.report` with a garbage/null payload.
++ *
++ * Fails soft end-to-end, on purpose: a Claude Code statusLine command runs on
++ * every prompt/response cycle and its output becomes the visible status
++ * line — it must NEVER block, delay, or corrupt that rendering. So:
++ *   - unparseable/incomplete stdin -> the telemetry.report call is skipped
++ *     (nothing meaningful to report), not retried, not logged loudly.
++ *   - hostd unreachable/timeout/error -> the rejection is swallowed.
++ *   - EITHER way, the chain to the previous statusLine command (if one was
++ *     configured) always runs, and this process always exits 0.
++ */
++import { existsSync, readFileSync } from "node:fs";
++import { join } from "node:path";
++import { spawnSync } from "node:child_process";
++import { PIPE_NAME_DEFAULT } from "@mirza-harness/shared";
++import { resolveBotId } from "../src/tools";
++import { callHostdOnce } from "../hooks/session-start";
++
++// ---------------------------------------------------------------------------
++// stdin parsing — CC's statusLine payload. Only the fields telemetry.report
++// needs are read; everything else in the snapshot is ignored here (the
++// renderer, context-command.ts, only ever sees what hostd persisted).
++// ---------------------------------------------------------------------------
++
++export interface TelemetryReportParams {
++  bot_id: string;
++  session_id: string;
++  used_percentage: number | null;
++  context_window_size: number | null;
++  model: string | null;
++  effort: string | null;
++  cost: number | null;
++  captured_at_ms: number;
++}
++
++function numberOrNull(v: unknown): number | null {
++  return typeof v === "number" && Number.isFinite(v) ? v : null;
++}
++
++function nonEmptyStringOrNull(v: unknown): string | null {
++  return typeof v === "string" && v.length > 0 ? v : null;
++}
++
++/**
++ * Parse CC's statusLine stdin JSON into `telemetry.report`'s params
++ * (`bot_id` filled in separately by the caller). Returns `null` when the
++ * stdin isn't JSON or lacks a non-empty `session_id` — there is nothing to
++ * key a `sessions` row update on without it (mirrors
++ * `../hooks/session-start.ts`'s `parseSessionStartInput` "fail silent,
++ * nothing worth reporting" contract — this is the FUNC-1 fix: skip the
++ * report entirely rather than ever writing/reporting a null payload).
++ */
++export function parseStatusLineInput(
++  raw: string,
++  botId: string,
++  nowMs: () => number = Date.now,
++): TelemetryReportParams | null {
++  let input: unknown;
++  try {
++    input = JSON.parse(raw);
++  } catch {
++    return null;
++  }
++  const obj = input as Record<string, unknown> | null;
++  const sessionId = obj?.session_id;
++  if (typeof sessionId !== "string" || sessionId.length === 0) return null;
++
++  const contextWindow = obj?.context_window as Record<string, unknown> | undefined;
++  const model = obj?.model as Record<string, unknown> | undefined;
++  const effort = obj?.effort as Record<string, unknown> | undefined;
++  const cost = obj?.cost as Record<string, unknown> | undefined;
++
++  return {
++    bot_id: botId,
++    session_id: sessionId,
++    used_percentage: numberOrNull(contextWindow?.used_percentage),
++    context_window_size: numberOrNull(contextWindow?.context_window_size),
++    model: nonEmptyStringOrNull(model?.display_name),
++    effort: nonEmptyStringOrNull(effort?.level),
++    cost: numberOrNull(cost?.total_cost_usd),
++    captured_at_ms: nowMs(),
++  };
++}
++
++// ---------------------------------------------------------------------------
++// telemetry.report — best-effort, injectable `call` (mirrors
++// ../hooks/session-start.ts's `SessionStartDeps` pattern).
++// ---------------------------------------------------------------------------
++
++export interface ReportTelemetryDeps {
++  call: (method: string, params: unknown) => Promise<unknown>;
++}
++
++/**
++ * Reports `params` to hostd's `telemetry.report`. NEVER throws/rejects —
++ * hostd unreachable, timeout, RPC error, or a rejected/malformed reply are
++ * all swallowed here so the caller can unconditionally proceed to chain +
++ * exit 0 (module docstring's "fails soft end-to-end").
++ */
++export async function reportTelemetry(params: TelemetryReportParams, deps: ReportTelemetryDeps): Promise<void> {
++  try {
++    await deps.call("telemetry.report", params);
++  } catch {
++    // Best-effort — see module docstring. A statusLine bridge must never
++    // fail loudly just because hostd is momentarily unreachable.
++  }
++}
++
++// ---------------------------------------------------------------------------
++// Chain to the previously-configured statusLine command (unchanged behavior
++// from `plugins/telegram/scripts/context-bridge.ts`, ported).
++// ---------------------------------------------------------------------------
++
++/**
++ * Resolve the `chained-statusline` file path from `CLAUDE_PROJECT_DIR` — the
++ * same convention `plugins/telegram/scripts/context-bridge.ts` used
++ * (`<project>/.claude/channels/telegram/chained-statusline`). Returns `null`
++ * when the env var is absent/blank (nothing to chain to, and no directory to
++ * even look in).
++ */
++export function resolveChainedStatusLineFile(env: Record<string, string | undefined>): string | null {
++  const projectDir = env.CLAUDE_PROJECT_DIR?.trim();
++  if (!projectDir) return null;
++  return join(projectDir, ".claude", "channels", "telegram", "chained-statusline");
++}
++
++/**
++ * Executes the previous statusLine command (if `chainFile` exists and isn't
++ * blank), piping `stdin` into it and forwarding its stdout/stderr straight
++ * through (`inherit`) — since THIS process's stdout IS what Claude Code
++ * reads as the status line, chaining means "let the old command's output be
++ * ours". No-op (nothing printed, nothing thrown) when `chainFile` is `null`
++ * or missing/blank — that's the normal case for a bot that never had a
++ * custom statusLine configured before this bridge.
++ */
++export function runChainedStatusLine(chainFile: string | null, stdin: string): void {
++  if (!chainFile || !existsSync(chainFile)) return;
++  const chain = readFileSync(chainFile, "utf8").trim();
++  if (!chain) return;
++  spawnSync(chain, { input: stdin, stdio: ["pipe", "inherit", "inherit"], shell: true });
++}
++
++// ---------------------------------------------------------------------------
++// Entrypoint.
++// ---------------------------------------------------------------------------
++
++async function main(): Promise<void> {
++  let raw = "";
++  try {
++    raw = readFileSync(0, "utf8");
++  } catch {
++    raw = "";
++  }
++
++  const botId = resolveBotId();
++  const params = parseStatusLineInput(raw, botId);
++  if (params) {
++    const pipeName = process.env.MIRZA_HOSTD_PIPE ?? PIPE_NAME_DEFAULT;
++    await reportTelemetry(params, { call: (method, callParams) => callHostdOnce(pipeName, method, callParams) });
++  }
++
++  // ALWAYS chain, regardless of whether the telemetry report above ran,
++  // succeeded, or was skipped — module docstring's "fails soft end-to-end".
++  runChainedStatusLine(resolveChainedStatusLineFile(process.env), raw);
++}
++
++if (import.meta.main) {
++  main()
++    .catch(() => {
++      // Belt-and-braces: even an unexpected throw here must not surface as a
++      // non-zero exit / crash log from a statusLine command.
++    })
++    .finally(() => process.exit(0));
++}
+diff --git a/packages/cc-stub/test/context-bridge.test.ts b/packages/cc-stub/test/context-bridge.test.ts
+new file mode 100644
+index 0000000..99e437d
+--- /dev/null
++++ b/packages/cc-stub/test/context-bridge.test.ts
+@@ -0,0 +1,331 @@
++import { describe, expect, test } from "bun:test";
++import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
++import { join } from "node:path";
++import { tmpdir } from "node:os";
++import { spawnSync, spawn } from "node:child_process";
++import net from "node:net";
++import {
++  parseStatusLineInput,
++  reportTelemetry,
++  resolveChainedStatusLineFile,
++  runChainedStatusLine,
++  type TelemetryReportParams,
++} from "../scripts/context-bridge";
++
++describe("parseStatusLineInput", () => {
++  test("full snapshot -> every telemetry field extracted, captured_at_ms from injected clock", () => {
++    const raw = JSON.stringify({
++      session_id: "sess-1",
++      context_window: { used_percentage: 42.5, context_window_size: 200000 },
++      model: { display_name: "claude-sonnet-5" },
++      effort: { level: "high" },
++      cost: { total_cost_usd: 1.23 },
++    });
++    const result = parseStatusLineInput(raw, "bot-03", () => 999);
++    expect(result).toEqual({
++      bot_id: "bot-03",
++      session_id: "sess-1",
++      used_percentage: 42.5,
++      context_window_size: 200000,
++      model: "claude-sonnet-5",
++      effort: "high",
++      cost: 1.23,
++      captured_at_ms: 999,
++    });
++  });
++
++  test("session_id only, no context_window/model/effort/cost -> other fields null, not a crash (FUNC-1 parity)", () => {
++    const raw = JSON.stringify({ session_id: "sess-1" });
++    const result = parseStatusLineInput(raw, "bot-03", () => 999);
++    expect(result).toEqual({
++      bot_id: "bot-03",
++      session_id: "sess-1",
++      used_percentage: null,
++      context_window_size: null,
++      model: null,
++      effort: null,
++      cost: null,
++      captured_at_ms: 999,
++    });
++  });
++
++  test("missing session_id -> null (nothing worth reporting)", () => {
++    const raw = JSON.stringify({ context_window: { used_percentage: 10 } });
++    expect(parseStatusLineInput(raw, "bot-03")).toBeNull();
++  });
++
++  test("empty-string session_id -> null", () => {
++    const raw = JSON.stringify({ session_id: "" });
++    expect(parseStatusLineInput(raw, "bot-03")).toBeNull();
++  });
++
++  test("unparseable JSON stdin -> null, not a throw (this IS the FUNC-1 fix: never report a null payload)", () => {
++    expect(() => parseStatusLineInput("not json{{{", "bot-03")).not.toThrow();
++    expect(parseStatusLineInput("not json{{{", "bot-03")).toBeNull();
++  });
++
++  test("empty stdin -> null", () => {
++    expect(parseStatusLineInput("", "bot-03")).toBeNull();
++  });
++
++  test("non-numeric context_window.used_percentage -> null (not coerced, not thrown)", () => {
++    const raw = JSON.stringify({ session_id: "sess-1", context_window: { used_percentage: "42%" } });
++    const result = parseStatusLineInput(raw, "bot-03", () => 1);
++    expect(result?.used_percentage).toBeNull();
++  });
++
++  test("empty-string model/effort -> null (not an empty string in the DB)", () => {
++    const raw = JSON.stringify({ session_id: "sess-1", model: { display_name: "" }, effort: { level: "" } });
++    const result = parseStatusLineInput(raw, "bot-03", () => 1);
++    expect(result?.model).toBeNull();
++    expect(result?.effort).toBeNull();
++  });
++});
++
++describe("reportTelemetry", () => {
++  const params: TelemetryReportParams = {
++    bot_id: "bot-03",
++    session_id: "sess-1",
++    used_percentage: 50,
++    context_window_size: 100000,
++    model: "claude-sonnet-5",
++    effort: "high",
++    cost: 0.5,
++    captured_at_ms: 1000,
++  };
++
++  test("sends telemetry.report with the exact params", async () => {
++    const calls: { method: string; params: unknown }[] = [];
++    await reportTelemetry(params, {
++      call: async (method, callParams) => {
++        calls.push({ method, params: callParams });
++        return { updated: true };
++      },
++    });
++    expect(calls).toEqual([{ method: "telemetry.report", params }]);
++  });
++
++  test("hostd unreachable (call() rejects) -> resolves without throwing (gagal konek -> tetap lanjut)", async () => {
++    await expect(
++      reportTelemetry(params, {
++        call: async () => {
++          throw new Error("hostd unreachable");
++        },
++      }),
++    ).resolves.toBeUndefined();
++  });
++
++  test("hostd replies with an RPC error -> still resolves without throwing", async () => {
++    await expect(
++      reportTelemetry(params, {
++        call: async () => {
++          throw new Error("params tak valid");
++        },
++      }),
++    ).resolves.toBeUndefined();
++  });
++});
++
++describe("resolveChainedStatusLineFile", () => {
++  test("CLAUDE_PROJECT_DIR set -> <project>/.claude/channels/telegram/chained-statusline", () => {
++    const file = resolveChainedStatusLineFile({ CLAUDE_PROJECT_DIR: "C:/workspace/bot-03" });
++    expect(file).toBe(join("C:/workspace/bot-03", ".claude", "channels", "telegram", "chained-statusline"));
++  });
++
++  test("CLAUDE_PROJECT_DIR unset -> null", () => {
++    expect(resolveChainedStatusLineFile({})).toBeNull();
++  });
++
++  test("CLAUDE_PROJECT_DIR blank/whitespace -> null", () => {
++    expect(resolveChainedStatusLineFile({ CLAUDE_PROJECT_DIR: "   " })).toBeNull();
++  });
++});
++
++describe("runChainedStatusLine", () => {
++  function tmpDir(prefix: string): string {
++    return mkdtempSync(join(tmpdir(), prefix));
++  }
++
++  test("chainFile null -> no-op, does not throw", () => {
++    expect(() => runChainedStatusLine(null, "{}")).not.toThrow();
++  });
++
++  test("chainFile path doesn't exist -> no-op, does not throw", () => {
++    const dir = tmpDir("ctx-bridge-chain-missing-");
++    try {
++      expect(() => runChainedStatusLine(join(dir, "chained-statusline"), "{}")).not.toThrow();
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  });
++
++  test("chainFile exists but blank -> no-op, does not throw", () => {
++    const dir = tmpDir("ctx-bridge-chain-blank-");
++    try {
++      const file = join(dir, "chained-statusline");
++      writeFileSync(file, "   \n");
++      expect(() => runChainedStatusLine(file, "{}")).not.toThrow();
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  });
++
++  test("chainFile exists with a real command -> executed, receives the exact stdin, output forwarded", () => {
++    const dir = tmpDir("ctx-bridge-chain-real-");
++    try {
++      const sentinelOut = join(dir, "sentinel.out");
++      const chainCmd =
++        process.platform === "win32" ? `more > "${sentinelOut}"` : `cat > "${sentinelOut}"`;
++      const chainFile = join(dir, "chained-statusline");
++      writeFileSync(chainFile, chainCmd);
++
++      runChainedStatusLine(chainFile, '{"a":1}');
++
++      expect(existsSync(sentinelOut)).toBe(true);
++      expect(readFileSync(sentinelOut, "utf8").trim()).toBe('{"a":1}');
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  });
++});
++
++// ---------------------------------------------------------------------------
++// Full-process integration: spawn the actual script via `bun run`, exercising
++// main()'s "chain ALWAYS runs + exit 0" contract end-to-end — including the
++// "hostd unreachable" path (no mock hostd listening on the given pipe name)
++// and the "hostd reachable" path (a minimal mock hostd captures the
++// telemetry.report call it received).
++// ---------------------------------------------------------------------------
++
++const SCRIPT = join(import.meta.dir, "..", "scripts", "context-bridge.ts");
++
++function runScript(env: Record<string, string>, stdin: string) {
++  return spawnSync("bun", ["run", SCRIPT], {
++    env: { ...process.env, ...env },
++    input: stdin,
++    encoding: "utf-8",
++  });
++}
++
++/**
++ * Async variant of `runScript` — REQUIRED (not just nicer) whenever the test
++ * also runs a mock hostd server in THIS same process (e.g. via
++ * `startMockHostd` below): `spawnSync` blocks this process's entire event
++ * loop until the child exits, so a same-process `net.Server` could never
++ * accept/answer the child's connection while `spawnSync` is blocking —
++ * guaranteed deadlock, broken only by the child's own IPC timeout. `spawn`
++ * (async) keeps this process's event loop running while the child is alive,
++ * so the in-process mock hostd can actually service the child's request.
++ */
++function runScriptAsync(env: Record<string, string>, stdin: string): Promise<{ status: number | null }> {
++  return new Promise(resolve => {
++    const child = spawn("bun", ["run", SCRIPT], { env: { ...process.env, ...env } });
++    child.stdin.end(stdin);
++    child.on("close", status => resolve({ status }));
++  });
++}
++
++function startMockHostd(pipeName: string, handler: (msg: any, sock: net.Socket) => void): Promise<net.Server> {
++  return new Promise((resolve, reject) => {
++    const server = net.createServer(sock => {
++      let buf = "";
++      sock.on("data", d => {
++        buf += d.toString("utf8");
++        let nl: number;
++        while ((nl = buf.indexOf("\n")) >= 0) {
++          const line = buf.slice(0, nl).trim();
++          buf = buf.slice(nl + 1);
++          if (line) handler(JSON.parse(line), sock);
++        }
++      });
++    });
++    server.on("error", reject);
++    server.listen(pipeName, () => resolve(server));
++  });
++}
++
++function closeServer(server: net.Server): Promise<void> {
++  return new Promise(resolve => server.close(() => resolve()));
++}
++
++describe("context-bridge.ts main() — full process", () => {
++  test("hostd unreachable -> still chains to the previous statusLine command, exits 0", () => {
++    const dir = mkdtempSync(join(tmpdir(), "ctx-bridge-e2e-unreachable-"));
++    try {
++      const stateDir = join(dir, ".claude", "channels", "telegram");
++      mkdirSync(stateDir, { recursive: true });
++      const sentinelOut = join(dir, "sentinel.out");
++      const chainCmd = process.platform === "win32" ? `more > "${sentinelOut}"` : `cat > "${sentinelOut}"`;
++      writeFileSync(join(stateDir, "chained-statusline"), chainCmd);
++
++      const payload = { session_id: "sess-1", context_window: { used_percentage: 10 } };
++      const r = runScript(
++        {
++          CLAUDE_PROJECT_DIR: dir,
++          MIRZA_HOSTD_PIPE: `\\\\.\\pipe\\cc-stub-context-bridge-test-unreachable-${process.pid}`,
++          MIRZA_BOT_ID: "bot-03",
++        },
++        JSON.stringify(payload),
++      );
++
++      expect(r.status).toBe(0);
++      expect(existsSync(sentinelOut)).toBe(true);
++      expect(JSON.parse(readFileSync(sentinelOut, "utf8"))).toEqual(payload);
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  });
++
++  test("hostd reachable -> telemetry.report sent with extracted fields, chain still runs, exits 0", async () => {
++    const pipeName = `\\\\.\\pipe\\cc-stub-context-bridge-test-ok-${process.pid}`;
++    const received: { method: string; params: any }[] = [];
++    const server = await startMockHostd(pipeName, (msg, sock) => {
++      received.push({ method: msg.method, params: msg.params });
++      sock.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { updated: true } }) + "\n");
++    });
++
++    const dir = mkdtempSync(join(tmpdir(), "ctx-bridge-e2e-ok-"));
++    try {
++      const stateDir = join(dir, ".claude", "channels", "telegram");
++      mkdirSync(stateDir, { recursive: true });
++      const sentinelOut = join(dir, "sentinel.out");
++      const chainCmd = process.platform === "win32" ? `more > "${sentinelOut}"` : `cat > "${sentinelOut}"`;
++      writeFileSync(join(stateDir, "chained-statusline"), chainCmd);
++
++      const payload = {
++        session_id: "sess-1",
++        context_window: { used_percentage: 77, context_window_size: 150000 },
++        model: { display_name: "claude-sonnet-5" },
++        effort: { level: "low" },
++        cost: { total_cost_usd: 2.5 },
++      };
++      const r = await runScriptAsync({ CLAUDE_PROJECT_DIR: dir, MIRZA_HOSTD_PIPE: pipeName, MIRZA_BOT_ID: "bot-03" }, JSON.stringify(payload));
++
++      expect(r.status).toBe(0);
++      expect(received).toEqual([
++        {
++          method: "telemetry.report",
++          params: {
++            bot_id: "bot-03",
++            session_id: "sess-1",
++            used_percentage: 77,
++            context_window_size: 150000,
++            model: "claude-sonnet-5",
++            effort: "low",
++            cost: 2.5,
++            captured_at_ms: expect.any(Number),
++          },
++        },
++      ]);
++      expect(existsSync(sentinelOut)).toBe(true);
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++      await closeServer(server);
++    }
++  });
++
++  test("no CLAUDE_PROJECT_DIR (no chain configured) -> still exits 0, no telemetry.report sent (no session_id)", () => {
++    const r = runScript({ CLAUDE_PROJECT_DIR: "" }, "not json{{{");
++    expect(r.status).toBe(0);
++  });
++});
+diff --git a/packages/hostd/src/rpc-handlers.ts b/packages/hostd/src/rpc-handlers.ts
+index d1676e5..d67b437 100644
+--- a/packages/hostd/src/rpc-handlers.ts
++++ b/packages/hostd/src/rpc-handlers.ts
+@@ -126,16 +126,31 @@ export function handleAgentList(_params: unknown, deps: RpcHandlerDeps): AgentLi
+ // ---------------------------------------------------------------------------
+ 
+ export interface AgentStatusSessionRow {
+   id: string;
+   name: string;
+   lifecycle: string;
+   started_at: number;
+   ended_at: number | null;
++  /**
++   * Task M2, Fase 2 — telemetry columns (schema.ts), written by cc-stub's
++   * `scripts/context-bridge.ts` via the `telemetry.report` RPC below. NULL
++   * until the first CC statusLine snapshot fires for this session (FUNC-1:
++   * "no data yet" is a real, distinguishable state — never faked as 0/"").
++   * `context-command.ts` (telegram-adapter) reads this SAME query result
++   * (via `agent.status`) to render `/context` — INFRA-5: one row, one
++   * writer, both readers agree by construction.
++   */
++  used_percentage: number | null;
++  context_window_size: number | null;
++  model: string | null;
++  effort: string | null;
++  cost: number | null;
++  captured_at_ms: number | null;
+ }
+ 
+ export interface AgentStatusResult {
+   name: string;
+   workspace: string;
+   poller_status: string;
+   stub_connected: boolean;
+   /**
+@@ -153,17 +168,18 @@ export function handleAgentStatus(params: unknown, deps: RpcHandlerDeps): AgentS
+   const bot = deps.config.bots.find(b => b.id === name);
+   if (!bot) {
+     const known = deps.config.bots.map(b => b.id).join(", ") || "(none)";
+     throw new Error(`agent.status: bot "${name}" tak dikenal di hostd config. Known: ${known}`);
+   }
+ 
+   const session = deps.db
+     .query(
+-      `SELECT id, name, lifecycle, started_at, ended_at
++      `SELECT id, name, lifecycle, started_at, ended_at,
++              used_percentage, context_window_size, model, effort, cost, captured_at_ms
+          FROM sessions
+         WHERE bot_id = ?
+         ORDER BY started_at DESC
+         LIMIT 1`,
+     )
+     .get(name) as AgentStatusSessionRow | null;
+ 
+   return {
+@@ -309,8 +325,77 @@ export function handleSessionStarted(params: unknown, deps: RpcHandlerDeps): Ses
+   // Hook-inversion §5 step 2 — see module-level comment above.
+   deps.supervisors?.get(bot.id)?.onSessionStarted();
+ 
+   const row = deps.db.query(`SELECT name FROM sessions WHERE id = ?`).get(parsed.session_id) as { name: string } | null;
+   const name = row?.name ?? "idle";
+ 
+   return { additionalContext: `Current session name: "${name}"` };
+ }
++
++// ---------------------------------------------------------------------------
++// telemetry.report {bot_id, session_id, used_percentage, context_window_size,
++// model, effort, cost, captured_at_ms} — Task M2, Fase 2.
++//
++// Called (best-effort) by cc-stub's `scripts/context-bridge.ts` on every CC
++// statusLine invocation. Updates the telemetry columns (schema.ts's Task M2
++// additions) of the ALREADY-EXISTING `sessions` row for (bot_id, session_id)
++// — that row is written by `handleSessionStarted` above when the session's
++// SessionStart hook fires, which always happens before its first statusLine
++// snapshot, so in the normal case the row is already there.
++//
++// Every field besides bot_id/session_id is nullable (accepts `null` or
++// omission) — cc-stub's `parseStatusLineInput` (context-bridge.ts) may not
++// find every field in a given CC snapshot; whatever it DID find still gets
++// written, whatever it didn't stays/becomes NULL (matches the columns'
++// nullable contract, FUNC-1).
++//
++// Does NOT throw when no matching row exists yet (race: statusLine fires
++// before SessionStart's RPC lands, or the session already ended) — this is
++// a best-effort telemetry write, not a business-rule validation; the honest
++// `{updated: false}` return lets a caller notice without treating it as a
++// wire-level error. `bot_id` is validated but NOT cross-checked against
++// hostd config (unlike `agent.status`'s `name`) — a stale/renamed bot_id
++// here simply fails to match any row (`updated: false`), which is the
++// correct "nothing to update" outcome, not a config lookup failure.
++// ---------------------------------------------------------------------------
++
++const TelemetryReportParams = z
++  .object({
++    bot_id: z.string().min(1),
++    session_id: z.string().min(1),
++    used_percentage: z.number().nullable().optional(),
++    context_window_size: z.number().nullable().optional(),
++    model: z.string().nullable().optional(),
++    effort: z.string().nullable().optional(),
++    cost: z.number().nullable().optional(),
++    captured_at_ms: z.number().nullable().optional(),
++  })
++  .strict();
++
++export type TelemetryReportParamsT = z.infer<typeof TelemetryReportParams>;
++
++export interface TelemetryReportResult {
++  /** `true` iff a `sessions` row for (bot_id, session_id) existed and was updated. */
++  updated: boolean;
++}
++
++export function handleTelemetryReport(params: unknown, deps: RpcHandlerDeps): TelemetryReportResult {
++  const parsed = TelemetryReportParams.parse(params);
++
++  const result = deps.db.run(
++    `UPDATE sessions
++        SET used_percentage = ?, context_window_size = ?, model = ?, effort = ?, cost = ?, captured_at_ms = ?
++      WHERE id = ? AND bot_id = ?`,
++    [
++      parsed.used_percentage ?? null,
++      parsed.context_window_size ?? null,
++      parsed.model ?? null,
++      parsed.effort ?? null,
++      parsed.cost ?? null,
++      parsed.captured_at_ms ?? null,
++      parsed.session_id,
++      parsed.bot_id,
++    ],
++  );
++
++  return { updated: result.changes > 0 };
++}
+diff --git a/packages/hostd/src/server.ts b/packages/hostd/src/server.ts
+index b6a806a..5ef4cf8 100644
+--- a/packages/hostd/src/server.ts
++++ b/packages/hostd/src/server.ts
+@@ -3,16 +3,17 @@ import { z } from "zod";
+ import { RpcRequest, ChannelConfirmParams, type RpcEventT, parseRpcMessage } from "@mirza-harness/shared";
+ import { doctorReport } from "./doctor";
+ import {
+   handleTelegramOutbound,
+   handleAgentList,
+   handleAgentStatus,
+   handleAgentSend,
+   handleSessionStarted,
++  handleTelemetryReport,
+   type RpcHandlerDeps,
+ } from "./rpc-handlers";
+ 
+ type Handler = (params: unknown, sock: net.Socket) => unknown | Promise<unknown>;
+ 
+ /** Delegate yang dipanggil saat method `channel.confirm {envelope_id, attempt_token}` diterima. */
+ export type ConfirmDelegate = (envelopeId: string, attemptToken: string) => unknown;
+ 
+@@ -95,16 +96,18 @@ const handlers: Record<string, Handler> = {
+   // rpc-handlers.ts lewat `rpcDeps` (di-inject main.ts); tanpa wiring, error
+   // terlihat (requireRpcDeps), bukan diam-diam sukses/kosong.
+   "telegram.outbound": params => handleTelegramOutbound(params, requireRpcDeps()),
+   "agent.list": params => handleAgentList(params, requireRpcDeps()),
+   "agent.status": params => handleAgentStatus(params, requireRpcDeps()),
+   "agent.send": params => handleAgentSend(params, requireRpcDeps()),
+   // Task H1, Fase 2 — cc-stub's SessionStart hook (`packages/cc-stub/hooks/session-start.ts`).
+   "session.started": params => handleSessionStarted(params, requireRpcDeps()),
++  // Task M2, Fase 2 — cc-stub's statusLine bridge (`packages/cc-stub/scripts/context-bridge.ts`).
++  "telemetry.report": params => handleTelemetryReport(params, requireRpcDeps()),
+ };
+ 
+ /** Apakah bot_id punya koneksi cc-stub terdaftar saat ini. */
+ export function isRegistered(botId: string): boolean {
+   return connections.has(botId);
+ }
+ 
+ /**
+diff --git a/packages/hostd/test/rpc-handlers.test.ts b/packages/hostd/test/rpc-handlers.test.ts
+index 5c6b600..d3d20fe 100644
+--- a/packages/hostd/test/rpc-handlers.test.ts
++++ b/packages/hostd/test/rpc-handlers.test.ts
+@@ -3,16 +3,17 @@ import { openDb } from "../src/state/db";
+ import { claimNext } from "../src/bus/bus";
+ import { parseAgentPrompt } from "../src/bus/marker";
+ import {
+   handleTelegramOutbound,
+   handleAgentList,
+   handleAgentStatus,
+   handleAgentSend,
+   handleSessionStarted,
++  handleTelemetryReport,
+   type RpcHandlerDeps,
+ } from "../src/rpc-handlers";
+ import type { OutboundSender } from "@mirza-harness/telegram-adapter";
+ import type { HostdConfig } from "../src/config";
+ 
+ function makeConfig(overrides: Partial<HostdConfig> = {}): HostdConfig {
+   return {
+     bots: [
+@@ -94,17 +95,69 @@ describe("handleAgentStatus", () => {
+     deps.db.run(`INSERT INTO sessions (id, bot_id, name, lifecycle, started_at) VALUES (?, ?, ?, ?, ?)`, [
+       "sess-1",
+       "bot-01",
+       "my-session",
+       "idle",
+       1000,
+     ]);
+     const result = handleAgentStatus({ name: "bot-01" }, deps);
+-    expect(result.session).toEqual({ id: "sess-1", name: "my-session", lifecycle: "idle", started_at: 1000, ended_at: null });
++    expect(result.session).toEqual({
++      id: "sess-1",
++      name: "my-session",
++      lifecycle: "idle",
++      started_at: 1000,
++      ended_at: null,
++      used_percentage: null,
++      context_window_size: null,
++      model: null,
++      effort: null,
++      cost: null,
++      captured_at_ms: null,
++    });
++  });
++
++  test("telemetry columns populated by telemetry.report are surfaced (INFRA-5: same row agent.status reads)", () => {
++    const deps = baseDeps();
++    deps.db.run(`INSERT INTO bots (id, workspace) VALUES (?, ?)`, ["bot-01", "C:/workspace/bot-01"]);
++    deps.db.run(`INSERT INTO sessions (id, bot_id, name, lifecycle, started_at) VALUES (?, ?, ?, ?, ?)`, [
++      "sess-1",
++      "bot-01",
++      "my-session",
++      "idle",
++      1000,
++    ]);
++    handleTelemetryReport(
++      {
++        bot_id: "bot-01",
++        session_id: "sess-1",
++        used_percentage: 42.5,
++        context_window_size: 200000,
++        model: "claude-sonnet-5",
++        effort: "high",
++        cost: 1.23,
++        captured_at_ms: 1720000000000,
++      },
++      deps,
++    );
++
++    const result = handleAgentStatus({ name: "bot-01" }, deps);
++    expect(result.session).toEqual({
++      id: "sess-1",
++      name: "my-session",
++      lifecycle: "idle",
++      started_at: 1000,
++      ended_at: null,
++      used_percentage: 42.5,
++      context_window_size: 200000,
++      model: "claude-sonnet-5",
++      effort: "high",
++      cost: 1.23,
++      captured_at_ms: 1720000000000,
++    });
+   });
+ 
+   test("unknown bot name -> clear error listing known bots", () => {
+     const deps = baseDeps();
+     expect(() => handleAgentStatus({ name: "bot-99" }, deps)).toThrow(/bot-01, bot-02/);
+   });
+ });
+ 
+@@ -273,8 +326,101 @@ describe("handleSessionStarted", () => {
+     expect(deps.db.query(`SELECT * FROM sessions WHERE id = ?`).get("sess-no-supervisor")).not.toBeNull();
+   });
+ 
+   test("bad params shape (missing session_id) -> zod error, nothing written", () => {
+     const deps = baseDeps();
+     expect(() => handleSessionStarted({ bot_id: "bot-01", source: "startup", cwd: "C:/workspace/bot-01" }, deps)).toThrow();
+   });
+ });
++
++describe("handleTelemetryReport", () => {
++  function seedSession(deps: RpcHandlerDeps, botId: string, sessionId: string): void {
++    deps.db.run(`INSERT INTO bots (id, workspace) VALUES (?, ?)`, [botId, `C:/workspace/${botId}`]);
++    deps.db.run(`INSERT INTO sessions (id, bot_id, name, lifecycle, started_at) VALUES (?, ?, 'idle', 'idle', ?)`, [
++      sessionId,
++      botId,
++      1000,
++    ]);
++  }
++
++  test("existing session row -> telemetry columns updated, updated:true", () => {
++    const deps = baseDeps();
++    seedSession(deps, "bot-01", "sess-1");
++
++    const result = handleTelemetryReport(
++      {
++        bot_id: "bot-01",
++        session_id: "sess-1",
++        used_percentage: 55,
++        context_window_size: 180000,
++        model: "claude-opus",
++        effort: "medium",
++        cost: 0.42,
++        captured_at_ms: 1700000000000,
++      },
++      deps,
++    );
++
++    expect(result).toEqual({ updated: true });
++    const row = deps.db
++      .query(`SELECT used_percentage, context_window_size, model, effort, cost, captured_at_ms FROM sessions WHERE id = ?`)
++      .get("sess-1");
++    expect(row).toEqual({
++      used_percentage: 55,
++      context_window_size: 180000,
++      model: "claude-opus",
++      effort: "medium",
++      cost: 0.42,
++      captured_at_ms: 1700000000000,
++    });
++  });
++
++  test("fields omitted/null -> written as NULL, not 0/empty-string (FUNC-1 nullable contract)", () => {
++    const deps = baseDeps();
++    seedSession(deps, "bot-01", "sess-1");
++
++    const result = handleTelemetryReport({ bot_id: "bot-01", session_id: "sess-1" }, deps);
++
++    expect(result).toEqual({ updated: true });
++    const row = deps.db
++      .query(`SELECT used_percentage, context_window_size, model, effort, cost, captured_at_ms FROM sessions WHERE id = ?`)
++      .get("sess-1");
++    expect(row).toEqual({
++      used_percentage: null,
++      context_window_size: null,
++      model: null,
++      effort: null,
++      cost: null,
++      captured_at_ms: null,
++    });
++  });
++
++  test("no matching (bot_id, session_id) row -> updated:false, does not throw (honest no-op, not faked success)", () => {
++    const deps = baseDeps();
++    const result = handleTelemetryReport({ bot_id: "bot-01", session_id: "sess-does-not-exist" }, deps);
++    expect(result).toEqual({ updated: false });
++  });
++
++  test("session_id matches a DIFFERENT bot_id's row -> not updated (bot_id is part of the match, not just a label)", () => {
++    const deps = baseDeps();
++    seedSession(deps, "bot-01", "sess-1");
++    const result = handleTelemetryReport({ bot_id: "bot-02", session_id: "sess-1" }, deps);
++    expect(result).toEqual({ updated: false });
++    const row = deps.db.query(`SELECT used_percentage FROM sessions WHERE id = ?`).get("sess-1") as { used_percentage: number | null };
++    expect(row.used_percentage).toBeNull();
++  });
++
++  test("bad params shape (missing session_id) -> zod error, nothing written", () => {
++    const deps = baseDeps();
++    expect(() => handleTelemetryReport({ bot_id: "bot-01" }, deps)).toThrow();
++  });
++
++  test("bad params shape (missing bot_id) -> zod error", () => {
++    const deps = baseDeps();
++    expect(() => handleTelemetryReport({ session_id: "sess-1" }, deps)).toThrow();
++  });
++
++  test("unexpected extra field -> zod .strict() rejects", () => {
++    const deps = baseDeps();
++    expect(() => handleTelemetryReport({ bot_id: "bot-01", session_id: "sess-1", unexpected: true }, deps)).toThrow();
++  });
++});
+diff --git a/packages/shared/src/schema.ts b/packages/shared/src/schema.ts
+index c00c285..8d4ec40 100644
+--- a/packages/shared/src/schema.ts
++++ b/packages/shared/src/schema.ts
+@@ -14,17 +14,32 @@ CREATE TABLE IF NOT EXISTS bots (
+ );
+ 
+ CREATE TABLE IF NOT EXISTS sessions (
+   id TEXT PRIMARY KEY,                -- session_id dari hook SessionStart
+   bot_id TEXT NOT NULL REFERENCES bots(id),
+   name TEXT NOT NULL DEFAULT 'idle',
+   lifecycle TEXT NOT NULL DEFAULT 'idle',  -- idle|busy|resetting|dead
+   started_at INTEGER NOT NULL,
+-  ended_at INTEGER
++  ended_at INTEGER,
++  -- Task M2, Fase 2 -- kolom telemetri statusline (recon-hooks.md paragraf E),
++  -- diisi oleh RPC telemetry.report (cc-stub's scripts/context-bridge.ts,
++  -- dipicu CC statusLine). SEMUA nullable: belum ada snapshot statusLine
++  -- (belum pernah "fire") = NULL, bukan 0/"" -- FUNC-1 fix (/context dan
++  -- agent_status harus bisa membedakan "belum ada data" dari "nilai nol
++  -- asli"). Ditambah di sini untuk DB baru; migrateSessionsTelemetryColumns
++  -- di bawah menambahkannya via ALTER TABLE untuk DB lama yang sudah ada
++  -- baris sessions sebelum kolom ini ada (CREATE TABLE IF NOT EXISTS tidak
++  -- menyentuh tabel yang sudah tercipta).
++  used_percentage REAL,
++  context_window_size INTEGER,
++  model TEXT,
++  effort TEXT,
++  cost REAL,
++  captured_at_ms INTEGER
+ );
+ 
+ CREATE TABLE IF NOT EXISTS messages (
+   id INTEGER PRIMARY KEY AUTOINCREMENT,
+   bot_id TEXT NOT NULL,
+   channel TEXT NOT NULL,              -- 'telegram' (nanti: wa/discord/web)
+   chat_id TEXT NOT NULL,
+   message_id TEXT,
+@@ -120,11 +135,43 @@ CREATE TABLE IF NOT EXISTS kv (
+ CREATE TABLE IF NOT EXISTS session_archive (
+   bot_id TEXT NOT NULL,
+   session_id TEXT NOT NULL,
+   archived_at INTEGER NOT NULL DEFAULT (unixepoch()),
+   PRIMARY KEY (bot_id, session_id)
+ );
+ `;
+ 
++/**
++ * Task M2, Fase 2 — additive migration for `sessions`' telemetry columns
++ * (see the CREATE TABLE comment above). `CREATE TABLE IF NOT EXISTS` only
++ * helps brand-new databases; a DB file created before this task exists
++ * already has a `sessions` table WITHOUT these columns, and that statement
++ * is then a no-op. This walks `PRAGMA table_info` and `ALTER TABLE ... ADD
++ * COLUMN`s in whichever are missing — idempotent (checks presence first),
++ * additive only (never touches an existing column), and safe to call on
++ * every `applySchema` (including `:memory:` test DBs, where the CREATE
++ * TABLE above already included them and this loop is simply a no-op).
++ */
++const SESSION_TELEMETRY_COLUMNS: ReadonlyArray<{ name: string; ddlType: string }> = [
++  { name: "used_percentage", ddlType: "REAL" },
++  { name: "context_window_size", ddlType: "INTEGER" },
++  { name: "model", ddlType: "TEXT" },
++  { name: "effort", ddlType: "TEXT" },
++  { name: "cost", ddlType: "REAL" },
++  { name: "captured_at_ms", ddlType: "INTEGER" },
++];
++
++function migrateSessionsTelemetryColumns(db: Database): void {
++  const existing = new Set(
++    (db.query(`PRAGMA table_info(sessions)`).all() as { name: string }[]).map(row => row.name),
++  );
++  for (const col of SESSION_TELEMETRY_COLUMNS) {
++    if (!existing.has(col.name)) {
++      db.exec(`ALTER TABLE sessions ADD COLUMN ${col.name} ${col.ddlType}`);
++    }
++  }
++}
++
+ export function applySchema(db: Database): void {
+   db.exec(SCHEMA_SQL);
++  migrateSessionsTelemetryColumns(db);
+ }
+diff --git a/packages/telegram-adapter/src/context-command.ts b/packages/telegram-adapter/src/context-command.ts
+new file mode 100644
+index 0000000..90ec212
+--- /dev/null
++++ b/packages/telegram-adapter/src/context-command.ts
+@@ -0,0 +1,203 @@
++/**
++ * Task M2, Fase 2 — `/context` and `/version` reply rendering.
++ *
++ * Kode acuan (mirza-marketplace, read-only): `plugins/telegram/context-renderer.ts`
++ * (the OLD renderer, which dereferenced `status.payload.context_window`
++ * WITHOUT a null guard — FUNC-1, "TypeError: null is not an object" on a
++ * statusLine snapshot that hadn't captured yet, swallowed by the bot's
++ * catch-all so the user got no reply at all) and
++ * `plugins/telegram/current-session-info.ts` (resolving "which session is
++ * this bot on right now", ported here as hostd's `agent.status` RPC instead
++ * of reading `wrapper.current_session_id`/a jsonl-backed registry — INFRA-5:
++ * `agent_status` and `/context` now read the exact same `sessions` row, so
++ * they can never disagree).
++ *
++ * Both render functions are pure (no I/O) and take already-resolved data;
++ * the `SessionQuery`/`VersionQuery` interfaces below are the ONLY seam for
++ * I/O, injected by the caller — production wires them to hostd RPC / package
++ * .json reads (see `createRpcSessionQuery`/`createPackageJsonVersionQuery`),
++ * tests inject a fake. This mirrors `context-bridge.ts`'s `ReportTelemetryDeps`
++ * / `session-start.ts`'s `SessionStartDeps` injectable-`call` pattern.
++ */
++import { readFileSync } from "node:fs";
++
++// ---------------------------------------------------------------------------
++// /context
++// ---------------------------------------------------------------------------
++
++/**
++ * Shape of the `sessions` row `/context` needs — matches hostd's
++ * `AgentStatusSessionRow` (rpc-handlers.ts) field-for-field, including the
++ * Task M2 telemetry columns. All telemetry fields are nullable: NULL means
++ * "no statusLine snapshot has fired yet for this session" (FUNC-1's fix —
++ * a real, renderable state, never a crash).
++ */
++export interface SessionSnapshot {
++  id: string;
++  name: string;
++  lifecycle: string;
++  started_at: number;
++  ended_at: number | null;
++  used_percentage: number | null;
++  context_window_size: number | null;
++  model: string | null;
++  effort: string | null;
++  cost: number | null;
++  captured_at_ms: number | null;
++}
++
++export interface SessionQuery {
++  /** Resolve `botId`'s current/most-recent session row, or `null` if none exists yet. */
++  getSession(botId: string): Promise<SessionSnapshot | null>;
++}
++
++/** `⏺⏺⏺⏺⏺⏺⏺⏺⏺⏺` style progress bar — ported from context-renderer.ts's `progressBar`. */
++export function progressBar(pct: number, width = 10): string {
++  const filled = Math.max(0, Math.min(width, Math.round((pct * width) / 100)));
++  return "●".repeat(filled) + "○".repeat(width - filled);
++}
++
++/** Ported from context-renderer.ts's `formatRelativeMs`. */
++export function formatRelativeMs(ageMs: number): string {
++  if (ageMs < 0) return "just now";
++  const sec = Math.floor(ageMs / 1000);
++  if (sec < 60) return `${sec}s ago`;
++  const min = Math.floor(sec / 60);
++  if (min < 60) return `${min}m ago`;
++  const hr = Math.floor(min / 60);
++  const rm = min % 60;
++  return rm ? `${hr}h ${rm}m ago` : `${hr}h ago`;
++}
++
++/** Ported from context-renderer.ts's `shortSession`. */
++export function shortSession(id: string): string {
++  return id.slice(0, 8);
++}
++
++/**
++ * Renders the `/context` reply from an already-resolved session row.
++ *
++ * FUNC-1 fix, made structural rather than a bolt-on guard: there is no
++ * `payload` to dereference here at all — `session` is either `null` (no
++ * `sessions` row yet — e.g. SessionStart hasn't fired once for this bot) or
++ * a fully-typed `SessionSnapshot` whose telemetry fields are individually
++ * nullable. Both cases render "(no data yet)" for whichever piece is
++ * missing, and NEITHER case can throw a null-dereference.
++ */
++export function renderContextReply(session: SessionSnapshot | null, nowMs: number = Date.now()): string {
++  if (!session) {
++    return "(no data yet)";
++  }
++
++  const sections: string[] = [];
++
++  // --- Context section ---
++  const ctxLines: string[] = ["Context"];
++  if (typeof session.used_percentage === "number") {
++    ctxLines.push(`${progressBar(session.used_percentage)} ${Math.round(session.used_percentage)}%`);
++    if (typeof session.context_window_size === "number") {
++      ctxLines.push(`window: ${session.context_window_size}`);
++    }
++  } else {
++    ctxLines.push("(no data yet)");
++  }
++  sections.push(ctxLines.join("\n"));
++
++  // --- Metadata block ---
++  const meta: string[] = [];
++  meta.push(session.model ? session.model : "(no data yet)");
++  meta.push(`Session: ${session.name} (${shortSession(session.id)})`);
++  meta.push(`Lifecycle: ${session.lifecycle}`);
++  meta.push(typeof session.cost === "number" ? `Cost: $${session.cost.toFixed(2)}` : "Cost: (no data yet)");
++  meta.push(session.effort ? `Effort: ${session.effort}` : "Effort: (no data yet)");
++  sections.push(meta.join("\n"));
++
++  // --- Last update ---
++  if (typeof session.captured_at_ms === "number") {
++    sections.push(`Last update: ${formatRelativeMs(nowMs - session.captured_at_ms)}`);
++  } else {
++    sections.push("Last update: (no data yet)");
++  }
++
++  return sections.join("\n\n");
++}
++
++/** Resolve `botId`'s session via `deps` and render the `/context` reply. */
++export async function buildContextReply(botId: string, deps: SessionQuery, nowMs: number = Date.now()): Promise<string> {
++  const session = await deps.getSession(botId);
++  return renderContextReply(session, nowMs);
++}
++
++/**
++ * Production `SessionQuery`: calls hostd's `agent.status` RPC (rpc-handlers
++ * .ts's `handleAgentStatus`) — the SAME query `agent_status` (the MCP tool)
++ * uses, per INFRA-5. `call` is `HostdClient.call`/`callHostdOnce` shaped
++ * (`(method, params) => Promise<unknown>`) so either cc-stub IPC client works
++ * unchanged.
++ */
++export function createRpcSessionQuery(call: (method: string, params?: unknown) => Promise<unknown>): SessionQuery {
++  return {
++    async getSession(botId: string): Promise<SessionSnapshot | null> {
++      const result = (await call("agent.status", { name: botId })) as { session: SessionSnapshot | null } | null;
++      return result?.session ?? null;
++    },
++  };
++}
++
++// ---------------------------------------------------------------------------
++// /version
++// ---------------------------------------------------------------------------
++
++export interface VersionInfo {
++  hostd: string | null;
++  holder: string | null;
++}
++
++export interface VersionQuery {
++  getVersions(): Promise<VersionInfo> | VersionInfo;
++}
++
++/** Renders the `/version` reply — VER-1: versions are always resolved dynamically, never hardcoded. */
++export function renderVersionReply(versions: VersionInfo): string {
++  return ["Version", `hostd: ${versions.hostd ?? "(unknown)"}`, `pty-holder: ${versions.holder ?? "(unknown)"}`].join("\n");
++}
++
++export async function buildVersionReply(deps: VersionQuery): Promise<string> {
++  const versions = await deps.getVersions();
++  return renderVersionReply(versions);
++}
++
++/**
++ * Reads `version` out of a `package.json` file at `pkgJsonPath`. Returns
++ * `null` on any failure (missing file, invalid JSON, missing/non-string
++ * field) — VER-1's whole point is an honest "unknown" rather than a
++ * hardcoded/stale string, never a thrown error from a `/version` reply.
++ */
++export function readPackageVersion(pkgJsonPath: string): string | null {
++  try {
++    const raw = readFileSync(pkgJsonPath, "utf8");
++    const parsed = JSON.parse(raw) as { version?: unknown };
++    return typeof parsed.version === "string" && parsed.version.length > 0 ? parsed.version : null;
++  } catch {
++    return null;
++  }
++}
++
++/**
++ * Production `VersionQuery`: reads hostd's and pty-holder's own
++ * `package.json` `version` field directly off disk (VER-1's fix — "Baca
++ * versi dari plugin.json/package.json saat boot", not a hardcoded string).
++ * Paths are passed in explicitly rather than assumed relative to this file,
++ * since the caller (wherever `/version` is ultimately wired — outside this
++ * task's scope, see task brief) knows the real monorepo layout at runtime.
++ */
++export function createPackageJsonVersionQuery(paths: { hostdPkgJson: string; holderPkgJson: string }): VersionQuery {
++  return {
++    getVersions(): VersionInfo {
++      return {
++        hostd: readPackageVersion(paths.hostdPkgJson),
++        holder: readPackageVersion(paths.holderPkgJson),
++      };
++    },
++  };
++}
+diff --git a/packages/telegram-adapter/test/context-command.test.ts b/packages/telegram-adapter/test/context-command.test.ts
+new file mode 100644
+index 0000000..4806679
+--- /dev/null
++++ b/packages/telegram-adapter/test/context-command.test.ts
+@@ -0,0 +1,205 @@
++import { describe, expect, test } from "bun:test";
++import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
++import { join } from "node:path";
++import { tmpdir } from "node:os";
++import {
++  renderContextReply,
++  buildContextReply,
++  createRpcSessionQuery,
++  progressBar,
++  formatRelativeMs,
++  shortSession,
++  renderVersionReply,
++  buildVersionReply,
++  readPackageVersion,
++  createPackageJsonVersionQuery,
++  type SessionSnapshot,
++  type SessionQuery,
++} from "../src/context-command";
++
++function fullSession(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
++  return {
++    id: "sess-1234567890",
++    name: "my-session",
++    lifecycle: "idle",
++    started_at: 1000,
++    ended_at: null,
++    used_percentage: 42,
++    context_window_size: 200000,
++    model: "claude-sonnet-5",
++    effort: "high",
++    cost: 1.23,
++    captured_at_ms: 5000,
++    ...overrides,
++  };
++}
++
++describe("progressBar / formatRelativeMs / shortSession (ported from context-renderer.ts)", () => {
++  test("progressBar fills proportionally to pct", () => {
++    expect(progressBar(0)).toBe("○○○○○○○○○○");
++    expect(progressBar(100)).toBe("●●●●●●●●●●");
++    expect(progressBar(50)).toBe("●●●●●○○○○○");
++  });
++
++  test("formatRelativeMs renders seconds/minutes/hours", () => {
++    expect(formatRelativeMs(5000)).toBe("5s ago");
++    expect(formatRelativeMs(65_000)).toBe("1m ago");
++    expect(formatRelativeMs(3_665_000)).toBe("1h 1m ago");
++  });
++
++  test("shortSession truncates to 8 chars", () => {
++    expect(shortSession("sess-1234567890")).toBe("sess-123");
++  });
++});
++
++describe("renderContextReply — FUNC-1: null telemetry never crashes, always '(no data yet)'", () => {
++  test("session is null (no sessions row at all yet) -> '(no data yet)', no throw", () => {
++    expect(() => renderContextReply(null)).not.toThrow();
++    expect(renderContextReply(null)).toBe("(no data yet)");
++  });
++
++  test("session exists but statusline never fired (all telemetry columns null) -> renders '(no data yet)' placeholders, no throw", () => {
++    const session = fullSession({
++      used_percentage: null,
++      context_window_size: null,
++      model: null,
++      effort: null,
++      cost: null,
++      captured_at_ms: null,
++    });
++    expect(() => renderContextReply(session)).not.toThrow();
++    const text = renderContextReply(session);
++    expect(text).toContain("(no data yet)");
++    // Context section itself must say so, not crash trying to read pct.
++    expect(text).toMatch(/Context\n\(no data yet\)/);
++    expect(text).toContain("Last update: (no data yet)");
++    expect(text).toContain("Cost: (no data yet)");
++    expect(text).toContain("Effort: (no data yet)");
++    // Session identity (not telemetry) still renders — it's not ALL missing.
++    expect(text).toContain("Session: my-session (sess-123)");
++    expect(text).toContain("Lifecycle: idle");
++  });
++
++  test("session with full telemetry -> renders used%% / model / effort / cost", () => {
++    const session = fullSession();
++    const text = renderContextReply(session, 5500);
++    expect(text).toContain("42%");
++    expect(text).toContain("claude-sonnet-5");
++    expect(text).toContain("Effort: high");
++    expect(text).toContain("Cost: $1.23");
++    expect(text).toContain("Session: my-session (sess-123)");
++    expect(text).toMatch(/Last update: .+ago/);
++  });
++
++  test("Last update reflects nowMs - captured_at_ms", () => {
++    const session = fullSession({ captured_at_ms: 1000 });
++    const text = renderContextReply(session, 6000);
++    expect(text).toContain("Last update: 5s ago");
++  });
++
++  test("partial telemetry (used_percentage present, model missing) -> no crash, mixed placeholders", () => {
++    const session = fullSession({ model: null, effort: null });
++    const text = renderContextReply(session);
++    expect(text).toContain("42%");
++    expect(text).toContain("(no data yet)"); // for model
++    expect(text).toContain("Effort: (no data yet)");
++  });
++});
++
++describe("buildContextReply / createRpcSessionQuery — deps injectable", () => {
++  test("production shape: getSession resolves via injected call('agent.status', {name})", async () => {
++    const calls: { method: string; params: unknown }[] = [];
++    const query: SessionQuery = createRpcSessionQuery(async (method, params) => {
++      calls.push({ method, params });
++      return { session: fullSession() };
++    });
++
++    const reply = await buildContextReply("bot-03", query, 5500);
++
++    expect(calls).toEqual([{ method: "agent.status", params: { name: "bot-03" } }]);
++    expect(reply).toContain("42%");
++  });
++
++  test("agent.status returns session:null (no sessions row yet) -> '(no data yet)', not a crash", async () => {
++    const query: SessionQuery = createRpcSessionQuery(async () => ({ session: null }));
++    const reply = await buildContextReply("bot-03", query);
++    expect(reply).toBe("(no data yet)");
++  });
++
++  test("test fake SessionQuery (no RPC involved) -> renders normally", async () => {
++    const fake: SessionQuery = { getSession: async () => fullSession({ used_percentage: 10 }) };
++    const reply = await buildContextReply("bot-03", fake, 5000);
++    expect(reply).toContain("10%");
++  });
++});
++
++describe("renderVersionReply / buildVersionReply — VER-1: never hardcoded, injectable", () => {
++  test("both versions known", () => {
++    expect(renderVersionReply({ hostd: "0.0.1", holder: "0.0.1" })).toBe("Version\nhostd: 0.0.1\npty-holder: 0.0.1");
++  });
++
++  test("missing version -> '(unknown)', not a crash", () => {
++    expect(renderVersionReply({ hostd: null, holder: null })).toBe("Version\nhostd: (unknown)\npty-holder: (unknown)");
++  });
++
++  test("buildVersionReply resolves via injected deps (sync or async getVersions)", async () => {
++    const reply = await buildVersionReply({ getVersions: () => ({ hostd: "1.2.3", holder: "4.5.6" }) });
++    expect(reply).toBe("Version\nhostd: 1.2.3\npty-holder: 4.5.6");
++
++    const asyncReply = await buildVersionReply({ getVersions: async () => ({ hostd: "9.9.9", holder: null }) });
++    expect(asyncReply).toBe("Version\nhostd: 9.9.9\npty-holder: (unknown)");
++  });
++});
++
++describe("readPackageVersion / createPackageJsonVersionQuery — real fs reads", () => {
++  function tmpDir(prefix: string): string {
++    return mkdtempSync(join(tmpdir(), prefix));
++  }
++
++  test("reads version field from a real package.json", () => {
++    const dir = tmpDir("ctx-cmd-pkg-");
++    try {
++      const pkgPath = join(dir, "package.json");
++      writeFileSync(pkgPath, JSON.stringify({ name: "@mirza-harness/hostd", version: "0.0.7" }));
++      expect(readPackageVersion(pkgPath)).toBe("0.0.7");
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  });
++
++  test("missing file -> null, not a throw", () => {
++    expect(() => readPackageVersion(join(tmpdir(), "does-not-exist-package.json"))).not.toThrow();
++    expect(readPackageVersion(join(tmpdir(), "does-not-exist-package.json"))).toBeNull();
++  });
++
++  test("invalid JSON -> null, not a throw", () => {
++    const dir = tmpDir("ctx-cmd-pkg-badjson-");
++    try {
++      const pkgPath = join(dir, "package.json");
++      writeFileSync(pkgPath, "not json{{{");
++      expect(readPackageVersion(pkgPath)).toBeNull();
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  });
++
++  test("version field missing/non-string -> null", () => {
++    const dir = tmpDir("ctx-cmd-pkg-noversion-");
++    try {
++      const pkgPath = join(dir, "package.json");
++      writeFileSync(pkgPath, JSON.stringify({ name: "x", version: 123 }));
++      expect(readPackageVersion(pkgPath)).toBeNull();
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  });
++
++  test("createPackageJsonVersionQuery reads both real package.json files (hostd + pty-holder from this monorepo)", () => {
++    const hostdPkgJson = join(import.meta.dir, "..", "..", "hostd", "package.json");
++    const holderPkgJson = join(import.meta.dir, "..", "..", "pty-holder", "package.json");
++    const query = createPackageJsonVersionQuery({ hostdPkgJson, holderPkgJson });
++    const versions = query.getVersions() as { hostd: string | null; holder: string | null };
++    expect(versions.hostd).toBe("0.0.1");
++    expect(versions.holder).toBe("0.0.1");
++  });
++});

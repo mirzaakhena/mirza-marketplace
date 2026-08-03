@@ -1,0 +1,658 @@
+diff --git a/packages/hostd/src/bus/delivery.ts b/packages/hostd/src/bus/delivery.ts
+new file mode 100644
+index 0000000..c41ef69
+--- /dev/null
++++ b/packages/hostd/src/bus/delivery.ts
+@@ -0,0 +1,116 @@
++import type { Database } from "bun:sqlite";
++import { z } from "zod";
++import { claimNext, ack, fail } from "./bus";
++
++/** Interval tick default (ms) untuk loop delivery. */
++const DEFAULT_INTERVAL_MS = 500;
++
++/**
++ * Payload envelope bus yang ditujukan ke cc-stub (kind `channel-inbound`
++ * atau `prompt`). `meta` WAJIB `Record<string,string>` — nilai non-string
++ * (mis. angka/boolean/objek) ditolak di sini SEBELUM di-push, supaya
++ * kesalahan bentuk data (SCAR-056) jadi kegagalan bus TERLIHAT (fail +
++ * retry/dead-letter), bukan drop senyap atau korupsi data di sisi cc-stub.
++ */
++const ChannelDeliverPayload = z.object({
++  content: z.string(),
++  meta: z.record(z.string(), z.string()),
++});
++
++export interface DeliveryDeps {
++  /** Apakah bot_id punya koneksi cc-stub terdaftar saat ini (dipakai untuk memperjelas alasan gagal). */
++  isRegistered: (botId: string) => boolean;
++  /** Kirim event `method`/`params` ke cc-stub botId; `false` bila gagal/offline. */
++  push: (botId: string, method: string, params: unknown) => boolean;
++}
++
++export interface DeliveryOptions {
++  /** Interval tick (ms). Default 500ms. */
++  intervalMs?: number;
++}
++
++export interface DeliveryStats {
++  delivered: number;
++  failed: number;
++}
++
++interface QueuedTarget {
++  to_agent: string;
++}
++
++/** Ambil daftar bot (to_agent) yang punya baris siap-klaim di bus_queue saat ini. */
++function claimableBotIds(db: Database, nowS: number): string[] {
++  const rows = db
++    .query(
++      `SELECT DISTINCT to_agent FROM bus_queue
++       WHERE acked_at IS NULL AND (next_attempt_at IS NULL OR next_attempt_at <= ?)`,
++    )
++    .all(nowS) as QueuedTarget[];
++  return rows.map(r => r.to_agent);
++}
++
++/**
++ * Proses satu envelope terklaim untuk `botId`. Return `true` bila sesuatu
++ * diproses (ack atau fail), `false` bila tak ada baris siap-klaim (pemanggil
++ * berhenti drain bot ini pada tick berjalan).
++ */
++function processOne(db: Database, botId: string, deps: DeliveryDeps, stats: DeliveryStats): boolean {
++  const env = claimNext(db, botId);
++  if (!env) return false;
++
++  const parsed = ChannelDeliverPayload.safeParse(env.payload);
++  if (!parsed.success) {
++    const detail = parsed.error.issues.map(i => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
++    fail(db, env.id, `SCAR-056: payload channel.deliver tak valid (meta bukan Record<string,string>) — ${detail}`);
++    stats.failed++;
++    return true;
++  }
++
++  const { content, meta } = parsed.data;
++  const sent = deps.push(botId, "channel.deliver", { content, meta });
++  if (sent) {
++    ack(db, env.id);
++    stats.delivered++;
++  } else {
++    const reason = deps.isRegistered(botId)
++      ? "push ke cc-stub gagal (koneksi terdaftar tapi kirim gagal)"
++      : "stub offline: belum ada koneksi cc-stub terdaftar utk bot ini";
++    fail(db, env.id, reason);
++    stats.failed++;
++  }
++  return true;
++}
++
++/**
++ * Satu tick delivery: untuk tiap bot yang punya baris siap-klaim di
++ * bus_queue, kuras (drain) semua baris yang due saat ini secara FIFO
++ * (claimNext selalu mengembalikan ts ter-tua lebih dulu). Aman dari
++ * infinite-loop: `fail` menjadwalkan next_attempt_at di masa depan
++ * (backoff bus-core), sehingga baris yang baru gagal tak lagi diklaim pada
++ * tick yang sama.
++ */
++export function deliverOnce(db: Database, deps: DeliveryDeps): DeliveryStats {
++  const stats: DeliveryStats = { delivered: 0, failed: 0 };
++  const nowS = Math.floor(Date.now() / 1000);
++  for (const botId of claimableBotIds(db, nowS)) {
++    while (processOne(db, botId, deps, stats)) {
++      // drain semua baris due utk bot ini pada tick berjalan
++    }
++  }
++  return stats;
++}
++
++export interface DeliveryHandle {
++  stop(): void;
++}
++
++/** Mulai loop delivery berkala (default 500ms). Panggil `.stop()` utk berhenti. */
++export function startDelivery(db: Database, deps: DeliveryDeps, opts: DeliveryOptions = {}): DeliveryHandle {
++  const intervalMs = opts.intervalMs ?? DEFAULT_INTERVAL_MS;
++  const timer = setInterval(() => deliverOnce(db, deps), intervalMs);
++  // Jangan tahan proses hidup hanya krn timer ini (relevan utk test/CLI singkat).
++  if (typeof (timer as unknown as { unref?: () => void }).unref === "function") {
++    (timer as unknown as { unref: () => void }).unref();
++  }
++  return { stop: () => clearInterval(timer) };
++}
+diff --git a/packages/hostd/src/doctor.ts b/packages/hostd/src/doctor.ts
+index e594832..753e933 100644
+--- a/packages/hostd/src/doctor.ts
++++ b/packages/hostd/src/doctor.ts
+@@ -1,21 +1,49 @@
++import type { Database } from "bun:sqlite";
++import { busStats } from "./bus/bus";
++
+ export const HOSTD_VERSION = "0.0.1";
+ 
+ export interface DoctorReport {
+   ok: boolean;
+   version: string;
+   pid: number;
+   uptime_s: number;
+   db: string;
+   components: Record<string, string>;
+ }
+ 
+-export function doctorReport(): DoctorReport {
++export interface DoctorDeps {
++  /** Bila ada, komponen `bus` dilaporkan dari busStats(db) alih-alih "stub". */
++  db?: Database;
++}
++
++/**
++ * Laporan doctor. `deps` opsional — tanpa argumen, perilaku identik dgn
++ * fase 0 (semua komponen "stub"), demi kompatibilitas mundur.
++ *
++ * Catatan (deferred dari review B1, SCAR): `Envelope.ts` disuplai oleh
++ * caller tanpa clamp/validasi rentang waktu — enqueue tidak menolak `ts` di
++ * masa depan. Akibatnya `busStats().oldest_unacked_s` (dihitung sbg
++ * `now - min(ts)`) bisa negatif. Perbaikan sumber (menolak/menjepit `ts` saat
++ * enqueue) didokumentasikan sbg follow-up terpisah di luar scope task ini
++ * (tidak menyentuh bus/bus.ts). Di sini, saat wiring stats ke doctor, kita
++ * jepit (clamp) NILAI TAMPILAN oldest_unacked_s ke >= 0 supaya laporan
++ * doctor tidak menampilkan angka negatif yang membingungkan.
++ */
++export function doctorReport(deps: DoctorDeps = {}): DoctorReport {
++  let busComponent = "stub";
++  if (deps.db) {
++    const stats = busStats(deps.db);
++    const clamped = { ...stats, oldest_unacked_s: Math.max(0, stats.oldest_unacked_s) };
++    busComponent = JSON.stringify(clamped);
++  }
++
+   return {
+     ok: true,
+     version: HOSTD_VERSION,
+     pid: process.pid,
+     uptime_s: Math.floor(process.uptime()),
+-    db: "not-connected (menyusul fase 1)",
+-    components: { bus: "stub", state: "stub", adapters: "stub", supervisors: "stub" },
++    db: deps.db ? "connected" : "not-connected (menyusul fase 1)",
++    components: { bus: busComponent, state: "stub", adapters: "stub", supervisors: "stub" },
+   };
+ }
+diff --git a/packages/hostd/src/index.ts b/packages/hostd/src/index.ts
+index 650a09b..de80fcc 100644
+--- a/packages/hostd/src/index.ts
++++ b/packages/hostd/src/index.ts
+@@ -1,3 +1,4 @@
+ export * from "./doctor";
+ export * from "./server";
+ export * from "./state/db";
++export * from "./bus/delivery";
+diff --git a/packages/hostd/src/server.ts b/packages/hostd/src/server.ts
+index 5392f2e..a987c95 100644
+--- a/packages/hostd/src/server.ts
++++ b/packages/hostd/src/server.ts
+@@ -1,18 +1,58 @@
+ import net from "node:net";
+-import { RpcRequest, parseRpcMessage } from "@mirza-harness/shared";
++import { z } from "zod";
++import { RpcRequest, type RpcEventT, parseRpcMessage } from "@mirza-harness/shared";
+ import { doctorReport } from "./doctor";
+ 
+-type Handler = (params: unknown) => unknown;
++type Handler = (params: unknown, sock: net.Socket) => unknown;
++
++/**
++ * Registry koneksi cc-stub: bot_id -> socket IPC yang mendaftar via
++ * `session.register`. Modul-scoped karena hostd berjalan sebagai satu proses
++ * daemon per pipe; satu bot_id hanya boleh punya satu koneksi aktif pada satu
++ * waktu (registrasi baru menimpa yang lama).
++ */
++const connections = new Map<string, net.Socket>();
++
++const SessionRegisterParams = z.object({ bot_id: z.string().min(1) }).strict();
+ 
+ const handlers: Record<string, Handler> = {
+   doctor: () => doctorReport(),
++  "session.register": (params, sock) => {
++    const { bot_id } = SessionRegisterParams.parse(params);
++    connections.set(bot_id, sock);
++    sock.once("close", () => {
++      // Hanya hapus bila socket ini masih pemegang mapping (bisa saja sudah
++      // ditimpa oleh registrasi bot_id yang sama dari koneksi baru).
++      if (connections.get(bot_id) === sock) connections.delete(bot_id);
++    });
++    return { registered: true, bot_id };
++  },
+ };
+ 
++/** Apakah bot_id punya koneksi cc-stub terdaftar saat ini. */
++export function isRegistered(botId: string): boolean {
++  return connections.has(botId);
++}
++
++/**
++ * Kirim event JSON-RPC (notification, tanpa id) `method`/`params` ke koneksi
++ * cc-stub terdaftar untuk `botId`. Return `false` (tanpa melempar) bila tak
++ * ada koneksi terdaftar — pemanggil (delivery.ts) bertanggung jawab
++ * menangani ini sbg kegagalan terlihat (fail + retry), bukan drop senyap.
++ */
++export function pushEvent(botId: string, method: string, params: unknown): boolean {
++  const sock = connections.get(botId);
++  if (!sock) return false;
++  const event: RpcEventT = { jsonrpc: "2.0", method, params };
++  sock.write(JSON.stringify(event) + "\n");
++  return true;
++}
++
+ function respond(sock: net.Socket, obj: object): void {
+   sock.write(JSON.stringify(obj) + "\n");
+ }
+ 
+ function handleLine(sock: net.Socket, line: string): void {
+   let id: string | number | null = null;
+   try {
+     const msg = parseRpcMessage(line);
+@@ -22,17 +62,17 @@ function handleLine(sock: net.Socket, line: string): void {
+       return;
+     }
+     id = req.data.id;
+     const handler = handlers[req.data.method];
+     if (!handler) {
+       respond(sock, { jsonrpc: "2.0", id, error: { code: -32601, message: `method tak dikenal: ${req.data.method}` } });
+       return;
+     }
+-    respond(sock, { jsonrpc: "2.0", id, result: handler(req.data.params) });
++    respond(sock, { jsonrpc: "2.0", id, result: handler(req.data.params, sock) });
+   } catch (e) {
+     // Prinsip §2.5: kegagalan harus terlihat — balas error, jangan telan.
+     respond(sock, { jsonrpc: "2.0", id, error: { code: -32700, message: String(e) } });
+   }
+ }
+ 
+ export function startServer(pipeName: string): Promise<net.Server> {
+   return new Promise((resolve, reject) => {
+diff --git a/packages/hostd/test/delivery.test.ts b/packages/hostd/test/delivery.test.ts
+new file mode 100644
+index 0000000..4eacb5a
+--- /dev/null
++++ b/packages/hostd/test/delivery.test.ts
+@@ -0,0 +1,209 @@
++import { describe, expect, test } from "bun:test";
++import { openDb } from "../src/state/db";
++import { enqueue, claimNext } from "../src/bus/bus";
++import { deliverOnce, startDelivery, type DeliveryDeps } from "../src/bus/delivery";
++import type { EnvelopeT } from "@mirza-harness/shared";
++
++function env(overrides: Partial<EnvelopeT> = {}): EnvelopeT {
++  return {
++    id: crypto.randomUUID(),
++    ts: Math.floor(Date.now() / 1000),
++    from: "bot-01",
++    to: "cc-stub-01",
++    kind: "channel-inbound",
++    payload: { content: "halo dari telegram", meta: { channel: "telegram", chat_id: "123" } },
++    hop: 0,
++    ...overrides,
++  };
++}
++
++interface PushedCall {
++  botId: string;
++  method: string;
++  params: unknown;
++}
++
++function fakeDeps(overrides: Partial<DeliveryDeps> = {}): { deps: DeliveryDeps; pushed: PushedCall[] } {
++  const pushed: PushedCall[] = [];
++  const deps: DeliveryDeps = {
++    isRegistered: () => true,
++    push: (botId, method, params) => {
++      pushed.push({ botId, method, params });
++      return true;
++    },
++    ...overrides,
++  };
++  return { deps, pushed };
++}
++
++describe("deliverOnce — sukses", () => {
++  test("envelope valid + stub online -> push terpanggil lalu ack", () => {
++    const db = openDb(":memory:");
++    const e = env();
++    enqueue(db, e);
++    const { deps, pushed } = fakeDeps();
++
++    const stats = deliverOnce(db, deps);
++
++    expect(stats.delivered).toBe(1);
++    expect(stats.failed).toBe(0);
++    expect(pushed.length).toBe(1);
++    expect(pushed[0].botId).toBe(e.to);
++    expect(pushed[0].method).toBe("channel.deliver");
++    expect(pushed[0].params).toEqual({ content: "halo dari telegram", meta: { channel: "telegram", chat_id: "123" } });
++
++    // sudah acked -> tak lagi diklaim
++    expect(claimNext(db, e.to)).toBeNull();
++    const row = db.query("SELECT acked_at FROM bus_queue WHERE id = ?").get(e.id) as { acked_at: number };
++    expect(row.acked_at).toBeGreaterThan(0);
++    db.close();
++  });
++
++  test("kind 'prompt' juga diproses (bukan hanya channel-inbound)", () => {
++    const db = openDb(":memory:");
++    const e = env({ kind: "prompt", payload: { content: "prompt text", meta: {} } });
++    enqueue(db, e);
++    const { deps, pushed } = fakeDeps();
++
++    deliverOnce(db, deps);
++
++    expect(pushed.length).toBe(1);
++    db.close();
++  });
++});
++
++describe("deliverOnce — stub offline lalu retry", () => {
++  test("offline -> fail (backoff terjadwal), online kemudian -> retry sukses -> ack", () => {
++    const db = openDb(":memory:");
++    const e = env();
++    enqueue(db, e);
++
++    let online = false;
++    const { deps, pushed } = fakeDeps({
++      isRegistered: () => online,
++      push: (botId, method, params) => {
++        if (!online) return false;
++        pushed.push({ botId, method, params });
++        return true;
++      },
++    });
++
++    // Tick 1: stub offline -> fail, attempts=1, next_attempt_at di masa depan.
++    const stats1 = deliverOnce(db, deps);
++    expect(stats1.delivered).toBe(0);
++    expect(stats1.failed).toBe(1);
++    expect(pushed.length).toBe(0);
++
++    const rowAfterFail = db.query("SELECT attempts, next_attempt_at, acked_at FROM bus_queue WHERE id = ?").get(e.id) as {
++      attempts: number;
++      next_attempt_at: number;
++      acked_at: number | null;
++    };
++    expect(rowAfterFail.attempts).toBe(1);
++    expect(rowAfterFail.acked_at).toBeNull();
++    expect(rowAfterFail.next_attempt_at).toBeGreaterThan(Math.floor(Date.now() / 1000));
++
++    // Tick 2 (segera): masih dalam window backoff -> tak diklaim -> tak ada perubahan.
++    const stats2 = deliverOnce(db, deps);
++    expect(stats2.delivered).toBe(0);
++    expect(stats2.failed).toBe(0);
++
++    // Stub online, paksa next_attempt_at ke masa lalu (simulasi waktu retry tiba).
++    online = true;
++    const past = Math.floor(Date.now() / 1000) - 1;
++    db.run("UPDATE bus_queue SET next_attempt_at = ? WHERE id = ?", [past, e.id]);
++
++    const stats3 = deliverOnce(db, deps);
++    expect(stats3.delivered).toBe(1);
++    expect(pushed.length).toBe(1);
++    const rowAfterAck = db.query("SELECT acked_at FROM bus_queue WHERE id = ?").get(e.id) as { acked_at: number };
++    expect(rowAfterAck.acked_at).toBeGreaterThan(0);
++    db.close();
++  });
++});
++
++describe("deliverOnce — meta non-string (SCAR-056)", () => {
++  test("meta berisi nilai non-string -> fail dgn reason menyebut SCAR-056, push tak pernah terpanggil", () => {
++    const db = openDb(":memory:");
++    // payload di Envelope bertipe unknown — meta.count sengaja number (bukan string) utk uji SCAR-056.
++    const e = env({ payload: { content: "x", meta: { channel: "telegram", count: 5 } } });
++    enqueue(db, e);
++    const { deps, pushed } = fakeDeps();
++
++    // Dorong sampai dead-letter (8 percobaan) supaya reason bisa diverifikasi
++    // lewat bus_dead — bus_queue sendiri tak menyimpan reason per-attempt.
++    for (let i = 0; i < 8; i++) {
++      deliverOnce(db, deps);
++      const past = Math.floor(Date.now() / 1000) - 1;
++      db.run("UPDATE bus_queue SET next_attempt_at = ? WHERE id = ?", [past, e.id]);
++    }
++
++    expect(pushed.length).toBe(0);
++    const dead = db.query("SELECT reason FROM bus_dead WHERE id = ?").get(e.id) as { reason: string } | null;
++    expect(dead).not.toBeNull();
++    expect(dead!.reason).toContain("SCAR-056");
++    db.close();
++  });
++
++  test("payload tanpa 'content' string juga ditolak sebelum push", () => {
++    const db = openDb(":memory:");
++    const e = env({ payload: { meta: { a: "b" } } });
++    enqueue(db, e);
++    const { deps, pushed } = fakeDeps();
++
++    const stats = deliverOnce(db, deps);
++    expect(stats.failed).toBe(1);
++    expect(pushed.length).toBe(0);
++    db.close();
++  });
++});
++
++describe("deliverOnce — urutan FIFO", () => {
++  test("dua envelope utk bot yang sama dikirim ter-tua (ts) lebih dulu, keduanya ke-ack dalam satu tick", () => {
++    const db = openDb(":memory:");
++    const now = Math.floor(Date.now() / 1000);
++    const older = env({ ts: now - 100, payload: { content: "pertama", meta: {} } });
++    const newer = env({ ts: now - 10, payload: { content: "kedua", meta: {} } });
++    enqueue(db, newer); // insert urutan dibalik sengaja
++    enqueue(db, older);
++
++    const { deps, pushed } = fakeDeps();
++    const stats = deliverOnce(db, deps);
++
++    expect(stats.delivered).toBe(2);
++    expect(pushed.length).toBe(2);
++    expect(pushed[0].params).toEqual({ content: "pertama", meta: {} });
++    expect(pushed[1].params).toEqual({ content: "kedua", meta: {} });
++    db.close();
++  });
++
++  test("bot berbeda tak saling mengganggu urutan", () => {
++    const db = openDb(":memory:");
++    const forA = env({ to: "cc-stub-a" });
++    const forB = env({ to: "cc-stub-b" });
++    enqueue(db, forA);
++    enqueue(db, forB);
++
++    const { deps, pushed } = fakeDeps();
++    deliverOnce(db, deps);
++
++    expect(pushed.map(p => p.botId).sort()).toEqual(["cc-stub-a", "cc-stub-b"]);
++    db.close();
++  });
++});
++
++describe("startDelivery — loop interval", () => {
++  test("tick otomatis mengirim envelope yang sudah antre tanpa perlu deliverOnce manual", async () => {
++    const db = openDb(":memory:");
++    const e = env();
++    enqueue(db, e);
++    const { deps, pushed } = fakeDeps();
++
++    const handle = startDelivery(db, deps, { intervalMs: 15 });
++    await new Promise(resolve => setTimeout(resolve, 100));
++    handle.stop();
++
++    expect(pushed.length).toBeGreaterThanOrEqual(1);
++    db.close();
++  });
++});
+diff --git a/packages/hostd/test/doctor.test.ts b/packages/hostd/test/doctor.test.ts
+index 7606e15..60ff12d 100644
+--- a/packages/hostd/test/doctor.test.ts
++++ b/packages/hostd/test/doctor.test.ts
+@@ -1,14 +1,55 @@
+ import { describe, expect, test } from "bun:test";
+ import { doctorReport } from "../src/doctor";
++import { openDb } from "../src/state/db";
++import { enqueue } from "../src/bus/bus";
++import type { EnvelopeT } from "@mirza-harness/shared";
+ 
+ describe("doctorReport (stub fase 0)", () => {
+-  test("bentuk payload lengkap", () => {
++  test("bentuk payload lengkap — tanpa deps, perilaku lama tak berubah", () => {
+     const r = doctorReport();
+     expect(r.ok).toBe(true);
+     expect(r.version).toMatch(/^\d+\.\d+\.\d+$/);
+     expect(r.pid).toBe(process.pid);
+     expect(r.uptime_s).toBeGreaterThanOrEqual(0);
+     expect(r.db).toContain("fase 1");
+     expect(Object.keys(r.components)).toEqual(["bus", "state", "adapters", "supervisors"]);
++    expect(r.components.bus).toBe("stub");
++  });
++});
++
++describe("doctorReport (deps.db — wiring bus stats)", () => {
++  function env(overrides: Partial<EnvelopeT> = {}): EnvelopeT {
++    return {
++      id: crypto.randomUUID(),
++      ts: Math.floor(Date.now() / 1000),
++      from: "bot-01",
++      to: "bot-02",
++      kind: "prompt",
++      payload: { text: "halo" },
++      hop: 0,
++      ...overrides,
++    };
++  }
++
++  test("dengan db tersedia, komponen bus berisi busStats (bukan 'stub')", () => {
++    const db = openDb(":memory:");
++    enqueue(db, env());
++    const r = doctorReport({ db });
++    expect(r.db).toBe("connected");
++    const stats = JSON.parse(r.components.bus);
++    expect(stats.queued).toBe(1);
++    expect(stats.dead).toBe(0);
++    expect(stats.oldest_unacked_s).toBeGreaterThanOrEqual(0);
++    db.close();
++  });
++
++  test("oldest_unacked_s dijepit (clamp) >= 0 walau ts caller-supplied di masa depan (deferred B1)", () => {
++    const db = openDb(":memory:");
++    const future = Math.floor(Date.now() / 1000) + 3600;
++    enqueue(db, env({ ts: future }));
++    const r = doctorReport({ db });
++    const stats = JSON.parse(r.components.bus);
++    expect(stats.oldest_unacked_s).toBeGreaterThanOrEqual(0);
++    db.close();
+   });
+ });
+diff --git a/packages/hostd/test/server.test.ts b/packages/hostd/test/server.test.ts
+index 36be3fe..9d27e59 100644
+--- a/packages/hostd/test/server.test.ts
++++ b/packages/hostd/test/server.test.ts
+@@ -1,11 +1,11 @@
+ import { afterAll, describe, expect, test } from "bun:test";
+ import net from "node:net";
+-import { startServer } from "../src/server";
++import { startServer, pushEvent, isRegistered } from "../src/server";
+ 
+ const TEST_PIPE = `\\\\.\\pipe\\mirza-hostd-test-${process.pid}`;
+ 
+ function rpcCall(pipe: string, payload: object): Promise<any> {
+   return new Promise((resolve, reject) => {
+     const sock = net.connect(pipe, () => sock.write(JSON.stringify(payload) + "\n"));
+     let buf = "";
+     sock.on("data", d => {
+@@ -35,8 +35,92 @@ describe("hostd server", () => {
+     expect(res.error.code).toBe(-32601);
+   });
+ 
+   test("payload invalid → error -32700/-32600 (bukan crash)", async () => {
+     const res = await rpcCall(TEST_PIPE, { hello: "dunia" });
+     expect(res.error.code).toBeLessThanOrEqual(-32600);
+   });
+ });
++
++/** Reader NDJSON single-listener: hindari stacking listener bila dibaca berkali-kali dari satu socket. */
++function makeLineReader(sock: net.Socket) {
++  const queue: unknown[] = [];
++  let waiter: ((msg: unknown) => void) | null = null;
++  let buf = "";
++  sock.on("data", d => {
++    buf += d.toString("utf8");
++    let nl: number;
++    while ((nl = buf.indexOf("\n")) >= 0) {
++      const line = buf.slice(0, nl);
++      buf = buf.slice(nl + 1);
++      if (!line) continue;
++      const msg = JSON.parse(line);
++      if (waiter) {
++        const w = waiter;
++        waiter = null;
++        w(msg);
++      } else {
++        queue.push(msg);
++      }
++    }
++  });
++  return {
++    next(): Promise<any> {
++      if (queue.length > 0) return Promise.resolve(queue.shift());
++      return Promise.race([
++        new Promise(resolve => { waiter = resolve; }),
++        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout menunggu pesan")), 5000)),
++      ]);
++    },
++  };
++}
++
++describe("session.register + pushEvent roundtrip", () => {
++  const REGISTER_PIPE = `\\\\.\\pipe\\mirza-hostd-test-register-${process.pid}`;
++  let server: net.Server;
++  afterAll(() => server?.close());
++
++  test("register socket lalu pushEvent mengirim notification NDJSON ke koneksi terdaftar", async () => {
++    server = await startServer(REGISTER_PIPE);
++    const botId = `cc-stub-${process.pid}`;
++
++    expect(isRegistered(botId)).toBe(false);
++    expect(pushEvent(botId, "channel.deliver", { x: 1 })).toBe(false);
++
++    const sock = net.connect(REGISTER_PIPE);
++    await new Promise<void>((resolve, reject) => {
++      sock.once("connect", () => resolve());
++      sock.once("error", reject);
++    });
++    const reader = makeLineReader(sock);
++
++    sock.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session.register", params: { bot_id: botId } }) + "\n");
++    const registerRes = await reader.next();
++    expect(registerRes.id).toBe(1);
++    expect(registerRes.result).toEqual({ registered: true, bot_id: botId });
++    expect(isRegistered(botId)).toBe(true);
++
++    // doctor lama tetap bekerja lewat koneksi yang sama (backward-compat)
++    sock.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "doctor" }) + "\n");
++    const doctorRes = await reader.next();
++    expect(doctorRes.result.ok).toBe(true);
++
++    const sent = pushEvent(botId, "channel.deliver", { content: "halo", meta: { a: "b" } });
++    expect(sent).toBe(true);
++
++    const eventMsg = await reader.next();
++    expect(eventMsg.id).toBeUndefined();
++    expect(eventMsg.jsonrpc).toBe("2.0");
++    expect(eventMsg.method).toBe("channel.deliver");
++    expect(eventMsg.params).toEqual({ content: "halo", meta: { a: "b" } });
++
++    sock.end();
++    await new Promise(resolve => setTimeout(resolve, 100));
++    expect(isRegistered(botId)).toBe(false);
++    expect(pushEvent(botId, "channel.deliver", {})).toBe(false);
++  });
++
++  test("session.register tanpa bot_id → error terlihat, bukan ditelan", async () => {
++    const res = await rpcCall(REGISTER_PIPE, { jsonrpc: "2.0", id: 3, method: "session.register", params: {} });
++    expect(res.error).toBeDefined();
++  });
++});

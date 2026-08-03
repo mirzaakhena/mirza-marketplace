@@ -1,0 +1,657 @@
+diff --git a/packages/hostd/src/state/access-store.ts b/packages/hostd/src/state/access-store.ts
+index 93badbf..a570459 100644
+--- a/packages/hostd/src/state/access-store.ts
++++ b/packages/hostd/src/state/access-store.ts
+@@ -1,73 +1,42 @@
+ import type { Database } from "bun:sqlite";
+ import { readFileSync } from "node:fs";
+-import { z } from "zod";
++import {
++  AccessSchema,
++  PENDING_CAP,
++  defaultAccess,
++  type Access,
++} from "@mirza-harness/shared";
+ 
+ /**
+  * Port dari `plugins/telegram/server.ts` (mirza-marketplace) — type `Access`
+  * lama disimpan di `access.json` per-bot lewat fs. Fase 1 hostd memindahkan
+  * penyimpanan itu ke tabel `channel_access(channel, bot_id, policy JSON)`
+  * (lihat state-core, HEAD 6f567f7). Tidak ada fs.watch di jalur ini — semua
+  * mutasi lewat API di bawah, jadi akar SCAR-021 (race antar penulis file)
+  * hilang untuk state access.
+  *
++ * Skema (`AccessSchema`, `Access`, `PENDING_CAP`, `defaultAccess`) dipindah ke
++ * `@mirza-harness/shared` (Task C2, Fase 1) supaya jadi satu sumber yang
++ * dipakai bareng `telegram-adapter` (gate/pairing) tanpa telegram-adapter
++ * depend ke hostd. Re-export di sini supaya pemanggil existing (test, dst.)
++ * tidak perlu ganti path impor.
++ *
+  * Field, default, dan urutan validasi persis meniru `Access` lama supaya
+  * `importLegacyAccessJson` bisa membaca access.json apa adanya.
+  */
+ 
+-const DEFAULT_CHANNEL = "telegram";
++export { AccessSchema, PENDING_CAP, defaultAccess, type Access };
+ 
+-/** Cap pending pairing per bot — nilai ini ikut kode acuan (`server.ts`: "Cap pending at 3"). */
+-export const PENDING_CAP = 3;
++const DEFAULT_CHANNEL = "telegram";
+ 
+ /** TTL kode pairing — ikut kode acuan (1 jam). */
+ const PENDING_TTL_MS = 60 * 60 * 1000;
+ 
+-export const PendingEntrySchema = z
+-  .object({
+-    senderId: z.string(),
+-    chatId: z.string(),
+-    createdAt: z.number(),
+-    expiresAt: z.number(),
+-    replies: z.number(),
+-  })
+-  .strict();
+-
+-export const GroupPolicySchema = z
+-  .object({
+-    requireMention: z.boolean(),
+-    allowFrom: z.array(z.string()),
+-  })
+-  .strict();
+-
+-export const AccessSchema = z
+-  .object({
+-    dmPolicy: z.enum(["pairing", "allowlist", "disabled"]).default("pairing"),
+-    allowFrom: z.array(z.string()).default([]),
+-    groups: z.record(GroupPolicySchema).default({}),
+-    pending: z.record(PendingEntrySchema).default({}),
+-    // delivery/UX config — optional, sama seperti kode acuan
+-    mentionPatterns: z.array(z.string()).optional(),
+-    ackReaction: z.string().optional(),
+-    replyToMode: z.enum(["off", "first", "all"]).optional(),
+-    textChunkLimit: z.number().optional(),
+-    chunkMode: z.enum(["length", "newline"]).optional(),
+-  })
+-  .strict();
+-
+-export type PendingEntry = z.infer<typeof PendingEntrySchema>;
+-export type GroupPolicy = z.infer<typeof GroupPolicySchema>;
+-export type Access = z.infer<typeof AccessSchema>;
+-
+-/** Hasil `{}` lewat AccessSchema — dipakai saat baris (channel,bot_id) belum ada. */
+-export function defaultAccess(): Access {
+-  return AccessSchema.parse({});
+-}
+-
+ function loadRow(db: Database, botId: string, channel: string): Access {
+   const row = db
+     .query("SELECT policy FROM channel_access WHERE channel = ? AND bot_id = ?")
+     .get(channel, botId) as { policy: string } | null;
+   if (!row) return defaultAccess();
+   return AccessSchema.parse(JSON.parse(row.policy));
+ }
+ 
+diff --git a/packages/shared/src/access.ts b/packages/shared/src/access.ts
+new file mode 100644
+index 0000000..1b305a7
+--- /dev/null
++++ b/packages/shared/src/access.ts
+@@ -0,0 +1,58 @@
++import { z } from "zod";
++
++/**
++ * Port dari `plugins/telegram/server.ts` (mirza-marketplace) — type `Access`
++ * lama disimpan di `access.json` per-bot lewat fs. Dipindah ke sini dari
++ * `packages/hostd/src/state/access-store.ts` (Task C2, Fase 1) supaya jadi
++ * SATU sumber skema — `packages/hostd` (persistence, DB-backed) dan
++ * `packages/telegram-adapter` (gate/pairing, modul murni) sama-sama
++ * mengimpor dari sini tanpa saling depend satu sama lain (arah dependensi:
++ * hostd → shared, telegram-adapter → shared).
++ *
++ * Field, default, dan urutan validasi persis meniru `Access` lama supaya
++ * `importLegacyAccessJson` (hostd) bisa membaca access.json apa adanya.
++ */
++
++/** Cap pending pairing per bot — nilai ini ikut kode acuan (`server.ts`: "Cap pending at 3"). */
++export const PENDING_CAP = 3;
++
++export const PendingEntrySchema = z
++  .object({
++    senderId: z.string(),
++    chatId: z.string(),
++    createdAt: z.number(),
++    expiresAt: z.number(),
++    replies: z.number(),
++  })
++  .strict();
++
++export const GroupPolicySchema = z
++  .object({
++    requireMention: z.boolean(),
++    allowFrom: z.array(z.string()),
++  })
++  .strict();
++
++export const AccessSchema = z
++  .object({
++    dmPolicy: z.enum(["pairing", "allowlist", "disabled"]).default("pairing"),
++    allowFrom: z.array(z.string()).default([]),
++    groups: z.record(GroupPolicySchema).default({}),
++    pending: z.record(PendingEntrySchema).default({}),
++    // delivery/UX config — optional, sama seperti kode acuan
++    mentionPatterns: z.array(z.string()).optional(),
++    ackReaction: z.string().optional(),
++    replyToMode: z.enum(["off", "first", "all"]).optional(),
++    textChunkLimit: z.number().optional(),
++    chunkMode: z.enum(["length", "newline"]).optional(),
++  })
++  .strict();
++
++export type PendingEntry = z.infer<typeof PendingEntrySchema>;
++export type GroupPolicy = z.infer<typeof GroupPolicySchema>;
++export type Access = z.infer<typeof AccessSchema>;
++
++/** Hasil `{}` lewat AccessSchema — dipakai saat baris (channel,bot_id) belum ada. */
++export function defaultAccess(): Access {
++  return AccessSchema.parse({});
++}
+diff --git a/packages/shared/src/index.ts b/packages/shared/src/index.ts
+index 3032994..34de0d6 100644
+--- a/packages/shared/src/index.ts
++++ b/packages/shared/src/index.ts
+@@ -1,3 +1,4 @@
+ export * from "./ipc";
+ export * from "./schema";
+ export * from "./bus";
++export * from "./access";
+diff --git a/packages/telegram-adapter/package.json b/packages/telegram-adapter/package.json
+index 029576c..697b6cd 100644
+--- a/packages/telegram-adapter/package.json
++++ b/packages/telegram-adapter/package.json
+@@ -1,11 +1,12 @@
+ {
+   "name": "@mirza-harness/telegram-adapter",
+   "version": "0.0.1",
+   "private": true,
+   "type": "module",
+   "exports": { ".": "./src/index.ts" },
+   "dependencies": {
++    "@mirza-harness/shared": "workspace:*",
+     "grammy": "^1.21.0",
+     "telegramify-markdown": "^1.3.3"
+   }
+ }
+diff --git a/packages/telegram-adapter/src/gate.ts b/packages/telegram-adapter/src/gate.ts
+new file mode 100644
+index 0000000..2c8b7a5
+--- /dev/null
++++ b/packages/telegram-adapter/src/gate.ts
+@@ -0,0 +1,152 @@
++import { randomBytes } from "node:crypto";
++import { PENDING_CAP, type Access } from "@mirza-harness/shared";
++
++/**
++ * Port dari `gate()` + pairing flow, `plugins/telegram/server.ts:209-420`
++ * (mirza-marketplace). Ditulis ulang sebagai fungsi murni: tidak ada fs/DB,
++ * tidak ada `Math.random`/`Date.now()` implisit (keduanya bisa disuntik lewat
++ * `opts` untuk testability) — semua state (access, pending, allowFrom) masuk
++ * lewat parameter, semua keputusan keluar lewat return value. Persistensi
++ * (saveAccess/addPending/approvePairing) adalah tanggung jawab pemanggil
++ * (hostd), bukan modul ini — lihat `packages/hostd/src/state/access-store.ts`.
++ *
++ * Fix keamanan dibanding kode acuan (lihat task-C2-brief.md):
++ * - SEC-1: kode acuan lama punya `dmCommandGate()` terpisah yang HANYA
++ *   menolak dmPolicy 'allowlist' non-allowFrom — di dmPolicy 'pairing',
++ *   siapa pun bisa memicu /context /version tanpa pernah pairing (bocor
++ *   info). Di sini `isInfoCommand` tidak dapat jalur longgar sendiri: ia
++ *   melewati logika private-chat yang SAMA dengan pesan biasa (harus
++ *   allowFrom untuk 'deliver'; stranger di dmPolicy 'pairing' jatuh ke alur
++ *   pairing biasa, bukan bocor apa pun), dan selalu drop di grup (command
++ *   itu DM-only).
++ * - SEC-2: sinyal meta-command/permission-reply (dipakai fase 2 untuk
++ *   permission-reply routing & meta-command seperti /telegram:access) HANYA
++ *   lolos bila chatType === 'private' DAN sender ada di allowFrom — apa pun
++ *   dmPolicy atau kondisi group-nya. Selain itu langsung drop dengan reason.
++ */
++
++export type ChatType = "private" | "group" | "supergroup" | (string & {});
++
++export interface GateInput {
++  chatType: ChatType;
++  chatId: string;
++  senderId: string;
++  text?: string;
++  /** True bila caller sudah mendeteksi mention entity (@bot) atau text_mention utk bot. */
++  mentionsBot?: boolean;
++  /** True bila pesan ini reply ke pesan bot sebelumnya (implicit mention). */
++  replyToBot?: boolean;
++  /** Perintah kelas info (/context, /version, dst.) — lihat SEC-1. */
++  isInfoCommand?: boolean;
++  /** Meta-command (mis. /telegram:access) — lihat SEC-2. */
++  isMetaCommand?: boolean;
++  /** Balasan ke prompt permission Claude Code — lihat SEC-2. */
++  isPermissionReply?: boolean;
++}
++
++export type GateResult =
++  | { action: "deliver" }
++  | { action: "drop"; reason: string }
++  | { action: "pairing-reply"; code: string; isResend: boolean };
++
++export interface GateOptions {
++  /** Injectable clock — default `Date.now()`. Dipakai utk menilai `expiresAt` pending. */
++  now?: number;
++  /** Injectable code generator — default 6 hex char (`randomBytes(3)`), sama seperti kode acuan. */
++  generateCode?: () => string;
++}
++
++function defaultGenerateCode(): string {
++  return randomBytes(3).toString("hex"); // 6 hex chars
++}
++
++function isMentioned(input: GateInput, mentionPatterns?: string[]): boolean {
++  if (input.mentionsBot) return true;
++  if (input.replyToBot) return true;
++  const text = input.text ?? "";
++  for (const pat of mentionPatterns ?? []) {
++    try {
++      if (new RegExp(pat, "i").test(text)) return true;
++    } catch {
++      // Invalid user-supplied regex — skip it, same as kode acuan.
++    }
++  }
++  return false;
++}
++
++function pairingFlow(input: GateInput, access: Access, now: number, generateCode: () => string): GateResult {
++  const active = Object.entries(access.pending).filter(([, p]) => p.expiresAt >= now);
++
++  const existing = active.find(([, p]) => p.senderId === input.senderId);
++  if (existing) {
++    const [code, p] = existing;
++    // Reply twice max (initial + one reminder), then go silent — same cap as kode acuan.
++    if ((p.replies ?? 1) >= 2) return { action: "drop", reason: "pairing reply cap reached" };
++    return { action: "pairing-reply", code, isResend: true };
++  }
++
++  if (active.length >= PENDING_CAP) {
++    return { action: "drop", reason: `pending cap (${PENDING_CAP}) reached` };
++  }
++
++  return { action: "pairing-reply", code: generateCode(), isResend: false };
++}
++
++export function gate(input: GateInput, access: Access, opts: GateOptions = {}): GateResult {
++  const now = opts.now ?? Date.now();
++  const generateCode = opts.generateCode ?? defaultGenerateCode;
++
++  if (access.dmPolicy === "disabled") {
++    return { action: "drop", reason: "dmPolicy disabled" };
++  }
++
++  // SEC-2: meta-command / permission-reply are reserved, private-only signals —
++  // they never fall through to group mention/allowlist logic or to the
++  // pairing flow, regardless of dmPolicy.
++  if (input.isMetaCommand || input.isPermissionReply) {
++    if (input.chatType === "private" && access.allowFrom.includes(input.senderId)) {
++      return { action: "deliver" };
++    }
++    return {
++      action: "drop",
++      reason: "meta-command/permission-reply requires chatType='private' and sender in allowFrom",
++    };
++  }
++
++  if (input.chatType === "private") {
++    if (access.allowFrom.includes(input.senderId)) return { action: "deliver" };
++
++    // SEC-1: isInfoCommand does NOT get a separate lenient check — a stranger
++    // falls through to the exact same allowlist/pairing handling as a normal
++    // message, so /context /version can never leak info pre-pairing.
++    if (access.dmPolicy === "allowlist") {
++      return { action: "drop", reason: "sender not in allowFrom (dmPolicy allowlist)" };
++    }
++
++    return pairingFlow(input, access, now, generateCode);
++  }
++
++  if (input.chatType === "group" || input.chatType === "supergroup") {
++    // Commands are DM-only (see kode acuan comment above bot.command('start', ...)):
++    // responding in groups would leak pairing codes / confirm bot presence /
++    // spam non-approved channels. isInfoCommand never delivers in a group.
++    if (input.isInfoCommand) {
++      return { action: "drop", reason: "info commands are DM-only" };
++    }
++
++    const policy = access.groups[input.chatId];
++    if (!policy) return { action: "drop", reason: "group not allowlisted" };
++
++    const groupAllowFrom = policy.allowFrom ?? [];
++    const requireMention = policy.requireMention ?? true;
++    if (groupAllowFrom.length > 0 && !groupAllowFrom.includes(input.senderId)) {
++      return { action: "drop", reason: "sender not in group allowFrom" };
++    }
++    if (requireMention && !isMentioned(input, access.mentionPatterns)) {
++      return { action: "drop", reason: "mention required" };
++    }
++    return { action: "deliver" };
++  }
++
++  return { action: "drop", reason: `unknown chatType: ${String(input.chatType)}` };
++}
+diff --git a/packages/telegram-adapter/src/index.ts b/packages/telegram-adapter/src/index.ts
+index 6391f43..437f543 100644
+--- a/packages/telegram-adapter/src/index.ts
++++ b/packages/telegram-adapter/src/index.ts
+@@ -1,6 +1,9 @@
+ // @mirza-harness/telegram-adapter — pure telegram modules (Task C1, Fase 1).
+ export * from "./album-buffer";
+ export * from "./buttons";
+ export * from "./markdown";
+ export * from "./paginated-picker";
+ export * from "./chunk";
++// Task C3, Fase 1 — poller lifecycle grammy supervised.
++export * from "./poller";
++export * from "./gate";
+diff --git a/packages/telegram-adapter/test/gate.test.ts b/packages/telegram-adapter/test/gate.test.ts
+new file mode 100644
+index 0000000..d8496ce
+--- /dev/null
++++ b/packages/telegram-adapter/test/gate.test.ts
+@@ -0,0 +1,297 @@
++import { describe, expect, test } from "bun:test";
++import { PENDING_CAP, defaultAccess, type Access } from "@mirza-harness/shared";
++import { gate, type GateInput } from "../src/gate";
++
++function baseInput(overrides: Partial<GateInput> = {}): GateInput {
++  return {
++    chatType: "private",
++    chatId: "u1",
++    senderId: "u1",
++    ...overrides,
++  };
++}
++
++function withPending(access: Access, entries: Record<string, Access["pending"][string]>): Access {
++  return { ...access, pending: { ...access.pending, ...entries } };
++}
++
++const NOW = 1_700_000_000_000;
++
++describe("gate — dmPolicy disabled", () => {
++  test("private chat drops regardless of allowFrom", () => {
++    const access: Access = { ...defaultAccess(), dmPolicy: "disabled", allowFrom: ["u1"] };
++    const result = gate(baseInput(), access, { now: NOW });
++    expect(result.action).toBe("drop");
++  });
++
++  test("group chat drops regardless of group policy", () => {
++    const access: Access = {
++      ...defaultAccess(),
++      dmPolicy: "disabled",
++      groups: { g1: { requireMention: false, allowFrom: [] } },
++    };
++    const result = gate(baseInput({ chatType: "group", chatId: "g1" }), access, { now: NOW });
++    expect(result.action).toBe("drop");
++  });
++});
++
++describe("gate — dmPolicy allowlist × chatType private", () => {
++  test("sender in allowFrom -> deliver", () => {
++    const access: Access = { ...defaultAccess(), dmPolicy: "allowlist", allowFrom: ["u1"] };
++    const result = gate(baseInput(), access, { now: NOW });
++    expect(result.action).toBe("deliver");
++  });
++
++  test("sender not in allowFrom -> drop (no pairing offered)", () => {
++    const access: Access = { ...defaultAccess(), dmPolicy: "allowlist", allowFrom: [] };
++    const result = gate(baseInput(), access, { now: NOW });
++    expect(result.action).toBe("drop");
++  });
++});
++
++describe("gate — dmPolicy pairing × chatType private", () => {
++  test("sender in allowFrom -> deliver", () => {
++    const access: Access = { ...defaultAccess(), dmPolicy: "pairing", allowFrom: ["u1"] };
++    const result = gate(baseInput(), access, { now: NOW });
++    expect(result.action).toBe("deliver");
++  });
++
++  test("stranger, no pending -> pairing-reply with fresh code, isResend false", () => {
++    const access: Access = { ...defaultAccess(), dmPolicy: "pairing" };
++    const result = gate(baseInput(), access, { now: NOW });
++    expect(result.action).toBe("pairing-reply");
++    if (result.action === "pairing-reply") {
++      expect(result.isResend).toBe(false);
++      expect(result.code).toMatch(/^[0-9a-f]{6}$/);
++    }
++  });
++
++  test("stranger with existing non-expired pending -> resend same code", () => {
++    let access: Access = { ...defaultAccess(), dmPolicy: "pairing" };
++    access = withPending(access, {
++      abc123: { senderId: "u1", chatId: "u1", createdAt: NOW, expiresAt: NOW + 1000, replies: 1 },
++    });
++    const result = gate(baseInput(), access, { now: NOW });
++    expect(result.action).toBe("pairing-reply");
++    if (result.action === "pairing-reply") {
++      expect(result.isResend).toBe(true);
++      expect(result.code).toBe("abc123");
++    }
++  });
++
++  test("stranger with pending already replied twice -> drop (reply cap)", () => {
++    let access: Access = { ...defaultAccess(), dmPolicy: "pairing" };
++    access = withPending(access, {
++      abc123: { senderId: "u1", chatId: "u1", createdAt: NOW, expiresAt: NOW + 1000, replies: 2 },
++    });
++    const result = gate(baseInput(), access, { now: NOW });
++    expect(result.action).toBe("drop");
++  });
++
++  test("expired pending entry for sender is ignored -> treated as fresh", () => {
++    let access: Access = { ...defaultAccess(), dmPolicy: "pairing" };
++    access = withPending(access, {
++      abc123: { senderId: "u1", chatId: "u1", createdAt: NOW - 2000, expiresAt: NOW - 1000, replies: 1 },
++    });
++    const result = gate(baseInput(), access, { now: NOW });
++    expect(result.action).toBe("pairing-reply");
++    if (result.action === "pairing-reply") expect(result.isResend).toBe(false);
++  });
++
++  test(`pending cap ${PENDING_CAP} (konsisten access-store) -> drop for new stranger`, () => {
++    let access: Access = { ...defaultAccess(), dmPolicy: "pairing" };
++    const entries: Record<string, Access["pending"][string]> = {};
++    for (let i = 0; i < PENDING_CAP; i++) {
++      entries[`code${i}`] = {
++        senderId: `other-${i}`,
++        chatId: `other-${i}`,
++        createdAt: NOW,
++        expiresAt: NOW + 1000,
++        replies: 1,
++      };
++    }
++    access = withPending(access, entries);
++    const result = gate(baseInput({ senderId: "u-new" }), access, { now: NOW });
++    expect(result.action).toBe("drop");
++  });
++
++  test("pending cap does not block a sender who already has an entry", () => {
++    let access: Access = { ...defaultAccess(), dmPolicy: "pairing" };
++    const entries: Record<string, Access["pending"][string]> = {};
++    for (let i = 0; i < PENDING_CAP; i++) {
++      entries[`code${i}`] = {
++        senderId: i === 0 ? "u1" : `other-${i}`,
++        chatId: i === 0 ? "u1" : `other-${i}`,
++        createdAt: NOW,
++        expiresAt: NOW + 1000,
++        replies: 1,
++      };
++    }
++    access = withPending(access, entries);
++    const result = gate(baseInput({ senderId: "u1" }), access, { now: NOW });
++    expect(result.action).toBe("pairing-reply");
++    if (result.action === "pairing-reply") {
++      expect(result.isResend).toBe(true);
++      expect(result.code).toBe("code0");
++    }
++  });
++});
++
++describe("gate — group/supergroup requireMention & allowFrom", () => {
++  function groupAccess(policy: Partial<{ requireMention: boolean; allowFrom: string[] }> = {}): Access {
++    return {
++      ...defaultAccess(),
++      groups: { g1: { requireMention: true, allowFrom: [], ...policy } },
++    };
++  }
++
++  test("no policy for chat -> drop", () => {
++    const access: Access = { ...defaultAccess(), groups: {} };
++    const result = gate(baseInput({ chatType: "group", chatId: "g1" }), access, { now: NOW });
++    expect(result.action).toBe("drop");
++  });
++
++  test("requireMention true, no mention -> drop", () => {
++    const access = groupAccess({ requireMention: true });
++    const result = gate(baseInput({ chatType: "group", chatId: "g1" }), access, { now: NOW });
++    expect(result.action).toBe("drop");
++  });
++
++  test("requireMention true, mentionsBot -> deliver", () => {
++    const access = groupAccess({ requireMention: true });
++    const result = gate(baseInput({ chatType: "group", chatId: "g1", mentionsBot: true }), access, { now: NOW });
++    expect(result.action).toBe("deliver");
++  });
++
++  test("requireMention true, replyToBot -> deliver", () => {
++    const access = groupAccess({ requireMention: true });
++    const result = gate(baseInput({ chatType: "group", chatId: "g1", replyToBot: true }), access, { now: NOW });
++    expect(result.action).toBe("deliver");
++  });
++
++  test("requireMention true, text matches mentionPatterns -> deliver", () => {
++    const access: Access = {
++      ...groupAccess({ requireMention: true }),
++      mentionPatterns: ["hey\\s+claude"],
++    };
++    const result = gate(
++      baseInput({ chatType: "supergroup", chatId: "g1", text: "hey claude, help" }),
++      access,
++      { now: NOW },
++    );
++    expect(result.action).toBe("deliver");
++  });
++
++  test("requireMention false -> deliver without mention", () => {
++    const access = groupAccess({ requireMention: false });
++    const result = gate(baseInput({ chatType: "group", chatId: "g1" }), access, { now: NOW });
++    expect(result.action).toBe("deliver");
++  });
++
++  test("group allowFrom set, sender not listed -> drop even with mention", () => {
++    const access = groupAccess({ requireMention: true, allowFrom: ["member-1"] });
++    const result = gate(
++      baseInput({ chatType: "group", chatId: "g1", senderId: "stranger", mentionsBot: true }),
++      access,
++      { now: NOW },
++    );
++    expect(result.action).toBe("drop");
++  });
++
++  test("group allowFrom set, sender listed + mention -> deliver", () => {
++    const access = groupAccess({ requireMention: true, allowFrom: ["member-1"] });
++    const result = gate(
++      baseInput({ chatType: "group", chatId: "g1", senderId: "member-1", mentionsBot: true }),
++      access,
++      { now: NOW },
++    );
++    expect(result.action).toBe("deliver");
++  });
++});
++
++describe("SEC-1 — isInfoCommand (/context /version class) never leaks under dmPolicy pairing", () => {
++  test("stranger in private+pairing sending an info command -> pairing-reply, not deliver (no info leak)", () => {
++    const access: Access = { ...defaultAccess(), dmPolicy: "pairing" };
++    const result = gate(baseInput({ isInfoCommand: true }), access, { now: NOW });
++    expect(result.action).not.toBe("deliver");
++    expect(result.action).toBe("pairing-reply");
++  });
++
++  test("allowFrom member in private+pairing sending an info command -> deliver", () => {
++    const access: Access = { ...defaultAccess(), dmPolicy: "pairing", allowFrom: ["u1"] };
++    const result = gate(baseInput({ isInfoCommand: true }), access, { now: NOW });
++    expect(result.action).toBe("deliver");
++  });
++
++  test("stranger in private+allowlist sending an info command -> drop, not deliver", () => {
++    const access: Access = { ...defaultAccess(), dmPolicy: "allowlist" };
++    const result = gate(baseInput({ isInfoCommand: true }), access, { now: NOW });
++    expect(result.action).toBe("drop");
++  });
++
++  test("info command in a group is always dropped (commands are DM-only), even with mention + allowlisted sender", () => {
++    const access: Access = {
++      ...defaultAccess(),
++      groups: { g1: { requireMention: true, allowFrom: ["u1"] } },
++    };
++    const result = gate(
++      baseInput({ chatType: "group", chatId: "g1", isInfoCommand: true, mentionsBot: true }),
++      access,
++      { now: NOW },
++    );
++    expect(result.action).toBe("drop");
++  });
++});
++
++describe("SEC-2 — isMetaCommand / isPermissionReply restricted to private + allowFrom", () => {
++  test("private chat, sender in allowFrom -> deliver (meta-command)", () => {
++    const access: Access = { ...defaultAccess(), dmPolicy: "allowlist", allowFrom: ["u1"] };
++    const result = gate(baseInput({ isMetaCommand: true }), access, { now: NOW });
++    expect(result.action).toBe("deliver");
++  });
++
++  test("private chat, sender in allowFrom -> deliver (permission-reply)", () => {
++    const access: Access = { ...defaultAccess(), dmPolicy: "pairing", allowFrom: ["u1"] };
++    const result = gate(baseInput({ isPermissionReply: true }), access, { now: NOW });
++    expect(result.action).toBe("deliver");
++  });
++
++  test("private chat, sender NOT in allowFrom -> drop with reason (meta-command)", () => {
++    const access: Access = { ...defaultAccess(), dmPolicy: "pairing" };
++    const result = gate(baseInput({ isMetaCommand: true }), access, { now: NOW });
++    expect(result.action).toBe("drop");
++    if (result.action === "drop") expect(result.reason).toBeTruthy();
++  });
++
++  test("group member who IS in the group's own allowFrom cannot trigger a meta-command", () => {
++    const access: Access = {
++      ...defaultAccess(),
++      groups: { g1: { requireMention: false, allowFrom: ["member-1"] } },
++    };
++    const result = gate(
++      baseInput({ chatType: "group", chatId: "g1", senderId: "member-1", isMetaCommand: true }),
++      access,
++      { now: NOW },
++    );
++    expect(result.action).toBe("drop");
++    if (result.action === "drop") expect(result.reason).toBeTruthy();
++  });
++
++  test("supergroup, sender in DM allowFrom (unrelated) but chatType isn't private -> drop (permission-reply)", () => {
++    const access: Access = { ...defaultAccess(), allowFrom: ["u1"] };
++    const result = gate(
++      baseInput({ chatType: "supergroup", chatId: "g1", senderId: "u1", isPermissionReply: true }),
++      access,
++      { now: NOW },
++    );
++    expect(result.action).toBe("drop");
++  });
++});
++
++describe("gate — unknown chatType", () => {
++  test("drops", () => {
++    const access: Access = { ...defaultAccess(), allowFrom: ["u1"] };
++    const result = gate(baseInput({ chatType: "channel" as GateInput["chatType"] }), access, { now: NOW });
++    expect(result.action).toBe("drop");
++  });
++});

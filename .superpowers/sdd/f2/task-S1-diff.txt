@@ -1,0 +1,2402 @@
+diff --git a/.gitignore b/.gitignore
+index 6385cc8..164d7cf 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -2,7 +2,7 @@ node_modules/
+ *.db
+ *.db-wal
+ *.db-shm
+ dist/
+ .superpowers/
+ hostd.config.json
+-state/
++/state/
+diff --git a/packages/hostd/src/config.ts b/packages/hostd/src/config.ts
+index 7c3b356..dac9264 100644
+--- a/packages/hostd/src/config.ts
++++ b/packages/hostd/src/config.ts
+@@ -42,12 +42,19 @@ const BotConfigSchema = z
+             `Format yang benar: <id numerik>:<35+ karakter alfanumerik/_/->, ` +
+             `contoh "123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" ` +
+             `(lihat hostd.config.example.json di root repo).`,
+         }),
+       ),
+     workspace: z.string().min(1, "bots[].workspace tidak boleh kosong"),
++    /**
++     * Task S1, Fase 2 — override per-bot untuk pty-holder's `CLAUDE_BIN`/
++     * `CLAUDE_ARGS` env (lihat `packages/pty-holder/README.md` "Env vars").
++     * Opsional: absen -> pty-holder pakai default bawaannya sendiri.
++     */
++    claude_bin: z.string().min(1).optional(),
++    claude_args: z.string().optional(),
+   })
+   .strict();
+ 
+ export const HostdConfigSchema = z
+   .object({
+     bots: z.array(BotConfigSchema),
+diff --git a/packages/hostd/src/doctor.ts b/packages/hostd/src/doctor.ts
+index 032a58c..4704aba 100644
+--- a/packages/hostd/src/doctor.ts
++++ b/packages/hostd/src/doctor.ts
+@@ -15,12 +15,22 @@ export interface DoctorReport {
+ 
+ /** Structural subset of telegram-adapter's `PollerStatus` actually needed here — avoids a hard type import for a single field. */
+ export interface DoctorPollerStatusLike {
+   state: string;
+ }
+ 
++/** Structural subset of `supervisor.ts`'s `SupervisorStatus` — same "avoid a hard type import" rationale as `DoctorPollerStatusLike`. */
++export interface DoctorSupervisorStatusLike {
++  holder: string;
++  queue: number;
++  awaiting_barrier: boolean;
++  last_ack_s: number | null;
++  restarts: number;
++  barrier_alarm: boolean;
++}
++
+ export interface DoctorDeps {
+   /** Bila ada, komponen `bus` dilaporkan dari busStats(db) alih-alih "stub". */
+   db?: Database;
+   /**
+    * Task D2, Fase 1 — bila ada, komponen `adapters` dilaporkan sbg
+    * `{botId: pollerState}` (dari `startTelegramAdapters(...).statuses`)
+@@ -30,12 +40,18 @@ export interface DoctorDeps {
+   /**
+    * Task D2, Fase 1 — bila ada (BERSAMA `db`), digabung ke dalam komponen
+    * `bus` sbg field `delivery` (dari `startDelivery`'s tick stats). Tidak
+    * berpengaruh tanpa `db` (komponen bus tetap "stub").
+    */
+   deliveryStats?: DeliveryStats;
++  /**
++   * Task S1, Fase 2 — bila ada, komponen `supervisors` dilaporkan sbg
++   * `{botId: SupervisorStatus}` (dari `startSupervisors(...).statuses()`)
++   * alih-alih "stub".
++   */
++  supervisorStatuses?: Readonly<Record<string, DoctorSupervisorStatusLike>>;
+ }
+ 
+ /**
+  * Laporan doctor. `deps` opsional — tanpa argumen, perilaku identik dgn
+  * fase 0 (semua komponen "stub"), demi kompatibilitas mundur.
+  *
+@@ -61,15 +77,17 @@ export function doctorReport(deps: DoctorDeps = {}): DoctorReport {
+   if (deps.adapterStatuses) {
+     const byBot: Record<string, string> = {};
+     for (const [botId, status] of deps.adapterStatuses) byBot[botId] = status.state;
+     adaptersComponent = JSON.stringify(byBot);
+   }
+ 
++  const supervisorsComponent = deps.supervisorStatuses ? JSON.stringify(deps.supervisorStatuses) : "stub";
++
+   return {
+     ok: true,
+     version: HOSTD_VERSION,
+     pid: process.pid,
+     uptime_s: Math.floor(process.uptime()),
+     db: deps.db ? "connected" : "not-connected (menyusul fase 1)",
+-    components: { bus: busComponent, state: "stub", adapters: adaptersComponent, supervisors: "stub" },
++    components: { bus: busComponent, state: "stub", adapters: adaptersComponent, supervisors: supervisorsComponent },
+   };
+ }
+diff --git a/packages/hostd/src/main.ts b/packages/hostd/src/main.ts
+index 34f6b27..a76b0b6 100644
+--- a/packages/hostd/src/main.ts
++++ b/packages/hostd/src/main.ts
+@@ -11,12 +11,14 @@ import { createMessagesStore, type MessagesStore } from "./state/messages-store"
+ import { getAccess, addPending } from "./state/access-store";
+ import { enqueue } from "./bus/bus";
+ import { startDelivery, confirmDelivery, type DeliveryHandle } from "./bus/delivery";
+ import { startTelegramAdapters, type TelegramAdapterDeps, type TelegramAdaptersHandle } from "./adapters/telegram";
+ import { mapCtxToInboundMessage } from "./adapters/ctx-map";
+ import { startServer, pushEvent, isRegistered, registerConfirmHandler, registerRpcHandlerDeps, destroyAllConnections } from "./server";
++import { startSupervisors, type SpawnHolderFn, type SupervisorsHandle } from "./supervisor/supervisor";
++import { startPendingConsumer, type PendingConsumerHandle } from "./shim/pending-consumer";
+ 
+ /**
+  * Task D2, Fase 1 — production assembly: wires every module built across
+  * Task A (state)/B (bus)/C (telegram-adapter)/D2 (rpc-handlers/cc-stub) into
+  * one running hostd process.
+  *
+@@ -123,12 +125,26 @@ function botStateDir(bot: BotConfig): string {
+   // workspace dir (that belongs to the bot's own Claude Code session, not
+   // hostd's channel-adapter state/inbox). Revisit if fase 2 wants this
+   // configurable per bot.
+   return join(process.cwd(), "state", bot.id);
+ }
+ 
++/**
++ * Task S1, Fase 2 — where THIS pilot bot watches for a bot-lama's legacy
++ * `pending/*.json` mailbox (Task X2's `pending-consumer.ts`; recon-hooks.md
++ * §D "hostd KONSUMSI selama fase 2"). No config field exists for "the old
++ * wrapper's state dir" (that belongs to a DIFFERENT process/repo entirely),
++ * so this reuses the same per-bot state area hostd already owns
++ * (`botStateDir`) rather than inventing a new config knob for a mixed-fleet
++ * window — documented assumption, revisit if a real migration needs the
++ * dir to be independently configurable.
++ */
++function botPendingDir(bot: BotConfig): string {
++  return join(botStateDir(bot), "pending");
++}
++
+ export interface StartHostdOptions {
+   /** Default: `loadConfig()` (reads MIRZA_HOSTD_CONFIG / ./hostd.config.json). Test-injectable to skip the filesystem entirely. */
+   config?: HostdConfig;
+   /** Default: `resolveDbPath()` (MIRZA_HOSTD_DB or `<cwd>/hostd.db`). Pass `:memory:` in tests. */
+   dbPath?: string;
+   /** Default: MIRZA_HOSTD_PIPE or PIPE_NAME_DEFAULT. Test-injectable so parallel test runs don't collide on one pipe name. */
+@@ -137,23 +153,37 @@ export interface StartHostdOptions {
+    * Test-injectable poller factory (mock grammy — see telegram-adapter's
+    * Task C3 `CreatePollerOptions.botFactory` pattern). MUST be supplied by
+    * any test that calls `startHostd` — never let a test start a real
+    * long-poll against Telegram.
+    */
+   createPoller?: TelegramAdapterDeps["createPoller"];
++  /**
++   * Task S1, Fase 2 — test-injectable holder factory (mock pty-holder — see
++   * `supervisor.ts`'s own "test JANGAN spawn holder Node sungguhan"
++   * constraint). Default: `spawnRealHolder` (spawns a real
++   * `node --import tsx pty-holder/src/main.ts` child per bot).
++   */
++  spawnHolder?: SpawnHolderFn;
++  /**
++   * Task S1, Fase 2 — disable the X2 pending-consumer shim (default: on for
++   * every configured bot). Tests that don't want real fs.watch/sweep timers
++   * running against `state/<bot>/pending` can set this `false`.
++   */
++  enableLegacyPendingShim?: boolean;
+ }
+ 
+ export interface HostdHandle {
+   db: Database;
+   server: net.Server;
+   pipe: string;
+   config: HostdConfig;
+   adapters: TelegramAdaptersHandle;
+   delivery: DeliveryHandle;
+   telegramSenders: ReadonlyMap<string, OutboundSender>;
+-  /** Stop everything (adapters, delivery, unwire server delegates, close the pipe server + db). Idempotent. */
++  supervisors: SupervisorsHandle;
++  /** Stop everything (adapters, delivery, supervisors, pending shims, unwire server delegates, close the pipe server + db). Idempotent. */
+   shutdown(): Promise<void>;
+ }
+ 
+ /**
+  * Assemble one running hostd instance. Extracted from `main()` (the
+  * `if (import.meta.main)` entrypoint below just calls this with real deps)
+@@ -226,25 +256,51 @@ export async function startHostd(opts: StartHostdOptions = {}): Promise<HostdHan
+       // that button never stops — see ackCallback's docstring above.
+       if (msg.callback) await ackCallback(ctx, outcome);
+     },
+     ...(opts.createPoller ? { createPoller: opts.createPoller } : {}),
+   });
+ 
++  // Task S1, Fase 2 — one BotSupervisor (holder spawn/restart/backoff +
++  // injection queue) per configured bot.
++  const supervisors = startSupervisors(config, db, { spawnHolder: opts.spawnHolder });
++
++  // X2 shim: watch each bot's legacy pending/*.json mailbox and forward
++  // command/batch payloads into that bot's own injection queue
++  // (recon-hooks.md §D — "hostd KONSUMSI selama fase 2").
++  const pendingConsumers: PendingConsumerHandle[] = [];
++  if (opts.enableLegacyPendingShim !== false) {
++    for (const bot of config.bots) {
++      const supervisor = supervisors.supervisors.get(bot.id);
++      if (!supervisor) continue; // unreachable — startSupervisors mirrors config.bots 1:1
++      pendingConsumers.push(
++        startPendingConsumer({
++          dir: botPendingDir(bot),
++          botId: bot.id,
++          enqueueEnv: env => enqueue(db, env),
++          enqueueInject: req => supervisor.enqueueFromLegacy(req),
++        }),
++      );
++    }
++  }
++
+   registerRpcHandlerDeps({
+     db,
+     config,
+     telegramSenders,
+     adapterStatuses: adapters.statuses,
+     isRegistered,
+     deliveryStats: () => delivery.stats(),
++    supervisorStatuses: () => supervisors.statuses(),
+   });
+ 
+   let shuttingDown = false;
+   async function shutdown(): Promise<void> {
+     if (shuttingDown) return;
+     shuttingDown = true;
++    for (const consumer of pendingConsumers) consumer.stop();
++    await supervisors.stopAll();
+     delivery.stop();
+     await adapters.stopAll();
+     registerConfirmHandler(null);
+     registerRpcHandlerDeps(null);
+     // Fix pass 1 (Bug 2): `server.close()` on its own waits for every open
+     // connection to end BEFORE its callback fires. A still-connected
+@@ -268,13 +324,13 @@ export async function startHostd(opts: StartHostdOptions = {}): Promise<HostdHan
+       new Promise<void>(resolve => server.close(() => resolve())),
+       new Promise<void>(resolve => setTimeout(resolve, SHUTDOWN_CLOSE_TIMEOUT_MS)),
+     ]);
+     db.close();
+   }
+ 
+-  return { db, server, pipe, config, adapters, delivery, telegramSenders, shutdown };
++  return { db, server, pipe, config, adapters, delivery, telegramSenders, supervisors, shutdown };
+ }
+ 
+ async function main(): Promise<void> {
+   const handle = await startHostd();
+   for (const sig of ["SIGINT", "SIGTERM"] as const) {
+     process.on(sig, () => {
+diff --git a/packages/hostd/src/rpc-handlers.ts b/packages/hostd/src/rpc-handlers.ts
+index 3f89b40..628998a 100644
+--- a/packages/hostd/src/rpc-handlers.ts
++++ b/packages/hostd/src/rpc-handlers.ts
+@@ -4,12 +4,13 @@ import type { OutboundSender } from "@mirza-harness/telegram-adapter";
+ import type { PollerStatus } from "@mirza-harness/telegram-adapter";
+ import { Envelope, TelegramOutboundParams, AgentStatusParams, AgentSendParams, type EnvelopeT } from "@mirza-harness/shared";
+ import type { HostdConfig } from "./config";
+ import { enqueue } from "./bus/bus";
+ import { composeAgentPrompt } from "./bus/marker";
+ import type { DeliveryStats } from "./bus/delivery";
++import type { DoctorSupervisorStatusLike } from "./doctor";
+ 
+ /**
+  * Task D2, Fase 1 — hostd's side of the cc-stub tools proxy: `server.ts`
+  * only wires these functions into its RPC method table (see
+  * `registerRpcHandlerDeps`); ALL validation (zod, from `@mirza-harness/shared`'s
+  * rpc.ts) and side effects (Telegram send, bus enqueue, config lookups)
+@@ -44,12 +45,19 @@ export interface RpcHandlerDeps {
+    * Not used by any of the 4 RPC handlers below — carried here purely so
+    * `main.ts` can register ONE deps object (`registerRpcHandlerDeps`) that
+    * also feeds `server.ts`'s `doctor` handler (`startDelivery(...).stats`).
+    * Optional so tests exercising the 4 handlers above don't need to supply it.
+    */
+   deliveryStats?: () => DeliveryStats;
++  /**
++   * Task S1, Fase 2 — same carry-through pattern as `deliveryStats`: not
++   * used by the 4 RPC handlers below, exists so `main.ts` can register one
++   * deps object that ALSO feeds `server.ts`'s `doctor` handler with real
++   * per-bot supervisor status (`startSupervisors(...).statuses()`).
++   */
++  supervisorStatuses?: () => Readonly<Record<string, DoctorSupervisorStatusLike>>;
+ }
+ 
+ function nowMs(deps: RpcHandlerDeps): number {
+   return (deps.now ?? Date.now)();
+ }
+ 
+diff --git a/packages/hostd/src/server.ts b/packages/hostd/src/server.ts
+index 95d007d..c9b9c5c 100644
+--- a/packages/hostd/src/server.ts
++++ b/packages/hostd/src/server.ts
+@@ -55,13 +55,18 @@ const connections = new Map<string, net.Socket>();
+ const SessionRegisterParams = z.object({ bot_id: z.string().min(1) }).strict();
+ 
+ const handlers: Record<string, Handler> = {
+   doctor: () =>
+     doctorReport(
+       rpcDeps
+-        ? { db: rpcDeps.db, adapterStatuses: rpcDeps.adapterStatuses, deliveryStats: rpcDeps.deliveryStats?.() }
++        ? {
++            db: rpcDeps.db,
++            adapterStatuses: rpcDeps.adapterStatuses,
++            deliveryStats: rpcDeps.deliveryStats?.(),
++            supervisorStatuses: rpcDeps.supervisorStatuses?.(),
++          }
+         : {},
+     ),
+   "session.register": (params, sock) => {
+     const { bot_id } = SessionRegisterParams.parse(params);
+     connections.set(bot_id, sock);
+     sock.once("close", () => {
+diff --git a/packages/hostd/src/state/sessions-store.ts b/packages/hostd/src/state/sessions-store.ts
+new file mode 100644
+index 0000000..80f8155
+--- /dev/null
++++ b/packages/hostd/src/state/sessions-store.ts
+@@ -0,0 +1,25 @@
++import type { Database } from "bun:sqlite";
++
++/**
++ * Small helper around the `sessions` table (schema.ts) needed by
++ * `supervisor.ts`'s `clearSession` — everything else about session rows
++ * (the actual INSERT on `SessionStart`) is H1's job (recon-hooks.md §B point
++ * 2, "hostd tulis baris sesi"), not built yet in this phase. This module
++ * only UPDATEs the lifecycle column of whatever row already exists.
++ */
++
++/**
++ * Set `lifecycle` on the bot's most-recently-started session row (mirrors
++ * `rpc-handlers.ts`'s `agent.status` query — "ORDER BY started_at DESC LIMIT
++ * 1"). No-op (returns `false`) if the bot has no session row yet — that's
++ * expected before the first `SessionStart` hook fires; there's nothing to
++ * mark "resetting" yet.
++ */
++export function setLatestSessionLifecycle(db: Database, botId: string, lifecycle: string): boolean {
++  const row = db
++    .query(`SELECT id FROM sessions WHERE bot_id = ? ORDER BY started_at DESC LIMIT 1`)
++    .get(botId) as { id: string } | null;
++  if (!row) return false;
++  db.run(`UPDATE sessions SET lifecycle = ? WHERE id = ?`, [lifecycle, row.id]);
++  return true;
++}
+diff --git a/packages/hostd/src/supervisor/injection.ts b/packages/hostd/src/supervisor/injection.ts
+new file mode 100644
+index 0000000..d0d6e34
+--- /dev/null
++++ b/packages/hostd/src/supervisor/injection.ts
+@@ -0,0 +1,486 @@
++import { randomUUID } from "node:crypto";
++
++/**
++ * Per-bot injection queue + clear-barrier gate — the "jantung" of Task S1.
++ *
++ * Kode acuan: `plugins/pty-controller/wrapper/src/wrapper.ts` (mirza-marketplace)
++ * lines 209-253 (pacing constants) and 654-745 (`InjectionGate`/`injectionQueue`/
++ * `drainInjectionQueue`), plus `wrapper/src/injection-gate.ts` (the pure gate
++ * class this module's `InjectionGate` is a direct port of). See
++ * `.superpowers/sdd/f2/recon-wrapper.md` §A/§E and `task-S1-brief.md`.
++ *
++ * Deliberate simplifications vs. kode acuan (this is a NEW system, not a
++ * verbatim port):
++ *  - No jsonl-polling. The clear barrier is released by an explicit
++ *    `onSessionStarted()` call (S1 exposes it as an API + will be wired to
++ *    the SessionStart hook in H1 — recon-hooks.md §B point 2) or by its own
++ *    safety timeout.
++ *  - No /rename or /resume chaining here — session naming flows through the
++ *    hook-inversion data path (recon-hooks.md §B point 4), not PTY output
++ *    sniffing.
++ *  - `CLEAR_BARRIER_TIMEOUT_MS` is lowered from kode acuan's 10 minutes to
++ *    2 minutes per the S1 brief ("turunkan jadi mis. 120000ms") — a timeout
++ *    here now surfaces as a doctor ALARM (`barrierAlarm()`) rather than a
++ *    silent log line, per "timeout → lepaskan + set ALARM doctor, BUKAN diam".
++ *
++ * Pure(-ish): all the state machine logic below is driven by an explicit
++ * `now` (never reads `Date.now()` internally unless the caller didn't
++ * supply a clock), and dispatch is a caller-supplied callback — this module
++ * never touches a socket/child-process itself. `supervisor.ts` owns the
++ * actual IPC to pty-holder and the `setInterval` that calls `tick()`.
++ */
++
++// ---------------------------------------------------------------------------
++// Pacing constants (recon-wrapper.md §A line 11, wrapper.ts:209-253)
++// ---------------------------------------------------------------------------
++
++/** Minimum quiet time after every injection before the next one may start (SCAR-002). */
++export const MIN_INJECTION_GAP_MS = 1_500;
++/** Extra settle held after an injection's ack lands, so the next item doesn't crowd it (SCAR-003). */
++export const POST_INJECTION_DELAY_MS = 1_000;
++/** Safety valve: if a `/clear`'s fresh session never gets reported via `onSessionStarted`, force-release the barrier instead of deadlocking the queue forever. Lowered from kode acuan's 10min per the S1 brief. */
++export const CLEAR_BARRIER_TIMEOUT_MS = 120_000;
++/** Default poll interval `supervisor.ts` uses to call `tick()`. */
++export const QUEUE_POLL_MS = 200;
++/** Retries before an item is dead-lettered (IDEA-2 — visible, not silently dropped). */
++export const MAX_INJECT_ATTEMPTS = 3;
++/** Cap on `enqueueBatch` size — this queue's own limit (independent of the legacy mailbox's `MAX_BATCH_ITEMS` in `@mirza-harness/shared`'s `legacy-pending.ts`). */
++export const MAX_BATCH_ITEMS = 8;
++
++// ---------------------------------------------------------------------------
++// Slash-guard (SEC-3 fix; recon-wrapper.md §C/§D, task brief "Slash-guard di
++// titik enqueue")
++// ---------------------------------------------------------------------------
++
++/**
++ * SEC-3 fix: kode acuan's MCP-layer regex (`^\/[a-z][a-z0-9_:-]{0,63}(\s[\s\S]{0,256})?$`)
++ * used `[\s\S]` for the argument tail, which happily matches raw control
++ * characters (NUL, ESC, CR/LF outside the intended split point, ...). Here
++ * the argument tail is `[^\r\n\x00-\x1f]{0,256}` instead — printable text
++ * only, no control characters — so a malformed/malicious argument can't
++ * smuggle extra keystrokes into the PTY via the command string itself.
++ */
++export const SLASH_COMMAND_RE = /^\/[a-z][a-z0-9_:-]{0,63}([^\r\n\x00-\x1f]{0,256})?$/;
++
++/**
++ * Commands that exist only in the telegram/wrapper layer, not in Claude
++ * Code itself — injecting them wedges the PTY on an unknown command.
++ * Duplicated (not imported) from `plugins/pty-controller/slash-guards.ts`
++ * (mirza-marketplace) — cross-repo import isn't available, same rationale
++ * as `wrapper.ts`'s other intentional duplications (recon-wrapper.md §57 —
++ * `writeTelegramRegistryName`'s docstring, "Option β").
++ *
++ * `/effort` is handled separately (see `guardSlashCommand`) — it pops a
++ * confirm picker that only a trusted, supervisor-originated injection can
++ * reasonably drive (`confirmAfterMs`), so it's blocked for AI/bus-originated
++ * commands but allowed when `source: 'supervisor'`.
++ */
++const TELEGRAM_LAYER_COMMANDS: Record<string, string> = {
++  "/new": "/new is a telegram-layer command, not a Claude Code command. Use a batch: [\"/clear\", \"/rename <name>\"].",
++  "/switch": "/switch is a telegram-layer picker, not a Claude Code command. Inject \"/resume <sessionId>\" instead.",
++  "/delete": "/delete is a telegram-layer picker that removes session files; Claude Code has no equivalent slash command.",
++};
++
++const EFFORT_COMMAND_WORD = "/effort";
++
++export type InjectSource = "ai" | "supervisor";
++
++export type SlashGuardResult = { ok: true } | { ok: false; error: string };
++
++function commandWord(command: string): string {
++  return (command.split(/\s/, 1)[0] ?? "").toLowerCase();
++}
++
++/**
++ * Validate a slash command before it's ever allowed into the queue. Checked
++ * at the ENQUEUE point (not just at dispatch) so a bad command surfaces
++ * immediately to its caller rather than silently occupying a queue slot.
++ */
++export function guardSlashCommand(command: string, source: InjectSource = "ai"): SlashGuardResult {
++  if (!SLASH_COMMAND_RE.test(command)) {
++    return { ok: false, error: `invalid slash command syntax: ${JSON.stringify(command)}` };
++  }
++  const word = commandWord(command);
++  if (word === EFFORT_COMMAND_WORD && source !== "supervisor") {
++    return {
++      ok: false,
++      error: "/effort pops a confirm picker that only a supervisor-originated injection can drive — blocked from the AI/bus path.",
++    };
++  }
++  const layerError = TELEGRAM_LAYER_COMMANDS[word];
++  if (layerError) return { ok: false, error: layerError };
++  return { ok: true };
++}
++
++// ---------------------------------------------------------------------------
++// InjectionGate — direct port of wrapper/src/injection-gate.ts
++// ---------------------------------------------------------------------------
++
++/**
++ * Pure gate that serializes PTY injections (BUG #3, kode acuan 2026-06-07).
++ * See the module docstring above and kode acuan's `injection-gate.ts` for
++ * the full rationale — logic ported verbatim, only the default timeout
++ * differs (S1 brief lowers it to `CLEAR_BARRIER_TIMEOUT_MS`).
++ */
++export class InjectionGate {
++  private holdUntil = 0;
++  private clearBarrierStartedAt: number | null = null;
++
++  constructor(private readonly clearBarrierTimeoutMs: number = CLEAR_BARRIER_TIMEOUT_MS) {}
++
++  /** Extend the do-not-inject window to at least `now + ms`. */
++  holdFor(ms: number, now: number): void {
++    this.holdUntil = Math.max(this.holdUntil, now + ms);
++  }
++
++  /** Arm the post-/clear barrier. */
++  beginClearBarrier(now: number): void {
++    this.clearBarrierStartedAt = now;
++  }
++
++  /** Release the barrier (session-started signal). `settleMs` holds the queue a little longer. */
++  releaseClearBarrier(settleMs: number, now: number): void {
++    this.clearBarrierStartedAt = null;
++    this.holdFor(settleMs, now);
++  }
++
++  /**
++   * True while the clear barrier is armed (and not timed out). Has the side
++   * effect of clearing the barrier once the timeout is exceeded — callers
++   * that need to distinguish "released by timeout" from "released by
++   * `onSessionStarted`" MUST check this (and act on the transition) BEFORE
++   * relying on `isBlocked`, exactly like kode acuan's `drainInjectionQueue`.
++   */
++  clearBarrierActive(now: number): boolean {
++    if (this.clearBarrierStartedAt === null) return false;
++    if (now - this.clearBarrierStartedAt > this.clearBarrierTimeoutMs) {
++      this.clearBarrierStartedAt = null;
++      return false;
++    }
++    return true;
++  }
++
++  /** True when the next injection must wait. */
++  isBlocked(now: number): boolean {
++    return this.clearBarrierActive(now) || now < this.holdUntil;
++  }
++}
++
++// ---------------------------------------------------------------------------
++// Queue item shapes
++// ---------------------------------------------------------------------------
++
++export type InjectItemKind = "slash" | "text" | "batch";
++export type InjectItemState = "queued" | "sent" | "acked" | "failed" | "dead";
++
++/** One command inside a `batch` item, or the shape a non-batch item's payload is normalized to for dispatch. */
++export interface BatchSubItem {
++  kind: "slash" | "text";
++  payload: string;
++}
++
++export interface InjectItem {
++  readonly id: string;
++  readonly kind: InjectItemKind;
++  readonly payload: string | readonly BatchSubItem[];
++  state: InjectItemState;
++  attempts: number;
++  readonly createdAt: number;
++}
++
++export type EnqueueResult = { ok: true; id: string } | { ok: false; error: string };
++
++interface PendingStep {
++  itemId: string;
++  stepId: string;
++  unit: BatchSubItem;
++}
++
++export interface InjectionQueueOptions {
++  /**
++   * Send one command unit to the holder. `stepId` is the caller's own
++   * correlation id (echoed back on `onInjected`) — for a plain item this is
++   * the item's own `id`; for a batch sub-item it is `${itemId}#${index}`.
++   */
++  dispatch: (stepId: string, unit: BatchSubItem) => void;
++  /** Fired when an item exhausts its retries and moves to `dead` (IDEA-2 — visible dead-letter). */
++  onDead?: (item: InjectItem, reason: string) => void;
++  /** Fired when the clear barrier force-releases via its safety timeout instead of `onSessionStarted` — the doctor ALARM signal. */
++  onBarrierTimeout?: (item: InjectItem) => void;
++  now?: () => number;
++  minGapMs?: number;
++  postInjectionDelayMs?: number;
++  clearBarrierTimeoutMs?: number;
++  maxAttempts?: number;
++}
++
++/**
++ * Per-bot FIFO injection queue with clear-barrier gating and dead-letter
++ * visibility. One instance per bot (single-consumer — `supervisor.ts` is the
++ * only thing that ever calls `tick()` for a given bot's queue).
++ */
++export class InjectionQueue {
++  private readonly items: InjectItem[] = [];
++  private readonly deadLetters: InjectItem[] = [];
++  private readonly batchCursors = new Map<string, number>();
++  private pendingStep: PendingStep | null = null;
++  private awaitingBarrierItemId: string | null = null;
++  private lastAckAt: number | null = null;
++  private alarm = false;
++
++  private readonly gate: InjectionGate;
++  private readonly dispatchFn: InjectionQueueOptions["dispatch"];
++  private readonly onDead: NonNullable<InjectionQueueOptions["onDead"]>;
++  private readonly onBarrierTimeout: NonNullable<InjectionQueueOptions["onBarrierTimeout"]>;
++  private readonly nowFn: () => number;
++  private readonly minGapMs: number;
++  private readonly postInjectionDelayMs: number;
++  private readonly maxAttempts: number;
++
++  constructor(opts: InjectionQueueOptions) {
++    this.dispatchFn = opts.dispatch;
++    this.onDead = opts.onDead ?? (() => {});
++    this.onBarrierTimeout = opts.onBarrierTimeout ?? (() => {});
++    this.nowFn = opts.now ?? Date.now;
++    this.minGapMs = opts.minGapMs ?? MIN_INJECTION_GAP_MS;
++    this.postInjectionDelayMs = opts.postInjectionDelayMs ?? POST_INJECTION_DELAY_MS;
++    this.maxAttempts = opts.maxAttempts ?? MAX_INJECT_ATTEMPTS;
++    this.gate = new InjectionGate(opts.clearBarrierTimeoutMs ?? CLEAR_BARRIER_TIMEOUT_MS);
++  }
++
++  // -- enqueue -----------------------------------------------------------
++
++  enqueueSlash(command: string, opts: { source?: InjectSource; id?: string } = {}): EnqueueResult {
++    const guard = guardSlashCommand(command, opts.source ?? "ai");
++    if (!guard.ok) return guard;
++    const item = this.push("slash", command, opts.id);
++    return { ok: true, id: item.id };
++  }
++
++  enqueueText(text: string, opts: { id?: string } = {}): EnqueueResult {
++    if (text.length === 0) return { ok: false, error: "text payload must not be empty" };
++    const item = this.push("text", text, opts.id);
++    return { ok: true, id: item.id };
++  }
++
++  /**
++   * `batch` = a unit kontigu atomik (ambiguitas #1 resolved): all sub-items
++   * are stored as ONE queue slot, so nothing else can ever interleave
++   * between them — there is no separate "merge N queue entries" step that
++   * a concurrent enqueue could split. Single-consumer per bot + this
++   * single-slot representation together make contiguity trivially true.
++   */
++  enqueueBatch(subItems: readonly BatchSubItem[], opts: { source?: InjectSource; id?: string } = {}): EnqueueResult {
++    if (subItems.length === 0) return { ok: false, error: "batch must contain at least one item" };
++    if (subItems.length > MAX_BATCH_ITEMS) return { ok: false, error: `batch too long (max ${MAX_BATCH_ITEMS})` };
++    for (const sub of subItems) {
++      if (sub.kind === "slash") {
++        const guard = guardSlashCommand(sub.payload, opts.source ?? "ai");
++        if (!guard.ok) return guard;
++      } else if (sub.payload.length === 0) {
++        return { ok: false, error: "batch text sub-item must not be empty" };
++      }
++    }
++    const item = this.push("batch", subItems.slice(), opts.id);
++    this.batchCursors.set(item.id, 0);
++    return { ok: true, id: item.id };
++  }
++
++  private push(kind: InjectItemKind, payload: InjectItem["payload"], id?: string): InjectItem {
++    const item: InjectItem = {
++      id: id ?? randomUUID(),
++      kind,
++      payload,
++      state: "queued",
++      attempts: 0,
++      createdAt: this.nowFn(),
++    };
++    this.items.push(item);
++    return item;
++  }
++
++  // -- observability (doctor) ---------------------------------------------
++
++  /** Active (not-yet-terminal) items, FIFO order — `doctor`'s `queue: N`. */
++  list(): readonly InjectItem[] {
++    return this.items;
++  }
++
++  /** Dead-lettered items (IDEA-2 — visible, never silently dropped). */
++  deadLetterList(): readonly InjectItem[] {
++    return this.deadLetters;
++  }
++
++  isAwaitingBarrier(): boolean {
++    return this.awaitingBarrierItemId !== null;
++  }
++
++  /** Seconds since the last successful ack, or `null` if none yet — `doctor`'s `last_ack_s`. */
++  lastAckAgeS(now: number = this.nowFn()): number | null {
++    if (this.lastAckAt === null) return null;
++    return Math.max(0, Math.floor((now - this.lastAckAt) / 1000));
++  }
++
++  /** Sticky ALARM: true once the clear barrier has force-released via timeout, until a fresh barrier is successfully armed. */
++  barrierAlarm(): boolean {
++    return this.alarm;
++  }
++
++  // -- driving the queue ---------------------------------------------------
++
++  /** Called by `supervisor.ts`'s poll loop. No-op while a step is in flight or the gate is closed. */
++  tick(now: number = this.nowFn()): void {
++    if (this.pendingStep) return;
++
++    // Barrier-timeout transition MUST be checked before `isBlocked` (which
++    // would otherwise silently clear it as a side effect) — mirrors kode
++    // acuan's `drainInjectionQueue` ordering exactly.
++    if (this.awaitingBarrierItemId && !this.gate.clearBarrierActive(now)) {
++      this.resolveAwaitingBarrierStep(now, { timedOut: true });
++    }
++
++    if (this.gate.isBlocked(now)) return;
++
++    const front = this.frontUnit();
++    if (!front) return;
++    this.dispatchUnit(front, now);
++  }
++
++  private frontUnit(): { item: InjectItem; stepId: string; unit: BatchSubItem } | null {
++    const item = this.items[0];
++    if (!item) return null;
++    if (item.kind === "batch") {
++      const subs = item.payload as readonly BatchSubItem[];
++      const idx = this.batchCursors.get(item.id) ?? 0;
++      if (idx >= subs.length) return null; // shouldn't happen — finished batches are removed
++      return { item, stepId: `${item.id}#${idx}`, unit: subs[idx]! };
++    }
++    return { item, stepId: item.id, unit: { kind: item.kind as "slash" | "text", payload: item.payload as string } };
++  }
++
++  private dispatchUnit(front: { item: InjectItem; stepId: string; unit: BatchSubItem }, now: number): void {
++    this.pendingStep = { itemId: front.item.id, stepId: front.stepId, unit: front.unit };
++    front.item.state = "sent";
++    this.gate.holdFor(this.minGapMs, now);
++    this.dispatchFn(front.stepId, front.unit);
++  }
++
++  private isClearCommand(unit: BatchSubItem): boolean {
++    return unit.kind === "slash" && commandWord(unit.payload) === "/clear";
++  }
++
++  /**
++   * Ack level = keystroke typed (pty-holder's `injected {id}` event — see
++   * `pty-holder/src/ipc.ts`'s docstring: "typed, not semantically
++   * processed"). For everything except `/clear`, that IS the item's
++   * success signal. For `/clear`, the contract requires the FURTHER
++   * semantic signal `onSessionStarted()` before the item is truly acked —
++   * see recon-hooks.md §B point 3.
++   */
++  onInjected(stepId: string, now: number = this.nowFn()): void {
++    if (!this.pendingStep || this.pendingStep.stepId !== stepId) return; // stale/unknown — ignore
++    const { itemId, unit } = this.pendingStep;
++    const item = this.items.find(i => i.id === itemId);
++    this.pendingStep = null;
++    if (!item) return; // defensive — shouldn't happen, item only leaves `items` once fully acked/dead
++
++    this.gate.holdFor(this.postInjectionDelayMs, now);
++
++    if (this.isClearCommand(unit)) {
++      this.gate.beginClearBarrier(now);
++      this.awaitingBarrierItemId = item.id;
++      this.alarm = false; // fresh barrier armed — clear any stale alarm from a previous cycle
++      // item stays 'sent': the semantic ack (onSessionStarted) or the
++      // safety timeout is what completes it.
++      return;
++    }
++
++    this.advanceOrComplete(item, now);
++  }
++
++  /** Advance a batch's cursor past its current step, or complete a non-batch item. */
++  private advanceOrComplete(item: InjectItem, now: number): void {
++    if (item.kind === "batch") {
++      const idx = (this.batchCursors.get(item.id) ?? 0) + 1;
++      const subs = item.payload as readonly BatchSubItem[];
++      if (idx >= subs.length) {
++        this.completeItem(item, "acked", now);
++      } else {
++        this.batchCursors.set(item.id, idx);
++        // stays 'sent' — next tick dispatches the next sub-item once the gate opens
++      }
++      return;
++    }
++    this.completeItem(item, "acked", now);
++  }
++
++  private resolveAwaitingBarrierStep(now: number, opts: { timedOut: boolean }): void {
++    const itemId = this.awaitingBarrierItemId;
++    this.awaitingBarrierItemId = null;
++    if (!itemId) return;
++    const item = this.items.find(i => i.id === itemId);
++    if (opts.timedOut) {
++      this.alarm = true;
++      if (item) this.onBarrierTimeout(item);
++    } else {
++      this.gate.releaseClearBarrier(this.postInjectionDelayMs, now);
++    }
++    if (!item) return;
++    this.advanceOrComplete(item, now);
++  }
++
++  /**
++   * The semantic ack for a `/clear` in flight — called from `supervisor.ts`
++   * on every `SessionStart` (H1's hook wiring), not just after a `/clear`:
++   * safe/no-op when nothing is awaiting the barrier.
++   */
++  onSessionStarted(now: number = this.nowFn()): void {
++    if (!this.awaitingBarrierItemId) return;
++    this.resolveAwaitingBarrierStep(now, { timedOut: false });
++  }
++
++  /**
++   * A step failed (`pty-error` from the holder, or the holder died mid-flight
++   * — see `resetInFlight`). Retries up to `maxAttempts`; beyond that the
++   * WHOLE item (batches can't skip a broken sub-step and stay atomic) is
++   * dead-lettered (IDEA-2 — visible via `deadLetterList()`, not silently
++   * dropped).
++   */
++  onError(stepId: string, reason: string, now: number = this.nowFn()): void {
++    if (!this.pendingStep || this.pendingStep.stepId !== stepId) return;
++    const { itemId } = this.pendingStep;
++    this.pendingStep = null;
++    const item = this.items.find(i => i.id === itemId);
++    if (!item) return;
++
++    item.attempts += 1;
++    if (item.attempts >= this.maxAttempts) {
++      this.completeItem(item, "dead", now);
++      this.onDead(item, reason);
++      return;
++    }
++    // Stays 'sent' at its current (item/batch-cursor) position — the next
++    // tick redispatches the SAME step. Brief backoff so failures don't
++    // hot-loop the poller.
++    this.gate.holdFor(this.minGapMs, now);
++  }
++
++  /**
++   * Called by `supervisor.ts` when the holder process dies (or is force-
++   * killed) while a step was in flight and no `injected`/`pty-error` ever
++   * arrived for it — treated the same as an explicit `pty-error`.
++   */
++  resetInFlight(reason: string, now: number = this.nowFn()): void {
++    if (!this.pendingStep) return;
++    this.onError(this.pendingStep.stepId, reason, now);
++  }
++
++  private completeItem(item: InjectItem, state: "acked" | "dead", now: number): void {
++    item.state = state;
++    const idx = this.items.findIndex(i => i.id === item.id);
++    if (idx >= 0) this.items.splice(idx, 1);
++    this.batchCursors.delete(item.id);
++    if (state === "acked") this.lastAckAt = now;
++    else this.deadLetters.push(item);
++  }
++}
+diff --git a/packages/hostd/src/supervisor/supervisor.ts b/packages/hostd/src/supervisor/supervisor.ts
+new file mode 100644
+index 0000000..3218e0c
+--- /dev/null
++++ b/packages/hostd/src/supervisor/supervisor.ts
+@@ -0,0 +1,492 @@
++import { randomUUID } from "node:crypto";
++import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
++import { createInterface } from "node:readline";
++import { dirname, join } from "node:path";
++import { fileURLToPath, pathToFileURL } from "node:url";
++import type { Database } from "bun:sqlite";
++import type { BotConfig } from "../config";
++import { setLatestSessionLifecycle } from "../state/sessions-store";
++import {
++  InjectionQueue,
++  type BatchSubItem,
++  type EnqueueResult,
++  type InjectSource,
++} from "./injection";
++
++/**
++ * bot-supervisor core — Task S1, Fase 2 ("jantung fase 2"). Spawns/restarts
++ * one pty-holder child process per bot, wires its IPC events into that
++ * bot's `InjectionQueue`, and reports status for `doctor`.
++ *
++ * Kode acuan: `plugins/pty-controller/wrapper/src/wrapper.ts` (mirza-marketplace)
++ * — spawn chain (553-587), `pending-consumer`'s `enqueueInject` contract
++ * (Task X2). pty-holder's own IPC contract: `packages/pty-holder/src/ipc.ts` +
++ * README ("Exit-time contract (S1)" — the 5s OS force-kill fallback this
++ * module implements is exactly the safety net that README's docstring
++ * requires of a caller).
++ *
++ * pty-holder runs under **Node**, never Bun (native `node-pty` — see its
++ * README), so it is always spawned as `node --import tsx <path-to-main.ts>`,
++ * regardless of what runtime hostd itself is running under.
++ */
++
++// ---------------------------------------------------------------------------
++// HolderHandle — the thing supervisor.ts drives. Real impl below; tests
++// supply a fake (`spawnHolder` factory override) so `bun test` never spawns
++// a real Node child / node-pty.
++// ---------------------------------------------------------------------------
++
++export type HolderEvent = "injected" | "pty-error" | "pty-exit" | "exit";
++
++export interface HolderHandle {
++  /** Send an `inject` request; `stepId` is the correlation id echoed back on the later `injected` event. */
++  inject(stepId: string, text: string, submit: boolean): void;
++  /** Send an `inject-slash` request. */
++  injectSlash(stepId: string, command: string, confirmAfterMs?: number): void;
++  /** Request graceful shutdown over IPC. Resolves once the holder's `{ok:true}` response arrives — does NOT itself enforce a timeout; the caller (`BotSupervisor.stop`) owns the OS force-kill fallback. */
++  shutdown(): Promise<void>;
++  /** Last-resort OS-level kill — used when `shutdown()` doesn't settle within the supervisor's own grace window. */
++  forceKill(): void;
++  on(event: "injected", cb: (id: string) => void): void;
++  on(event: "pty-error", cb: (message: string) => void): void;
++  on(event: "pty-exit", cb: (info: { code: number; signal: number | null }) => void): void;
++  /** Native child-process exit (fires even if the holder crashed before emitting `pty-exit` itself). */
++  on(event: "exit", cb: (code: number | null, signal: NodeJS.Signals | null) => void): void;
++}
++
++export interface SpawnHolderOptions {
++  /** Absolute path to pty-holder's `main.ts` — overridable for tests that DO want to exercise a real child (see the package's own `test-integration.mjs` pattern); defaults to the real on-disk sibling package. */
++  ptyHolderMainPath?: string;
++  /** Override the `node` executable — default `"node"` (must resolve on PATH). */
++  nodeBin?: string;
++  /** Absolute path to tsx's ESM loader — see `DEFAULT_TSX_LOADER`'s docstring for why this is resolved by absolute path rather than the bare `"tsx"` specifier. */
++  tsxLoaderPath?: string;
++}
++
++const __dirname = dirname(fileURLToPath(import.meta.url));
++/** packages/hostd/src/supervisor -> packages/pty-holder/src/main.ts */
++const DEFAULT_PTY_HOLDER_MAIN = join(__dirname, "..", "..", "..", "pty-holder", "src", "main.ts");
++/**
++ * packages/hostd/src/supervisor -> packages/pty-holder/node_modules/tsx/dist/loader.mjs.
++ *
++ * Resolved as an ABSOLUTE path, not the bare `"tsx"` specifier the package
++ * README's `node --import tsx src/main.ts` example shows. That example
++ * assumes the process's cwd IS the pty-holder package directory (so Node's
++ * bare-specifier resolution finds `tsx` in its own `node_modules`) — true
++ * when a human runs the README's command by hand, but NOT true here: this
++ * holder's inner `claude`/shell process inherits the pty-holder Node
++ * process's own cwd 1:1 (`pty.ts`'s `spawnClaudePty` has no separate cwd
++ * parameter of its own), so `spawnRealHolder` MUST set `cwd: bot.workspace`
++ * for the bot's session to run in the right directory. That breaks bare
++ * `--import tsx` resolution (tsx lives only in pty-holder's own
++ * `node_modules`, never hoisted into an arbitrary bot workspace — confirmed
++ * by direct repro: `ERR_MODULE_NOT_FOUND` for `tsx` when cwd is anywhere
++ * else). Passing tsx's loader by absolute file path sidesteps Node's
++ * cwd-relative package resolution entirely.
++ */
++const DEFAULT_TSX_LOADER = join(__dirname, "..", "..", "..", "pty-holder", "node_modules", "tsx", "dist", "loader.mjs");
++
++/**
++ * Real implementation: spawns `node --import <tsx loader> <pty-holder main.ts>`,
++ * speaks the NDJSON JSON-RPC protocol over stdio (ipc.ts's contract),
++ * cwd = bot's workspace (so the held `claude`/shell session runs there —
++ * see `DEFAULT_TSX_LOADER`'s docstring for why tsx itself is NOT resolved
++ * relative to that cwd), env carries CLAUDE_BIN/CLAUDE_ARGS per bot.
++ */
++export function spawnRealHolder(bot: BotConfig, opts: SpawnHolderOptions = {}): HolderHandle {
++  const nodeBin = opts.nodeBin ?? "node";
++  const mainPath = opts.ptyHolderMainPath ?? DEFAULT_PTY_HOLDER_MAIN;
++  // `--import` resolves its specifier as an ESM import, not a plain CLI path
++  // — on Windows, a raw `C:\...` path there is parsed as if `C:` were a URL
++  // scheme (`ERR_UNSUPPORTED_ESM_URL_SCHEME`; confirmed via direct repro).
++  // `pathToFileURL(...).href` produces the `file:///C:/...` form Node's ESM
++  // loader actually requires. The entry-file argument (`mainPath`) does NOT
++  // go through this path — Node's CLI normalizes a plain OS path there.
++  const tsxLoaderSpecifier = pathToFileURL(opts.tsxLoaderPath ?? DEFAULT_TSX_LOADER).href;
++
++  const env: NodeJS.ProcessEnv = { ...process.env };
++  if (bot.claude_bin !== undefined) env.CLAUDE_BIN = bot.claude_bin;
++  if (bot.claude_args !== undefined) env.CLAUDE_ARGS = bot.claude_args;
++
++  const child: ChildProcessWithoutNullStreams = spawn(nodeBin, ["--import", tsxLoaderSpecifier, mainPath], {
++    cwd: bot.workspace,
++    env,
++    windowsHide: true,
++  });
++
++  const listeners: { [K in HolderEvent]: Array<(...args: never[]) => void> } = {
++    injected: [],
++    "pty-error": [],
++    "pty-exit": [],
++    exit: [],
++  };
++  function emit<K extends HolderEvent>(event: K, ...args: unknown[]): void {
++    for (const cb of listeners[event]) (cb as (...a: unknown[]) => void)(...args);
++  }
++
++  let rpcSeq = 0;
++  const pendingRpc = new Map<number, { resolve: () => void; reject: (err: Error) => void }>();
++
++  function writeRequest(method: string, params: unknown): number {
++    const id = ++rpcSeq;
++    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
++    return id;
++  }
++
++  const rl = createInterface({ input: child.stdout });
++  rl.on("line", line => {
++    const trimmed = line.trim();
++    if (!trimmed) return;
++    let msg: Record<string, unknown>;
++    try {
++      msg = JSON.parse(trimmed);
++    } catch {
++      return; // malformed line from the child — not our contract to enforce here, just drop it
++    }
++    if (typeof msg.method === "string" && !("id" in msg)) {
++      // Event (no id): pty-exit / pty-error / injected.
++      const params = msg.params as Record<string, unknown> | undefined;
++      if (msg.method === "injected" && params && typeof params.id === "string") {
++        emit("injected", params.id);
++      } else if (msg.method === "pty-error" && params && typeof params.message === "string") {
++        emit("pty-error", params.message);
++      } else if (msg.method === "pty-exit" && params) {
++        emit("pty-exit", { code: Number(params.code ?? 0), signal: (params.signal as number | null) ?? null });
++      }
++      return;
++    }
++    if (typeof msg.id === "number" && pendingRpc.has(msg.id)) {
++      const entry = pendingRpc.get(msg.id)!;
++      pendingRpc.delete(msg.id);
++      if ("error" in msg) entry.reject(new Error(String((msg.error as { message?: string })?.message ?? "holder RPC error")));
++      else entry.resolve();
++    }
++  });
++
++  child.on("exit", (code, signal) => {
++    emit("exit", code, signal);
++  });
++  child.stdin.on("error", () => {
++    /* EPIPE etc. once the child is gone — nothing to do, `exit`/`pty-exit` cover the real signal */
++  });
++
++  return {
++    inject(stepId, text, submit) {
++      writeRequest("inject", { id: stepId, text, submit });
++    },
++    injectSlash(stepId, command, confirmAfterMs) {
++      const params: Record<string, unknown> = { id: stepId, command };
++      if (confirmAfterMs !== undefined) params.confirmAfterMs = confirmAfterMs;
++      writeRequest("inject-slash", params);
++    },
++    shutdown() {
++      return new Promise<void>((resolve, reject) => {
++        const id = writeRequest("shutdown", undefined);
++        pendingRpc.set(id, { resolve, reject });
++      });
++    },
++    forceKill() {
++      try {
++        child.kill();
++      } catch {
++        /* already dead */
++      }
++    },
++    on(event: HolderEvent, cb: (...args: never[]) => void) {
++      listeners[event].push(cb);
++    },
++  };
++}
++
++export type SpawnHolderFn = (bot: BotConfig, opts?: SpawnHolderOptions) => HolderHandle;
++
++// ---------------------------------------------------------------------------
++// BotSupervisor
++// ---------------------------------------------------------------------------
++
++export type HolderState = "starting" | "running" | "dead" | "restarting";
++
++export interface SupervisorStatus {
++  holder: HolderState;
++  queue: number;
++  awaiting_barrier: boolean;
++  last_ack_s: number | null;
++  restarts: number;
++  /** ALARM (perilaku brief: "timeout → lepaskan + set ALARM doctor, BUKAN diam") — sticky until a fresh barrier successfully arms. */
++  barrier_alarm: boolean;
++}
++
++export interface Clock {
++  now(): number;
++  setTimeout(cb: () => void, ms: number): ReturnType<typeof setTimeout>;
++  clearTimeout(handle: ReturnType<typeof setTimeout>): void;
++  setInterval(cb: () => void, ms: number): ReturnType<typeof setInterval>;
++  clearInterval(handle: ReturnType<typeof setInterval>): void;
++}
++
++function unref(handle: { unref?: () => void } | undefined): void {
++  handle?.unref?.();
++}
++
++const realClock: Clock = {
++  now: () => Date.now(),
++  setTimeout: (cb, ms) => {
++    const h = setTimeout(cb, ms);
++    unref(h as unknown as { unref?: () => void });
++    return h;
++  },
++  clearTimeout: h => clearTimeout(h),
++  setInterval: (cb, ms) => {
++    const h = setInterval(cb, ms);
++    unref(h as unknown as { unref?: () => void });
++    return h;
++  },
++  clearInterval: h => clearInterval(h),
++};
++
++export interface BotSupervisorOptions {
++  bot: BotConfig;
++  db: Database;
++  spawnHolder?: SpawnHolderFn;
++  clock?: Clock;
++  /** Base backoff (ms) for the first unexpected-death restart; doubles each subsequent restart. Default 1000ms. */
++  backoffBaseMs?: number;
++  /** Backoff cap. Default 30_000ms. */
++  backoffMaxMs?: number;
++  /** OS force-kill fallback window — README's "supervisor must keep its own ~5s force-kill timeout". Default 5000ms. */
++  forceKillTimeoutMs?: number;
++  /** Injection-queue poll interval. Default `QUEUE_POLL_MS` (200ms). */
++  queuePollMs?: number;
++  /** Injection-queue tuning passthrough (tests only — production uses the module defaults). */
++  minGapMs?: number;
++  postInjectionDelayMs?: number;
++  clearBarrierTimeoutMs?: number;
++  maxAttempts?: number;
++}
++
++/**
++ * One bot's whole supervision unit: holder lifecycle (spawn/restart/backoff/
++ * shutdown) + its `InjectionQueue`. `clearSession`/`onSessionStarted` are the
++ * two public entry points recon-hooks.md §B's contract calls for (H1 will
++ * wire the SessionStart hook to `onSessionStarted` in a later task — this
++ * phase only exposes it).
++ */
++export class BotSupervisor {
++  readonly queue: InjectionQueue;
++  private readonly bot: BotConfig;
++  private readonly db: Database;
++  private readonly spawnHolderFn: SpawnHolderFn;
++  private readonly clock: Clock;
++  private readonly backoffBaseMs: number;
++  private readonly backoffMaxMs: number;
++  private readonly forceKillTimeoutMs: number;
++  private readonly queuePollMs: number;
++
++  private holder: HolderHandle | null = null;
++  private holderState: HolderState = "starting";
++  private restarts = 0;
++  private shuttingDown = false;
++  private restartTimer: ReturnType<Clock["setTimeout"]> | null = null;
++  private pollTimer: ReturnType<Clock["setInterval"]> | null = null;
++
++  constructor(opts: BotSupervisorOptions) {
++    this.bot = opts.bot;
++    this.db = opts.db;
++    this.spawnHolderFn = opts.spawnHolder ?? spawnRealHolder;
++    this.clock = opts.clock ?? realClock;
++    this.backoffBaseMs = opts.backoffBaseMs ?? 1_000;
++    this.backoffMaxMs = opts.backoffMaxMs ?? 30_000;
++    this.forceKillTimeoutMs = opts.forceKillTimeoutMs ?? 5_000;
++    this.queuePollMs = opts.queuePollMs ?? 200;
++
++    this.queue = new InjectionQueue({
++      dispatch: (stepId, unit) => this.dispatchToHolder(stepId, unit),
++      now: () => this.clock.now(),
++      minGapMs: opts.minGapMs,
++      postInjectionDelayMs: opts.postInjectionDelayMs,
++      clearBarrierTimeoutMs: opts.clearBarrierTimeoutMs,
++      maxAttempts: opts.maxAttempts,
++    });
++  }
++
++  get botId(): string {
++    return this.bot.id;
++  }
++
++  /** Spawn the holder and start the queue's poll loop. */
++  start(): void {
++    this.spawn();
++    this.pollTimer = this.clock.setInterval(() => {
++      // Only drive the queue while a holder is actually attached — items
++      // simply wait (state stays 'queued'/'sent') across a restart/backoff
++      // window rather than being dispatched into thin air.
++      if (this.holder && this.holderState === "running") this.queue.tick(this.clock.now());
++    }, this.queuePollMs);
++  }
++
++  private spawn(): void {
++    this.holderState = "starting";
++    const holder = this.spawnHolderFn(this.bot);
++    holder.on("injected", id => this.queue.onInjected(id, this.clock.now()));
++    holder.on("pty-error", message => {
++      // pty-error carries no id (ipc.ts's `PtyErrorEvent` — message only):
++      // blame whichever step is currently in flight, if any.
++      this.queue.resetInFlight(`pty-error: ${message}`, this.clock.now());
++    });
++    holder.on("pty-exit", () => this.handleUnexpectedDeath("holder pty-exit"));
++    holder.on("exit", () => this.handleUnexpectedDeath("holder process exit"));
++    this.holder = holder;
++    this.holderState = "running";
++  }
++
++  private dispatchToHolder(stepId: string, unit: BatchSubItem): void {
++    if (!this.holder) return; // shouldn't happen (poll loop gates on holder presence) — defensive no-op
++    if (unit.kind === "slash") this.holder.injectSlash(stepId, unit.payload);
++    else this.holder.inject(stepId, unit.payload, true);
++  }
++
++  private handleUnexpectedDeath(reason: string): void {
++    if (this.holderState === "dead" || this.shuttingDown) return; // already handled / intentional stop
++    this.holderState = "dead";
++    this.queue.resetInFlight(reason, this.clock.now());
++    this.scheduleRestart();
++  }
++
++  private scheduleRestart(): void {
++    if (this.shuttingDown) return;
++    this.holderState = "restarting";
++    const delay = Math.min(this.backoffBaseMs * 2 ** this.restarts, this.backoffMaxMs);
++    this.restarts += 1;
++    this.restartTimer = this.clock.setTimeout(() => {
++      this.restartTimer = null;
++      this.spawn();
++    }, delay);
++  }
++
++  /** Graceful shutdown: RPC `shutdown`, raced against the OS-level force-kill fallback (README's "~5s" contract). Idempotent. */
++  async stop(): Promise<void> {
++    this.shuttingDown = true;
++    if (this.restartTimer) {
++      this.clock.clearTimeout(this.restartTimer);
++      this.restartTimer = null;
++    }
++    if (this.pollTimer) {
++      this.clock.clearInterval(this.pollTimer);
++      this.pollTimer = null;
++    }
++    const holder = this.holder;
++    if (!holder) return;
++
++    let settled = false;
++    await Promise.race([
++      holder
++        .shutdown()
++        .then(() => {
++          settled = true;
++        })
++        .catch(() => {
++          /* holder answered with an error, or the pipe died mid-request — force-kill fallback below covers both */
++        }),
++      new Promise<void>(resolve => {
++        this.clock.setTimeout(resolve, this.forceKillTimeoutMs);
++      }),
++    ]);
++    if (!settled) holder.forceKill();
++    this.holderState = "dead";
++  }
++
++  /**
++   * `sessions.lifecycle='resetting'` (state) -> enqueue `/clear` -> barrier
++   * armed once the holder acks the keystroke, held until `onSessionStarted`
++   * (or its safety timeout) — recon-hooks.md §B point 1.
++   */
++  clearSession(): EnqueueResult {
++    setLatestSessionLifecycle(this.db, this.bot.id, "resetting");
++    return this.queue.enqueueSlash("/clear", { source: "supervisor" });
++  }
++
++  /** H1 wires this to the SessionStart hook; exposed now as the barrier-release API + (via `queue`) available for an event subscriber later. */
++  onSessionStarted(): void {
++    this.queue.onSessionStarted(this.clock.now());
++  }
++
++  /** Convenience passthroughs so callers (X2 shim, cc-stub RPC handlers) don't need to reach into `.queue` directly. */
++  enqueueSlash(command: string, source: InjectSource = "ai"): EnqueueResult {
++    return this.queue.enqueueSlash(command, { source });
++  }
++
++  enqueueBatch(commands: readonly string[], source: InjectSource = "ai"): EnqueueResult {
++    const subItems: BatchSubItem[] = commands.map(c => ({ kind: "slash", payload: c }));
++    return this.queue.enqueueBatch(subItems, { source });
++  }
++
++  /** X2 shim's `enqueueInject` sink (`pending-consumer.ts`'s `InjectRequest`) — a legacy bot-lama command/batch payload landing on this pilot bot's queue. */
++  enqueueFromLegacy(req: { id: string; commands: string[] }): void {
++    if (req.commands.length === 0) return;
++    if (req.commands.length === 1) {
++      this.queue.enqueueSlash(req.commands[0]!, { source: "ai", id: req.id });
++      return;
++    }
++    const subItems: BatchSubItem[] = req.commands.map(c => ({ kind: "slash", payload: c }));
++    this.queue.enqueueBatch(subItems, { source: "ai", id: req.id });
++  }
++
++  status(): SupervisorStatus {
++    return {
++      holder: this.holderState,
++      queue: this.queue.list().length,
++      awaiting_barrier: this.queue.isAwaitingBarrier(),
++      last_ack_s: this.queue.lastAckAgeS(this.clock.now()),
++      restarts: this.restarts,
++      barrier_alarm: this.queue.barrierAlarm(),
++    };
++  }
++}
++
++// ---------------------------------------------------------------------------
++// startSupervisors — per-config-bot factory, mirrors adapters/telegram.ts's
++// `startTelegramAdapters` shape (pollers/statuses/stopAll).
++// ---------------------------------------------------------------------------
++
++export interface StartSupervisorsDeps {
++  spawnHolder?: SpawnHolderFn;
++  clock?: Clock;
++  backoffBaseMs?: number;
++  backoffMaxMs?: number;
++  forceKillTimeoutMs?: number;
++  queuePollMs?: number;
++}
++
++export interface SupervisorsHandle {
++  supervisors: ReadonlyMap<string, BotSupervisor>;
++  /** Snapshot for `doctorReport`'s `supervisors` component. */
++  statuses(): Record<string, SupervisorStatus>;
++  stopAll(): Promise<void>;
++}
++
++export function startSupervisors(
++  config: { bots: readonly BotConfig[] },
++  db: Database,
++  deps: StartSupervisorsDeps = {},
++): SupervisorsHandle {
++  const supervisors = new Map<string, BotSupervisor>();
++  for (const bot of config.bots) {
++    const supervisor = new BotSupervisor({ bot, db, ...deps });
++    supervisor.start();
++    supervisors.set(bot.id, supervisor);
++  }
++  return {
++    supervisors,
++    statuses(): Record<string, SupervisorStatus> {
++      const out: Record<string, SupervisorStatus> = {};
++      for (const [botId, s] of supervisors) out[botId] = s.status();
++      return out;
++    },
++    async stopAll(): Promise<void> {
++      await Promise.all([...supervisors.values()].map(s => s.stop()));
++    },
++  };
++}
++
++/** Re-exported so callers building a legacy inject-request id don't need their own uuid import. */
++export { randomUUID };
+diff --git a/packages/hostd/test/doctor.test.ts b/packages/hostd/test/doctor.test.ts
+index 9c57a60..4a456fb 100644
+--- a/packages/hostd/test/doctor.test.ts
++++ b/packages/hostd/test/doctor.test.ts
+@@ -75,6 +75,24 @@ describe("doctorReport (Task D2 — adapterStatuses + deliveryStats wiring)", ()
+ 
+   test("tanpa deps sama sekali, adapters tetap 'stub' (backward-compat)", () => {
+     const r = doctorReport();
+     expect(r.components.adapters).toBe("stub");
+   });
+ });
++
++describe("doctorReport (Task S1 — supervisorStatuses wiring)", () => {
++  test("supervisorStatuses -> komponen supervisors berisi {botId: SupervisorStatus}, bukan 'stub'", () => {
++    const r = doctorReport({
++      supervisorStatuses: {
++        "bot-01": { holder: "running", queue: 2, awaiting_barrier: false, last_ack_s: 3, restarts: 0, barrier_alarm: false },
++      },
++    });
++    expect(JSON.parse(r.components.supervisors)).toEqual({
++      "bot-01": { holder: "running", queue: 2, awaiting_barrier: false, last_ack_s: 3, restarts: 0, barrier_alarm: false },
++    });
++  });
++
++  test("tanpa deps sama sekali, supervisors tetap 'stub' (backward-compat)", () => {
++    const r = doctorReport();
++    expect(r.components.supervisors).toBe("stub");
++  });
++});
+diff --git a/packages/hostd/test/injection.test.ts b/packages/hostd/test/injection.test.ts
+new file mode 100644
+index 0000000..b9593d1
+--- /dev/null
++++ b/packages/hostd/test/injection.test.ts
+@@ -0,0 +1,426 @@
++import { describe, expect, test } from "bun:test";
++import {
++  InjectionGate,
++  InjectionQueue,
++  MAX_INJECT_ATTEMPTS,
++  guardSlashCommand,
++  type BatchSubItem,
++} from "../src/supervisor/injection";
++
++// ---------------------------------------------------------------------------
++// guardSlashCommand (SEC-3 fix + telegram-layer + /effort source guard)
++// ---------------------------------------------------------------------------
++
++describe("guardSlashCommand", () => {
++  test("accepts a plain slash command", () => {
++    expect(guardSlashCommand("/clear")).toEqual({ ok: true });
++  });
++
++  test("accepts a namespaced command with args", () => {
++    expect(guardSlashCommand("/telegram:notify-user hello world")).toEqual({ ok: true });
++  });
++
++  test("rejects a command not starting with a lowercase letter after /", () => {
++    expect(guardSlashCommand("/Clear").ok).toBe(false);
++    expect(guardSlashCommand("/1clear").ok).toBe(false);
++  });
++
++  test("rejects missing leading slash", () => {
++    expect(guardSlashCommand("clear").ok).toBe(false);
++  });
++
++  test("SEC-3: rejects control characters in the argument tail", () => {
++    expect(guardSlashCommand("/rename foo\x00bar").ok).toBe(false);
++    expect(guardSlashCommand("/rename foo\nbar").ok).toBe(false);
++    expect(guardSlashCommand("/rename foo\x1bbar").ok).toBe(false);
++  });
++
++  test("rejects overlong command+argument (total budget is 1 + 64 + 256)", () => {
++    // The optional argument group has no leading-whitespace requirement, so
++    // a run of plain letters can spill from the "command word" slot into the
++    // argument slot — total allowed length is 1 (word first char) + 63 (rest
++    // of word) + 256 (argument) = 320 chars after the leading '/'. Anything
++    // beyond that must be rejected.
++    expect(guardSlashCommand("/" + "a".repeat(320)).ok).toBe(true);
++    expect(guardSlashCommand("/" + "a".repeat(321)).ok).toBe(false);
++    expect(guardSlashCommand("/x " + "a".repeat(300)).ok).toBe(false); // argument alone (300) exceeds 256
++  });
++
++  test("blocks telegram-layer commands regardless of source", () => {
++    const r1 = guardSlashCommand("/new idle");
++    expect(r1.ok).toBe(false);
++    if (!r1.ok) expect(r1.error).toMatch(/telegram-layer/);
++
++    expect(guardSlashCommand("/switch", "supervisor").ok).toBe(false);
++    expect(guardSlashCommand("/delete").ok).toBe(false);
++  });
++
++  test("/effort blocked from AI/bus path, allowed from supervisor path", () => {
++    const asAi = guardSlashCommand("/effort high");
++    expect(asAi.ok).toBe(false);
++    const asSupervisor = guardSlashCommand("/effort high", "supervisor");
++    expect(asSupervisor).toEqual({ ok: true });
++  });
++
++  test("/clear and /rename are NOT telegram-layer-blocked (CC-native)", () => {
++    expect(guardSlashCommand("/clear")).toEqual({ ok: true });
++    expect(guardSlashCommand("/rename my-session")).toEqual({ ok: true });
++    expect(guardSlashCommand("/resume abc-123")).toEqual({ ok: true });
++  });
++});
++
++// ---------------------------------------------------------------------------
++// InjectionGate (ported from wrapper/src/injection-gate.ts)
++// ---------------------------------------------------------------------------
++
++describe("InjectionGate", () => {
++  const TIMEOUT = 1_000;
++
++  test("not blocked initially", () => {
++    const gate = new InjectionGate(TIMEOUT);
++    expect(gate.isBlocked(0)).toBe(false);
++  });
++
++  test("holdFor blocks until the deadline", () => {
++    const gate = new InjectionGate(TIMEOUT);
++    gate.holdFor(500, 0);
++    expect(gate.isBlocked(400)).toBe(true);
++    expect(gate.isBlocked(500)).toBe(false);
++  });
++
++  test("holdFor takes the max of overlapping holds", () => {
++    const gate = new InjectionGate(TIMEOUT);
++    gate.holdFor(500, 0);
++    gate.holdFor(100, 0); // shorter — should not shrink the window
++    expect(gate.isBlocked(499)).toBe(true);
++  });
++
++  test("clear barrier blocks until released", () => {
++    const gate = new InjectionGate(TIMEOUT);
++    gate.beginClearBarrier(0);
++    expect(gate.isBlocked(10)).toBe(true);
++    gate.releaseClearBarrier(50, 100);
++    expect(gate.clearBarrierActive(100)).toBe(false);
++    expect(gate.isBlocked(149)).toBe(true); // settle window
++    expect(gate.isBlocked(150)).toBe(false);
++  });
++
++  test("clear barrier force-releases after its timeout", () => {
++    const gate = new InjectionGate(1_000);
++    gate.beginClearBarrier(0);
++    expect(gate.clearBarrierActive(999)).toBe(true);
++    expect(gate.clearBarrierActive(1_001)).toBe(false);
++    expect(gate.isBlocked(1_001)).toBe(false);
++  });
++});
++
++// ---------------------------------------------------------------------------
++// InjectionQueue
++// ---------------------------------------------------------------------------
++
++interface HarnessOverrides {
++  minGapMs?: number;
++  postInjectionDelayMs?: number;
++  clearBarrierTimeoutMs?: number;
++  maxAttempts?: number;
++}
++
++interface Harness {
++  queue: InjectionQueue;
++  sent: Array<{ stepId: string; unit: BatchSubItem }>;
++  dead: Array<{ item: unknown; reason: string }>;
++  readonly barrierTimeouts: number;
++  clock: { now: number };
++}
++
++function makeHarness(overrides: HarnessOverrides = {}): Harness {
++  const clock = { now: 0 };
++  const sent: Harness["sent"] = [];
++  const dead: Harness["dead"] = [];
++  let barrierTimeouts = 0;
++  const queue = new InjectionQueue({
++    dispatch: (stepId, unit) => sent.push({ stepId, unit }),
++    onDead: (item, reason) => dead.push({ item, reason }),
++    onBarrierTimeout: () => {
++      barrierTimeouts += 1;
++    },
++    now: () => clock.now,
++    minGapMs: 100,
++    postInjectionDelayMs: 50,
++    clearBarrierTimeoutMs: 1_000,
++    maxAttempts: 3,
++    ...overrides,
++  });
++  return {
++    queue,
++    sent,
++    dead,
++    get barrierTimeouts() {
++      return barrierTimeouts;
++    },
++    clock,
++  };
++}
++
++describe("InjectionQueue — basic enqueue + dispatch + ack", () => {
++  test("enqueueSlash validates via guardSlashCommand", () => {
++    const h = makeHarness();
++    const bad = h.queue.enqueueSlash("/new idle");
++    expect(bad.ok).toBe(false);
++    expect(h.queue.list().length).toBe(0);
++  });
++
++  test("dispatches the front item once the gate is open, then waits for ack", () => {
++    const h = makeHarness();
++    const r = h.queue.enqueueSlash("/clear".replace("/clear", "/help")); // avoid barrier semantics here
++    expect(r.ok).toBe(true);
++    h.queue.tick(0);
++    expect(h.sent.length).toBe(1);
++    expect(h.sent[0]!.unit.payload).toBe("/help");
++    // A second tick while a step is in flight must NOT dispatch again.
++    h.queue.tick(1);
++    expect(h.sent.length).toBe(1);
++  });
++
++  test("min-gap holds the gate between two items", () => {
++    const h = makeHarness();
++    h.queue.enqueueSlash("/help");
++    h.queue.enqueueSlash("/help");
++    h.queue.tick(0);
++    expect(h.sent.length).toBe(1);
++    h.queue.onInjected(h.sent[0]!.stepId, 10); // ack arrives at t=10 -> settle holds until t=60
++    h.queue.tick(50);
++    expect(h.sent.length).toBe(1);
++    h.queue.tick(200);
++    expect(h.sent.length).toBe(2);
++    h.queue.onInjected(h.sent[1]!.stepId, 200);
++    expect(h.queue.list().length).toBe(0); // both acked and removed
++  });
++
++  test("last_ack_s reflects time since the most recent ack", () => {
++    const h = makeHarness();
++    h.queue.enqueueSlash("/help");
++    h.queue.tick(0);
++    h.queue.onInjected(h.sent[0]!.stepId);
++    expect(h.queue.lastAckAgeS(5_000)).toBe(5);
++  });
++
++  test("lastAckAgeS is null before any ack", () => {
++    const h = makeHarness();
++    expect(h.queue.lastAckAgeS(1000)).toBeNull();
++  });
++});
++
++describe("InjectionQueue — batch atomicity", () => {
++  test("a batch is one queue slot; its sub-items dispatch in order with nothing interleaved", () => {
++    const h = makeHarness();
++    const batch = h.queue.enqueueBatch([
++      { kind: "slash", payload: "/help" },
++      { kind: "slash", payload: "/rename foo" },
++    ]);
++    expect(batch.ok).toBe(true);
++    // Enqueue a plain item AFTER the batch — it must not jump the queue.
++    h.queue.enqueueSlash("/status");
++    expect(h.queue.list().length).toBe(2); // batch (1 slot) + /status
++
++    h.queue.tick(0);
++    expect(h.sent.length).toBe(1);
++    expect(h.sent[0]!.unit.payload).toBe("/help");
++    h.queue.onInjected(h.sent[0]!.stepId);
++
++    h.queue.tick(200);
++    expect(h.sent.length).toBe(2);
++    expect(h.sent[1]!.unit.payload).toBe("/rename foo"); // second batch sub-item, NOT /status
++    h.queue.onInjected(h.sent[1]!.stepId);
++    expect(h.queue.list().length).toBe(1); // batch fully acked and removed; /status remains
++
++    h.queue.tick(400);
++    expect(h.sent.length).toBe(3);
++    expect(h.sent[2]!.unit.payload).toBe("/status");
++  });
++
++  test("enqueueBatch rejects empty or oversized batches", () => {
++    const h = makeHarness();
++    expect(h.queue.enqueueBatch([]).ok).toBe(false);
++    const tooBig = Array.from({ length: 9 }, () => ({ kind: "slash", payload: "/help" }) as BatchSubItem);
++    expect(h.queue.enqueueBatch(tooBig).ok).toBe(false);
++  });
++
++  test("enqueueBatch validates every slash sub-item", () => {
++    const h = makeHarness();
++    const r = h.queue.enqueueBatch([{ kind: "slash", payload: "/help" }, { kind: "slash", payload: "/new x" }]);
++    expect(r.ok).toBe(false);
++    expect(h.queue.list().length).toBe(0);
++  });
++});
++
++describe("InjectionQueue — clear barrier", () => {
++  test("/clear arms the barrier on ack; nothing else dispatches until onSessionStarted", () => {
++    const h = makeHarness();
++    h.queue.enqueueSlash("/clear");
++    h.queue.enqueueSlash("/status");
++    h.queue.tick(0);
++    expect(h.sent.length).toBe(1);
++    expect(h.sent[0]!.unit.payload).toBe("/clear");
++    h.queue.onInjected(h.sent[0]!.stepId, 0);
++    expect(h.queue.isAwaitingBarrier()).toBe(true);
++
++    // Barrier open — /status must NOT dispatch even much later, until released.
++    h.queue.tick(500);
++    expect(h.sent.length).toBe(1);
++
++    h.queue.onSessionStarted(500);
++    expect(h.queue.isAwaitingBarrier()).toBe(false);
++    expect(h.queue.list().length).toBe(1); // /clear item consumed, /status remains
++
++    // Settle delay (postInjectionDelayMs=50) still applies after release.
++    h.queue.tick(510);
++    expect(h.sent.length).toBe(1);
++    h.queue.tick(600);
++    expect(h.sent.length).toBe(2);
++    expect(h.sent[1]!.unit.payload).toBe("/status");
++  });
++
++  test("onSessionStarted is a safe no-op when nothing is awaiting the barrier", () => {
++    const h = makeHarness();
++    expect(() => h.queue.onSessionStarted()).not.toThrow();
++    expect(h.queue.isAwaitingBarrier()).toBe(false);
++  });
++
++  test("barrier force-releases via timeout and sets the ALARM, draining the queue anyway", () => {
++    const h = makeHarness({ clearBarrierTimeoutMs: 1_000 });
++    h.queue.enqueueSlash("/clear");
++    h.queue.enqueueSlash("/status");
++    h.queue.tick(0);
++    h.queue.onInjected(h.sent[0]!.stepId);
++    expect(h.queue.barrierAlarm()).toBe(false);
++
++    h.queue.tick(500); // still within timeout
++    expect(h.sent.length).toBe(1);
++    expect(h.queue.barrierAlarm()).toBe(false);
++
++    h.queue.tick(1_500); // past the 1000ms timeout
++    expect(h.queue.barrierAlarm()).toBe(true);
++    expect(h.barrierTimeouts).toBe(1);
++    expect(h.queue.isAwaitingBarrier()).toBe(false);
++
++    // Queue keeps draining — /status should dispatch on a subsequent tick.
++    h.queue.tick(1_700);
++    expect(h.sent.length).toBe(2);
++    expect(h.sent[1]!.unit.payload).toBe("/status");
++  });
++
++  test("a fresh /clear cycle clears a stale alarm from a previous timeout", () => {
++    const h = makeHarness({ clearBarrierTimeoutMs: 100 });
++    h.queue.enqueueSlash("/clear");
++    h.queue.tick(0);
++    h.queue.onInjected(h.sent[0]!.stepId);
++    h.queue.tick(300);
++    expect(h.queue.barrierAlarm()).toBe(true);
++
++    h.queue.enqueueSlash("/clear");
++    h.queue.tick(500);
++    expect(h.sent.length).toBe(2);
++    h.queue.onInjected(h.sent[1]!.stepId, 500);
++    expect(h.queue.barrierAlarm()).toBe(false); // fresh arm resets the sticky alarm
++  });
++
++  test("/clear inside a batch pauses only the remaining sub-items, not other queue items", () => {
++    const h = makeHarness();
++    h.queue.enqueueBatch([
++      { kind: "slash", payload: "/clear" },
++      { kind: "slash", payload: "/status" },
++    ]);
++    h.queue.tick(0);
++    expect(h.sent[0]!.unit.payload).toBe("/clear");
++    h.queue.onInjected(h.sent[0]!.stepId);
++    expect(h.queue.isAwaitingBarrier()).toBe(true);
++
++    h.queue.tick(50);
++    expect(h.sent.length).toBe(1); // still waiting on the barrier
++
++    h.queue.onSessionStarted();
++    h.queue.tick(200);
++    expect(h.sent.length).toBe(2);
++    expect(h.sent[1]!.unit.payload).toBe("/status"); // batch's own second sub-item
++  });
++});
++
++describe("InjectionQueue — retry + dead-letter (IDEA-2)", () => {
++  test("a failed step retries up to maxAttempts, then dead-letters visibly", () => {
++    const h = makeHarness({ maxAttempts: 3 });
++    h.queue.enqueueSlash("/help");
++    h.queue.tick(0);
++    expect(h.sent.length).toBe(1);
++    h.queue.onError(h.sent[0]!.stepId, "pty-error: boom 1");
++    expect(h.queue.list().length).toBe(1); // still active, retrying
++
++    h.queue.tick(200);
++    expect(h.sent.length).toBe(2);
++    h.queue.onError(h.sent[1]!.stepId, "pty-error: boom 2");
++    expect(h.queue.list().length).toBe(1);
++    expect(h.dead.length).toBe(0);
++
++    h.queue.tick(400);
++    expect(h.sent.length).toBe(3);
++    h.queue.onError(h.sent[2]!.stepId, "pty-error: boom 3");
++    expect(h.queue.list().length).toBe(0); // dead-lettered, removed from active queue
++    expect(h.dead.length).toBe(1);
++    expect(h.dead[0]!.reason).toBe("pty-error: boom 3");
++  });
++
++  test("onError for an unknown/stale stepId is ignored", () => {
++    const h = makeHarness();
++    h.queue.enqueueSlash("/help");
++    h.queue.tick(0);
++    expect(() => h.queue.onError("not-a-real-step", "whatever")).not.toThrow();
++    expect(h.queue.list().length).toBe(1); // untouched
++  });
++
++  test("resetInFlight treats an in-flight step as an error (holder died mid-flight)", () => {
++    const h = makeHarness({ maxAttempts: 2 });
++    h.queue.enqueueSlash("/help");
++    h.queue.tick(0);
++    expect(h.sent.length).toBe(1);
++    h.queue.resetInFlight("holder pty exited unexpectedly");
++    expect(h.queue.list().length).toBe(1); // one retry left
++
++    h.queue.tick(200);
++    h.queue.resetInFlight("holder pty exited unexpectedly again");
++    expect(h.dead.length).toBe(1);
++  });
++
++  test("resetInFlight is a no-op when nothing is in flight", () => {
++    const h = makeHarness();
++    expect(() => h.queue.resetInFlight("nothing to reset")).not.toThrow();
++  });
++
++  test("onInjected for an unknown/stale stepId is ignored", () => {
++    const h = makeHarness();
++    h.queue.enqueueSlash("/help");
++    h.queue.tick(0);
++    expect(() => h.queue.onInjected("not-the-real-step-id")).not.toThrow();
++    expect(h.queue.list().length).toBe(1); // untouched — still in flight
++  });
++});
++
++describe("InjectionQueue — enqueueText", () => {
++  test("rejects empty text", () => {
++    const h = makeHarness();
++    expect(h.queue.enqueueText("").ok).toBe(false);
++  });
++
++  test("dispatches and acks like a slash item", () => {
++    const h = makeHarness();
++    h.queue.enqueueText("hello agent-bus prompt");
++    h.queue.tick(0);
++    expect(h.sent[0]!.unit).toEqual({ kind: "text", payload: "hello agent-bus prompt" });
++    h.queue.onInjected(h.sent[0]!.stepId);
++    expect(h.queue.list().length).toBe(0);
++  });
++});
++
++// Sanity: MAX_INJECT_ATTEMPTS export exists and matches the harness default expectations.
++test("MAX_INJECT_ATTEMPTS default export sanity", () => {
++  expect(MAX_INJECT_ATTEMPTS).toBeGreaterThan(0);
++});
+diff --git a/packages/hostd/test/main.test.ts b/packages/hostd/test/main.test.ts
+index 470a6fd..38a802c 100644
+--- a/packages/hostd/test/main.test.ts
++++ b/packages/hostd/test/main.test.ts
+@@ -4,12 +4,13 @@ import type { Context } from "grammy";
+ import type { CreatePollerOptions, Poller } from "@mirza-harness/telegram-adapter";
+ import { defaultAccess } from "@mirza-harness/shared";
+ import { startHostd, type HostdHandle } from "../src/main";
+ import { setAccess } from "../src/state/access-store";
+ import { claimNext } from "../src/bus/bus";
+ import type { HostdConfig } from "../src/config";
++import type { HolderHandle, SpawnHolderFn } from "../src/supervisor/supervisor";
+ 
+ /**
+  * Task D2, Fase 1 — smoke test for the production assembly (`startHostd`).
+  * Exercises the FULL wiring — pipe server, rpc-handlers (doctor/agent.list),
+  * delivery, and the real `createInboundPipeline` reached through
+  * `startTelegramAdapters`'s `onInbound` — with NO real network:
+@@ -53,12 +54,30 @@ function fakeCreatePoller(captured: { onInbound?: (ctx: Context) => void | Promi
+       start: () => new Promise<void>(() => {}), // never resolves — mirrors a poller that just keeps running
+       stop: async () => {},
+     };
+   };
+ }
+ 
++/**
++ * Task S1, Fase 2 — these smoke tests exercise the D2/C4 wiring, not the
++ * supervisor; `startHostd` now always spawns a `BotSupervisor` per bot, so a
++ * fake `spawnHolder` (never a real `node --import tsx pty-holder` child) is
++ * REQUIRED here per the S1 brief's "test JANGAN spawn holder Node
++ * sungguhan". `enableLegacyPendingShim: false` keeps these tests from also
++ * standing up a real fs.watch/sweep loop against `state/bot-smoke/pending`
++ * — that shim gets its own coverage in pending-consumer.test.ts.
++ */
++const fakeSpawnHolder: SpawnHolderFn = (): HolderHandle => ({
++  inject() {},
++  injectSlash() {},
++  shutdown: () => Promise.resolve(),
++  forceKill() {},
++  on() {},
++});
++const SUPERVISOR_TEST_OPTS = { spawnHolder: fakeSpawnHolder, enableLegacyPendingShim: false } as const;
++
+ describe("startHostd — smoke", () => {
+   let handle: HostdHandle | undefined;
+   afterEach(async () => {
+     await handle?.shutdown();
+     handle = undefined;
+   });
+@@ -68,12 +87,13 @@ describe("startHostd — smoke", () => {
+     const pipe = `\\\\.\\pipe\\mirza-hostd-test-main-smoke-${process.pid}`;
+ 
+     handle = await startHostd({
+       config: makeFakeConfig(),
+       dbPath: ":memory:",
+       pipeName: pipe,
++      ...SUPERVISOR_TEST_OPTS,
+       createPoller: fakeCreatePoller(captured),
+     });
+ 
+     expect(handle.adapters.pollers.size).toBe(1);
+     expect(captured.onInbound).toBeDefined(); // startTelegramAdapters really called our fake factory
+ 
+@@ -99,12 +119,13 @@ describe("startHostd — smoke", () => {
+     const pipe = `\\\\.\\pipe\\mirza-hostd-test-main-inbound-${process.pid}`;
+ 
+     handle = await startHostd({
+       config: makeFakeConfig(),
+       dbPath: ":memory:",
+       pipeName: pipe,
++      ...SUPERVISOR_TEST_OPTS,
+       createPoller: fakeCreatePoller(captured),
+     });
+ 
+     // Pre-allowlist the sender so gate() returns 'deliver' (bus enqueue) —
+     // NOT 'pairing-reply' (which would fire a real Api.sendMessage).
+     setAccess(handle.db, "bot-smoke", { ...defaultAccess(), allowFrom: ["999"] }, "telegram");
+@@ -128,12 +149,13 @@ describe("startHostd — smoke", () => {
+     const pipe = `\\\\.\\pipe\\mirza-hostd-test-main-cb-ok-${process.pid}`;
+ 
+     handle = await startHostd({
+       config: makeFakeConfig(),
+       dbPath: ":memory:",
+       pipeName: pipe,
++      ...SUPERVISOR_TEST_OPTS,
+       createPoller: fakeCreatePoller(captured),
+     });
+ 
+     setAccess(handle.db, "bot-smoke", { ...defaultAccess(), allowFrom: ["999"] }, "telegram");
+ 
+     const answerCalls: unknown[] = [];
+@@ -162,12 +184,13 @@ describe("startHostd — smoke", () => {
+     const pipe = `\\\\.\\pipe\\mirza-hostd-test-main-cb-unauth-${process.pid}`;
+ 
+     handle = await startHostd({
+       config: makeFakeConfig(),
+       dbPath: ":memory:",
+       pipeName: pipe,
++      ...SUPERVISOR_TEST_OPTS,
+       createPoller: fakeCreatePoller(captured),
+     });
+ 
+     // Sender NOT in allowFrom + dmPolicy 'allowlist' (default) -> gate() drops.
+     setAccess(handle.db, "bot-smoke", { ...defaultAccess(), allowFrom: [], dmPolicy: "allowlist" }, "telegram");
+ 
+@@ -194,12 +217,13 @@ describe("startHostd — smoke", () => {
+     const pipe = `\\\\.\\pipe\\mirza-hostd-test-main-cb-expired-${process.pid}`;
+ 
+     handle = await startHostd({
+       config: makeFakeConfig(),
+       dbPath: ":memory:",
+       pipeName: pipe,
++      ...SUPERVISOR_TEST_OPTS,
+       createPoller: fakeCreatePoller(captured),
+     });
+ 
+     setAccess(handle.db, "bot-smoke", { ...defaultAccess(), allowFrom: ["999"] }, "telegram");
+ 
+     const fakeCtx = {
+@@ -227,12 +251,13 @@ describe("startHostd — smoke", () => {
+     let stopCalls = 0;
+ 
+     handle = await startHostd({
+       config: makeFakeConfig(),
+       dbPath: ":memory:",
+       pipeName: pipe,
++      ...SUPERVISOR_TEST_OPTS,
+       createPoller: (options: CreatePollerOptions): Poller => {
+         captured.onInbound = options.onInbound;
+         return {
+           start: () => new Promise<void>(() => {}),
+           stop: async () => {
+             stopCalls++;
+@@ -254,12 +279,13 @@ describe("startHostd — smoke", () => {
+     const pipe = `\\\\.\\pipe\\mirza-hostd-test-main-shutdown-stub-${process.pid}`;
+ 
+     handle = await startHostd({
+       config: makeFakeConfig(),
+       dbPath: ":memory:",
+       pipeName: pipe,
++      ...SUPERVISOR_TEST_OPTS,
+       createPoller: fakeCreatePoller(captured),
+     });
+ 
+     // Connect a client and perform the real "register" handshake a cc-stub
+     // does (session.register — see packages/hostd/test/server.test.ts and
+     // packages/hostd/src/server.ts), then deliberately NEVER call `.end()`
+diff --git a/packages/hostd/test/supervisor.test.ts b/packages/hostd/test/supervisor.test.ts
+new file mode 100644
+index 0000000..d14ec7e
+--- /dev/null
++++ b/packages/hostd/test/supervisor.test.ts
+@@ -0,0 +1,451 @@
++import { describe, expect, test } from "bun:test";
++import type { Database } from "bun:sqlite";
++import { openDb } from "../src/state/db";
++import type { BotConfig } from "../src/config";
++import {
++  BotSupervisor,
++  startSupervisors,
++  type Clock,
++  type HolderHandle,
++  type SpawnHolderFn,
++} from "../src/supervisor/supervisor";
++
++/**
++ * Task S1 — supervisor.ts tests. Per the brief: "test JANGAN spawn holder
++ * Node sungguhan" — `spawnHolder` is always a fake, in-memory `HolderHandle`
++ * here. This suite exercises spawn/restart/backoff, IPC event wiring into
++ * the injection queue, the shutdown race (RPC ack vs. OS force-kill
++ * fallback), and `clearSession`/`onSessionStarted`. A real-holder
++ * integration script is a separate concern (mirrors pty-holder's own
++ * `test-integration.mjs`), not part of this `bun test` suite.
++ */
++
++// ---------------------------------------------------------------------------
++// Fake clock — deterministic timer control (no real waiting in tests).
++// ---------------------------------------------------------------------------
++
++interface TimerEntry {
++  id: number;
++  repeat: boolean;
++  ms: number;
++  cb: () => void;
++  nextAt: number;
++}
++
++class FakeClock implements Clock {
++  private t = 0;
++  private timers: TimerEntry[] = [];
++  private seq = 0;
++
++  now(): number {
++    return this.t;
++  }
++  setTimeout(cb: () => void, ms: number): ReturnType<typeof setTimeout> {
++    const id = ++this.seq;
++    this.timers.push({ id, repeat: false, ms, cb, nextAt: this.t + ms });
++    return id as unknown as ReturnType<typeof setTimeout>;
++  }
++  clearTimeout(handle: ReturnType<typeof setTimeout>): void {
++    this.timers = this.timers.filter(entry => entry.id !== (handle as unknown as number));
++  }
++  setInterval(cb: () => void, ms: number): ReturnType<typeof setInterval> {
++    const id = ++this.seq;
++    this.timers.push({ id, repeat: true, ms, cb, nextAt: this.t + ms });
++    return id as unknown as ReturnType<typeof setInterval>;
++  }
++  clearInterval(handle: ReturnType<typeof setInterval>): void {
++    this.timers = this.timers.filter(entry => entry.id !== (handle as unknown as number));
++  }
++
++  /** Advance simulated time, firing every due timer/interval in order (intervals reschedule; may fire >1x on a big jump). */
++  advance(ms: number): void {
++    const target = this.t + ms;
++    for (;;) {
++      const due = this.timers.filter(entry => entry.nextAt <= target).sort((a, b) => a.nextAt - b.nextAt)[0];
++      if (!due) break;
++      this.t = due.nextAt;
++      if (due.repeat) due.nextAt += due.ms;
++      else this.timers = this.timers.filter(entry => entry.id !== due.id);
++      due.cb();
++    }
++    this.t = target;
++  }
++}
++
++// ---------------------------------------------------------------------------
++// Fake holder — in-memory HolderHandle, no real process/node-pty anywhere.
++// ---------------------------------------------------------------------------
++
++type ListenerMap = {
++  injected: Array<(id: string) => void>;
++  "pty-error": Array<(message: string) => void>;
++  "pty-exit": Array<(info: { code: number; signal: number | null }) => void>;
++  exit: Array<(code: number | null, signal: NodeJS.Signals | null) => void>;
++};
++
++class FakeHolder implements HolderHandle {
++  readonly injectCalls: Array<{ stepId: string; command: string; kind: "slash" | "text" }> = [];
++  shutdownBehavior: "resolve" | "hang" | "reject" = "resolve";
++  forceKillCalled = false;
++  private readonly listeners: ListenerMap = { injected: [], "pty-error": [], "pty-exit": [], exit: [] };
++
++  inject(stepId: string, text: string): void {
++    this.injectCalls.push({ stepId, command: text, kind: "text" });
++  }
++  injectSlash(stepId: string, command: string): void {
++    this.injectCalls.push({ stepId, command, kind: "slash" });
++  }
++  shutdown(): Promise<void> {
++    if (this.shutdownBehavior === "resolve") return Promise.resolve();
++    if (this.shutdownBehavior === "reject") return Promise.reject(new Error("holder shutdown RPC failed"));
++    return new Promise<void>(() => {}); // hang forever — exercises the force-kill fallback
++  }
++  forceKill(): void {
++    this.forceKillCalled = true;
++  }
++  on(event: keyof ListenerMap, cb: (...args: never[]) => void): void {
++    (this.listeners[event] as Array<(...args: never[]) => void>).push(cb);
++  }
++  emitInjected(id: string): void {
++    for (const cb of this.listeners.injected) cb(id);
++  }
++  emitPtyError(message: string): void {
++    for (const cb of this.listeners["pty-error"]) cb(message);
++  }
++  emitPtyExit(): void {
++    for (const cb of this.listeners["pty-exit"]) cb({ code: 1, signal: null });
++  }
++  emitExit(): void {
++    for (const cb of this.listeners.exit) cb(null, null);
++  }
++}
++
++function fakeSpawnFactory(): { spawnHolder: SpawnHolderFn; instances: FakeHolder[] } {
++  const instances: FakeHolder[] = [];
++  const spawnHolder: SpawnHolderFn = () => {
++    const h = new FakeHolder();
++    instances.push(h);
++    return h;
++  };
++  return { spawnHolder, instances };
++}
++
++function makeBot(id = "bot-test"): BotConfig {
++  return { id, telegram_token: "123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", workspace: "C:/ws/" + id };
++}
++
++function makeSupervisor(overrides: {
++  db?: Database;
++  bot?: BotConfig;
++  backoffBaseMs?: number;
++  forceKillTimeoutMs?: number;
++  queuePollMs?: number;
++  minGapMs?: number;
++  maxAttempts?: number;
++} = {}) {
++  const clock = new FakeClock();
++  const { spawnHolder, instances } = fakeSpawnFactory();
++  const db = overrides.db ?? openDb(":memory:");
++  const bot = overrides.bot ?? makeBot();
++  const supervisor = new BotSupervisor({
++    bot,
++    db,
++    spawnHolder,
++    clock,
++    backoffBaseMs: overrides.backoffBaseMs ?? 1_000,
++    forceKillTimeoutMs: overrides.forceKillTimeoutMs ?? 5_000,
++    queuePollMs: overrides.queuePollMs ?? 200,
++    minGapMs: overrides.minGapMs,
++    maxAttempts: overrides.maxAttempts,
++  });
++  return { supervisor, clock, instances, db, bot };
++}
++
++// ---------------------------------------------------------------------------
++// Spawn + status
++// ---------------------------------------------------------------------------
++
++describe("BotSupervisor — spawn + status", () => {
++  test("start() spawns via the fake factory; status().holder is 'running'", () => {
++    const { supervisor, instances } = makeSupervisor();
++    supervisor.start();
++    expect(instances.length).toBe(1);
++    expect(supervisor.status()).toEqual({
++      holder: "running",
++      queue: 0,
++      awaiting_barrier: false,
++      last_ack_s: null,
++      restarts: 0,
++      barrier_alarm: false,
++    });
++  });
++
++  test("enqueueSlash dispatches into the holder once the poll loop ticks, and drains on ack", () => {
++    const { supervisor, instances, clock } = makeSupervisor();
++    supervisor.start();
++    const r = supervisor.enqueueSlash("/status");
++    expect(r.ok).toBe(true);
++    expect(supervisor.status().queue).toBe(1);
++
++    clock.advance(200); // one poll tick
++    const holder = instances[0]!;
++    expect(holder.injectCalls.length).toBe(1);
++    expect(holder.injectCalls[0]).toEqual({ stepId: (r as { ok: true; id: string }).id, command: "/status", kind: "slash" });
++
++    holder.emitInjected((r as { ok: true; id: string }).id);
++    expect(supervisor.status().queue).toBe(0);
++    expect(supervisor.status().last_ack_s).toBe(0);
++  });
++
++  test("enqueueSlash rejects an invalid/blocked command without touching the holder", () => {
++    const { supervisor, instances, clock } = makeSupervisor();
++    supervisor.start();
++    const r = supervisor.enqueueSlash("/new idle");
++    expect(r.ok).toBe(false);
++    clock.advance(1000);
++    expect(instances[0]!.injectCalls.length).toBe(0);
++  });
++
++  test("enqueueBatch produces one atomic queue slot dispatched over successive ticks", () => {
++    const { supervisor, instances, clock } = makeSupervisor();
++    supervisor.start();
++    const r = supervisor.enqueueBatch(["/help", "/status"]);
++    expect(r.ok).toBe(true);
++    expect(supervisor.status().queue).toBe(1);
++
++    clock.advance(200);
++    const holder = instances[0]!;
++    expect(holder.injectCalls.length).toBe(1);
++    expect(holder.injectCalls[0]!.command).toBe("/help");
++    holder.emitInjected(holder.injectCalls[0]!.stepId);
++
++    clock.advance(2_000); // clear the min-gap/settle hold
++    expect(holder.injectCalls.length).toBe(2);
++    expect(holder.injectCalls[1]!.command).toBe("/status");
++    holder.emitInjected(holder.injectCalls[1]!.stepId);
++    expect(supervisor.status().queue).toBe(0);
++  });
++});
++
++// ---------------------------------------------------------------------------
++// Unexpected death -> backoff -> restart
++// ---------------------------------------------------------------------------
++
++describe("BotSupervisor — unexpected death, backoff, restart", () => {
++  test("pty-exit marks the holder dead, then respawns after exponential backoff", () => {
++    const { supervisor, instances, clock } = makeSupervisor({ backoffBaseMs: 1_000 });
++    supervisor.start();
++    expect(instances.length).toBe(1);
++
++    instances[0]!.emitPtyExit();
++    expect(supervisor.status().holder).toBe("restarting");
++    expect(supervisor.status().restarts).toBe(1);
++
++    clock.advance(999);
++    expect(instances.length).toBe(1); // not yet — backoff base is 1000ms
++    clock.advance(1);
++    expect(instances.length).toBe(2); // respawned
++    expect(supervisor.status().holder).toBe("running");
++
++    // second death -> backoff doubles (2000ms)
++    instances[1]!.emitPtyExit();
++    expect(supervisor.status().restarts).toBe(2);
++    clock.advance(1_999);
++    expect(instances.length).toBe(2);
++    clock.advance(1);
++    expect(instances.length).toBe(3);
++  });
++
++  test("native 'exit' event (no pty-exit) also triggers restart", () => {
++    const { supervisor, instances, clock } = makeSupervisor({ backoffBaseMs: 500 });
++    supervisor.start();
++    instances[0]!.emitExit();
++    expect(supervisor.status().holder).toBe("restarting");
++    clock.advance(500);
++    expect(instances.length).toBe(2);
++  });
++
++  test("an in-flight injection is retried after the holder dies mid-flight", () => {
++    const { supervisor, instances, clock } = makeSupervisor({ backoffBaseMs: 10, minGapMs: 5, maxAttempts: 3 });
++    supervisor.start();
++    supervisor.enqueueSlash("/status");
++    clock.advance(200);
++    expect(instances[0]!.injectCalls.length).toBe(1);
++
++    instances[0]!.emitPtyExit(); // dies mid-flight, no injected/pty-error ever arrives
++    clock.advance(10); // backoff -> respawn
++    expect(instances.length).toBe(2);
++
++    clock.advance(200); // poll tick against the NEW holder
++    expect(instances[1]!.injectCalls.length).toBe(1); // retried against the new holder
++    expect(supervisor.status().queue).toBe(1); // still active (not dead — only 1 failed attempt so far)
++  });
++
++  test("pty-error with no matching in-flight step is a harmless no-op (queue untouched)", () => {
++    const { supervisor, instances } = makeSupervisor();
++    supervisor.start();
++    expect(() => instances[0]!.emitPtyError("spurious error, nothing in flight")).not.toThrow();
++    expect(supervisor.status().queue).toBe(0);
++  });
++});
++
++// ---------------------------------------------------------------------------
++// stop() — RPC shutdown vs. OS force-kill fallback
++// ---------------------------------------------------------------------------
++
++describe("BotSupervisor — stop()", () => {
++  test("resolves once the holder's shutdown RPC acks, without force-killing", async () => {
++    const { supervisor, instances } = makeSupervisor();
++    supervisor.start();
++    instances[0]!.shutdownBehavior = "resolve";
++    await supervisor.stop();
++    expect(instances[0]!.forceKillCalled).toBe(false);
++    expect(supervisor.status().holder).toBe("dead");
++  });
++
++  test("force-kills after forceKillTimeoutMs when the holder never acks shutdown", async () => {
++    const { supervisor, instances, clock } = makeSupervisor({ forceKillTimeoutMs: 5_000 });
++    supervisor.start();
++    instances[0]!.shutdownBehavior = "hang";
++    const stopPromise = supervisor.stop();
++    // Let the fallback timer fire — FakeClock timers are synchronous, so
++    // this settles the race deterministically without a real 5s wait.
++    clock.advance(5_000);
++    await stopPromise;
++    expect(instances[0]!.forceKillCalled).toBe(true);
++  });
++
++  test("force-kills when the holder's shutdown RPC rejects", async () => {
++    const { supervisor, instances, clock } = makeSupervisor({ forceKillTimeoutMs: 5_000 });
++    supervisor.start();
++    instances[0]!.shutdownBehavior = "reject";
++    const stopPromise = supervisor.stop();
++    clock.advance(5_000);
++    await stopPromise;
++    // A rejected shutdown() never sets `settled`, so the fallback still runs
++    // (rejection is swallowed, not a substitute for the OS kill).
++    expect(instances[0]!.forceKillCalled).toBe(true);
++  });
++
++  test("stop() is idempotent and safe to call when never started", async () => {
++    const { supervisor } = makeSupervisor();
++    await expect(supervisor.stop()).resolves.toBeUndefined();
++  });
++
++  test("stop() suppresses further restarts even if the holder dies during shutdown", async () => {
++    const { supervisor, instances, clock } = makeSupervisor({ forceKillTimeoutMs: 1_000 });
++    supervisor.start();
++    instances[0]!.shutdownBehavior = "hang";
++    const stopPromise = supervisor.stop();
++    instances[0]!.emitPtyExit(); // race: holder dies while shutdown is pending
++    clock.advance(1_000);
++    await stopPromise;
++    expect(instances.length).toBe(1); // no restart happened
++  });
++});
++
++// ---------------------------------------------------------------------------
++// clearSession / onSessionStarted
++// ---------------------------------------------------------------------------
++
++describe("BotSupervisor — clearSession + onSessionStarted (recon-hooks §B point 1)", () => {
++  test("clearSession sets sessions.lifecycle='resetting' for the bot's latest row and enqueues /clear", () => {
++    const db = openDb(":memory:");
++    const bot = makeBot("bot-clear");
++    db.run(`INSERT INTO bots (id, workspace) VALUES (?, ?)`, [bot.id, bot.workspace]);
++    db.run(`INSERT INTO sessions (id, bot_id, lifecycle, started_at) VALUES (?, ?, 'idle', ?)`, [
++      "sess-1",
++      bot.id,
++      Math.floor(Date.now() / 1000),
++    ]);
++
++    const { supervisor, instances, clock } = makeSupervisor({ db, bot });
++    supervisor.start();
++    const r = supervisor.clearSession();
++    expect(r.ok).toBe(true);
++
++    const row = db.query(`SELECT lifecycle FROM sessions WHERE id = 'sess-1'`).get() as { lifecycle: string };
++    expect(row.lifecycle).toBe("resetting");
++
++    clock.advance(200);
++    const holder = instances[0]!;
++    expect(holder.injectCalls[0]!.command).toBe("/clear");
++    holder.emitInjected(holder.injectCalls[0]!.stepId);
++    expect(supervisor.status().awaiting_barrier).toBe(true);
++
++    supervisor.onSessionStarted();
++    expect(supervisor.status().awaiting_barrier).toBe(false);
++  });
++
++  test("clearSession with no existing session row is a safe no-op on the DB side, /clear still enqueued", () => {
++    const { supervisor } = makeSupervisor();
++    supervisor.start();
++    const r = supervisor.clearSession();
++    expect(r.ok).toBe(true);
++    expect(supervisor.status().queue).toBe(1);
++  });
++
++  test("onSessionStarted is safe to call with nothing awaiting the barrier", () => {
++    const { supervisor } = makeSupervisor();
++    supervisor.start();
++    expect(() => supervisor.onSessionStarted()).not.toThrow();
++  });
++});
++
++// ---------------------------------------------------------------------------
++// enqueueFromLegacy — X2 shim's InjectRequest sink
++// ---------------------------------------------------------------------------
++
++describe("BotSupervisor — enqueueFromLegacy (X2 shim wiring)", () => {
++  test("single command -> enqueueSlash", () => {
++    const { supervisor } = makeSupervisor();
++    supervisor.start();
++    supervisor.enqueueFromLegacy({ id: "legacy-1", commands: ["/status"] });
++    expect(supervisor.status().queue).toBe(1);
++  });
++
++  test("multiple commands -> one atomic batch slot", () => {
++    const { supervisor } = makeSupervisor();
++    supervisor.start();
++    supervisor.enqueueFromLegacy({ id: "legacy-2", commands: ["/help", "/status"] });
++    expect(supervisor.status().queue).toBe(1); // one slot, not two
++  });
++
++  test("empty commands array is a no-op", () => {
++    const { supervisor } = makeSupervisor();
++    supervisor.start();
++    supervisor.enqueueFromLegacy({ id: "legacy-3", commands: [] });
++    expect(supervisor.status().queue).toBe(0);
++  });
++});
++
++// ---------------------------------------------------------------------------
++// startSupervisors — multi-bot wiring (doctor's `statuses()` source)
++// ---------------------------------------------------------------------------
++
++describe("startSupervisors", () => {
++  test("spawns one supervisor per configured bot and reports a statuses() map", () => {
++    const db = openDb(":memory:");
++    const { spawnHolder, instances } = fakeSpawnFactory();
++    const clock = new FakeClock();
++    const config = { bots: [makeBot("bot-a"), makeBot("bot-b")] };
++    const handle = startSupervisors(config, db, { spawnHolder, clock });
++
++    expect(handle.supervisors.size).toBe(2);
++    expect(instances.length).toBe(2);
++    const statuses = handle.statuses();
++    expect(Object.keys(statuses).sort()).toEqual(["bot-a", "bot-b"]);
++    expect(statuses["bot-a"]!.holder).toBe("running");
++  });
++
++  test("stopAll stops every supervisor", async () => {
++    const db = openDb(":memory:");
++    const { spawnHolder, instances } = fakeSpawnFactory();
++    const clock = new FakeClock();
++    const config = { bots: [makeBot("bot-a"), makeBot("bot-b")] };
++    const handle = startSupervisors(config, db, { spawnHolder, clock });
++    for (const h of instances) h.shutdownBehavior = "resolve";
++    await handle.stopAll();
++    for (const s of handle.supervisors.values()) expect(s.status().holder).toBe("dead");
++  });
++});

@@ -1,0 +1,321 @@
+== stat (scope A1) ==
+ packages/hostd/src/index.ts          |   1 +
+ packages/hostd/src/state/db.ts       |  59 +++++++++++++
+ packages/hostd/test/state-db.test.ts | 155 +++++++++++++++++++++++++++++++++++
+ packages/shared/src/schema.ts        |  20 ++++-
+ packages/shared/test/schema.test.ts  |   5 +-
+ 5 files changed, 237 insertions(+), 3 deletions(-)
+
+== diff ==
+diff --git a/packages/hostd/src/index.ts b/packages/hostd/src/index.ts
+index 12c1fd8..650a09b 100644
+--- a/packages/hostd/src/index.ts
++++ b/packages/hostd/src/index.ts
+@@ -1,2 +1,3 @@
+ export * from "./doctor";
+ export * from "./server";
++export * from "./state/db";
+diff --git a/packages/hostd/src/state/db.ts b/packages/hostd/src/state/db.ts
+new file mode 100644
+index 0000000..837558e
+--- /dev/null
++++ b/packages/hostd/src/state/db.ts
+@@ -0,0 +1,59 @@
++import { Database } from "bun:sqlite";
++import { applySchema } from "@mirza-harness/shared";
++
++/**
++ * Retention policy keys stored in the `kv` table (INFRA-6). Values are
++ * plain decimal strings (jumlah hari). Absent or non-positive/non-numeric
++ * values fall back to the defaults below.
++ */
++const RETENTION_DEFAULTS = {
++  "retention.messages_days": 90,
++  "retention.bus_dead_days": 30,
++} as const;
++
++const SECONDS_PER_DAY = 86400;
++
++/**
++ * Buka (atau buat) database SQLite di `path` — pakai `:memory:` untuk DB
++ * sementara (mis. test). Menerapkan pragma standar hostd, lalu skema, lalu
++ * sapuan retensi satu kali di titik buka.
++ *
++ * Catatan `journal_mode=WAL`: untuk file DB sungguhan pragma ini akan aktif
++ * (`wal`). Untuk `:memory:`, SQLite tidak pernah mengizinkan WAL pada
++ * database in-memory — pragma tetap diterapkan tanpa error, hasilnya cukup
++ * dibaca sebagai `'memory'` (bukan kegagalan).
++ */
++export function openDb(path: string): Database {
++  const db = new Database(path);
++  db.exec("PRAGMA journal_mode = WAL;");
++  db.exec("PRAGMA foreign_keys = ON;");
++  db.exec("PRAGMA busy_timeout = 5000;");
++  applySchema(db);
++  runRetention(db);
++  return db;
++}
++
++function readPolicyDays(db: Database, key: keyof typeof RETENTION_DEFAULTS): number {
++  const row = db.query("SELECT value FROM kv WHERE key = ?").get(key) as { value: string } | null;
++  if (!row) return RETENTION_DEFAULTS[key];
++  const n = Number(row.value);
++  return Number.isFinite(n) && n > 0 ? n : RETENTION_DEFAULTS[key];
++}
++
++/**
++ * Hapus baris `messages` dan `bus_dead` yang lebih tua dari kebijakan
++ * retensi (dibaca dari tabel `kv`, default 90 hari / 30 hari). Cutoff
++ * dihitung dalam unix seconds, dibandingkan terhadap kolom `ts` (messages)
++ * dan `dead_at` (bus_dead).
++ */
++export function runRetention(db: Database): void {
++  const now = Math.floor(Date.now() / 1000);
++
++  const messagesDays = readPolicyDays(db, "retention.messages_days");
++  const messagesCutoff = now - messagesDays * SECONDS_PER_DAY;
++  db.run("DELETE FROM messages WHERE ts < ?", [messagesCutoff]);
++
++  const busDeadDays = readPolicyDays(db, "retention.bus_dead_days");
++  const busDeadCutoff = now - busDeadDays * SECONDS_PER_DAY;
++  db.run("DELETE FROM bus_dead WHERE dead_at < ?", [busDeadCutoff]);
++}
+diff --git a/packages/hostd/test/state-db.test.ts b/packages/hostd/test/state-db.test.ts
+new file mode 100644
+index 0000000..76a7499
+--- /dev/null
++++ b/packages/hostd/test/state-db.test.ts
+@@ -0,0 +1,155 @@
++import { describe, expect, test } from "bun:test";
++import fs from "node:fs";
++import os from "node:os";
++import path from "node:path";
++import { openDb, runRetention } from "../src/state/db";
++
++function tmpDbPath(): string {
++  return path.join(os.tmpdir(), `mirza-hostd-test-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.sqlite`);
++}
++
++describe("openDb — pragma", () => {
++  test("journal_mode=WAL untuk file db", () => {
++    const file = tmpDbPath();
++    try {
++      const db = openDb(file);
++      const row = db.query("PRAGMA journal_mode").get() as { journal_mode: string };
++      expect(row.journal_mode.toLowerCase()).toBe("wal");
++      db.close();
++    } finally {
++      for (const ext of ["", "-wal", "-shm"]) {
++        try { fs.unlinkSync(file + ext); } catch { /* noop */ }
++      }
++    }
++  });
++
++  test("journal_mode menerima 'memory' untuk :memory:", () => {
++    const db = openDb(":memory:");
++    const row = db.query("PRAGMA journal_mode").get() as { journal_mode: string };
++    expect(row.journal_mode.toLowerCase()).toBe("memory");
++    db.close();
++  });
++
++  test("foreign_keys ON", () => {
++    const db = openDb(":memory:");
++    const row = db.query("PRAGMA foreign_keys").get() as { foreign_keys: number };
++    expect(row.foreign_keys).toBe(1);
++    db.close();
++  });
++
++  test("busy_timeout=5000", () => {
++    const db = openDb(":memory:");
++    const row = db.query("PRAGMA busy_timeout").get() as { timeout: number };
++    expect(row.timeout).toBe(5000);
++    db.close();
++  });
++});
++
++describe("openDb — foreign key enforcement", () => {
++  test("insert sessions dgn bot_id tak dikenal -> throw", () => {
++    const db = openDb(":memory:");
++    expect(() => {
++      db.run("INSERT INTO sessions (id, bot_id, started_at) VALUES ('s1', 'bot-tak-dikenal', 0)");
++    }).toThrow();
++    db.close();
++  });
++
++  test("insert sessions dgn bot_id dikenal -> sukses", () => {
++    const db = openDb(":memory:");
++    db.run("INSERT INTO bots (id, workspace) VALUES ('bot-03', '/ws/bot-03')");
++    expect(() => {
++      db.run("INSERT INTO sessions (id, bot_id, started_at) VALUES ('s1', 'bot-03', 0)");
++    }).not.toThrow();
++    db.close();
++  });
++});
++
++describe("skema messages — revisi fase 1", () => {
++  test("kolom user_id, user_name, attachments, metadata tersedia", () => {
++    const db = openDb(":memory:");
++    db.run(
++      `INSERT INTO messages (bot_id, channel, chat_id, direction, source, ts, body, user_id, user_name, attachments, metadata)
++       VALUES ('bot-03','telegram','1','in','user',0,'halo','u1','Budi','["a.png"]','{"k":1}')`
++    );
++    const row = db.query("SELECT user_id, user_name, attachments, metadata FROM messages WHERE id = 1").get() as Record<string, string>;
++    expect(row.user_id).toBe("u1");
++    expect(row.user_name).toBe("Budi");
++    expect(row.attachments).toBe('["a.png"]');
++    expect(row.metadata).toBe('{"k":1}');
++    db.close();
++  });
++
++  test("kolom meta lama sudah tidak ada (rename ke metadata)", () => {
++    const db = openDb(":memory:");
++    const cols = (db.query("PRAGMA table_info(messages)").all() as { name: string }[]).map(c => c.name);
++    expect(cols).toContain("metadata");
++    expect(cols).not.toContain("meta");
++    db.close();
++  });
++});
++
++describe("FTS5 sinkron via trigger", () => {
++  test("insert messages otomatis muncul di messages_fts", () => {
++    const db = openDb(":memory:");
++    db.run("INSERT INTO messages (bot_id, channel, chat_id, direction, ts, body) VALUES ('bot-03','telegram','1','in',0,'halo dunia')");
++    const hit = db.query("SELECT rowid FROM messages_fts WHERE messages_fts MATCH 'halo'").all();
++    expect(hit.length).toBe(1);
++    db.close();
++  });
++
++  test("delete messages menghapus entri messages_fts", () => {
++    const db = openDb(":memory:");
++    db.run("INSERT INTO messages (bot_id, channel, chat_id, direction, ts, body) VALUES ('bot-03','telegram','1','in',0,'halo dunia')");
++    db.run("DELETE FROM messages WHERE id = 1");
++    const hit = db.query("SELECT rowid FROM messages_fts WHERE messages_fts MATCH 'halo'").all();
++    expect(hit.length).toBe(0);
++  });
++
++  test("update messages memperbarui entri messages_fts", () => {
++    const db = openDb(":memory:");
++    db.run("INSERT INTO messages (bot_id, channel, chat_id, direction, ts, body) VALUES ('bot-03','telegram','1','in',0,'lama sekali')");
++    db.run("UPDATE messages SET body = 'baru sekali' WHERE id = 1");
++    const oldHit = db.query("SELECT rowid FROM messages_fts WHERE messages_fts MATCH 'lama'").all();
++    const newHit = db.query("SELECT rowid FROM messages_fts WHERE messages_fts MATCH 'baru'").all();
++    expect(oldHit.length).toBe(0);
++    expect(newHit.length).toBe(1);
++  });
++});
++
++describe("runRetention", () => {
++  const DAY = 86400;
++
++  test("default: hapus messages > 90 hari, sisakan yang lebih baru", () => {
++    const db = openDb(":memory:");
++    const now = Math.floor(Date.now() / 1000);
++    db.run("INSERT INTO messages (bot_id, channel, chat_id, direction, ts, body) VALUES ('bot-03','telegram','1','in',?,'lama')", [now - 100 * DAY]);
++    db.run("INSERT INTO messages (bot_id, channel, chat_id, direction, ts, body) VALUES ('bot-03','telegram','1','in',?,'baru')", [now - 10 * DAY]);
++    runRetention(db);
++    const rows = db.query("SELECT body FROM messages").all() as { body: string }[];
++    expect(rows.map(r => r.body)).toEqual(["baru"]);
++    db.close();
++  });
++
++  test("default: hapus bus_dead > 30 hari, sisakan yang lebih baru", () => {
++    const db = openDb(":memory:");
++    const now = Math.floor(Date.now() / 1000);
++    db.run("INSERT INTO bus_dead (id, ts, envelope, reason, dead_at) VALUES ('d1', ?, '{}', 'timeout', ?)", [now - 40 * DAY, now - 40 * DAY]);
++    db.run("INSERT INTO bus_dead (id, ts, envelope, reason, dead_at) VALUES ('d2', ?, '{}', 'timeout', ?)", [now - 5 * DAY, now - 5 * DAY]);
++    runRetention(db);
++    const rows = db.query("SELECT id FROM bus_dead").all() as { id: string }[];
++    expect(rows.map(r => r.id)).toEqual(["d2"]);
++    db.close();
++  });
++
++  test("kebijakan kustom dari tabel kv override default", () => {
++    const db = openDb(":memory:");
++    const now = Math.floor(Date.now() / 1000);
++    db.run("INSERT INTO kv (key, value) VALUES ('retention.messages_days', '10')");
++    db.run("INSERT INTO messages (bot_id, channel, chat_id, direction, ts, body) VALUES ('bot-03','telegram','1','in',?,'umur20')", [now - 20 * DAY]);
++    db.run("INSERT INTO messages (bot_id, channel, chat_id, direction, ts, body) VALUES ('bot-03','telegram','1','in',?,'umur5')", [now - 5 * DAY]);
++    runRetention(db);
++    const rows = db.query("SELECT body FROM messages").all() as { body: string }[];
++    expect(rows.map(r => r.body)).toEqual(["umur5"]);
++    db.close();
++  });
++});
+diff --git a/packages/shared/src/schema.ts b/packages/shared/src/schema.ts
+index cccbb51..2e0765a 100644
+--- a/packages/shared/src/schema.ts
++++ b/packages/shared/src/schema.ts
+@@ -23,27 +23,45 @@ CREATE TABLE IF NOT EXISTS sessions (
+ );
+ 
+ CREATE TABLE IF NOT EXISTS messages (
+   id INTEGER PRIMARY KEY AUTOINCREMENT,
+   bot_id TEXT NOT NULL,
+   channel TEXT NOT NULL,              -- 'telegram' (nanti: wa/discord/web)
+   chat_id TEXT NOT NULL,
+   message_id TEXT,
+   direction TEXT NOT NULL,            -- in|out
+   source TEXT,                        -- user|assistant|system
++  user_id TEXT,
++  user_name TEXT,
+   ts INTEGER NOT NULL,
+   body TEXT NOT NULL,
+-  meta TEXT                           -- JSON string (album, buttons, quote, ...)
++  attachments TEXT,                   -- JSON string (array)
++  metadata TEXT                       -- JSON string (album, buttons, quote, ...)
+ );
+ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
+   USING fts5(body, content='messages', content_rowid='id');
+ 
++-- Sinkronisasi messages_fts otomatis (external content table, lihat
++-- https://sqlite.org/fts5.html#external_content_tables). Trigger dipasang di
++-- sini (bukan di hostd) supaya siapa pun yang menulis ke messages langsung
++-- lewat SQL tetap menjaga index tetap konsisten.
++CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
++  INSERT INTO messages_fts(rowid, body) VALUES (new.id, new.body);
++END;
++CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
++  INSERT INTO messages_fts(messages_fts, rowid, body) VALUES ('delete', old.id, old.body);
++END;
++CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
++  INSERT INTO messages_fts(messages_fts, rowid, body) VALUES ('delete', old.id, old.body);
++  INSERT INTO messages_fts(rowid, body) VALUES (new.id, new.body);
++END;
++
+ CREATE TABLE IF NOT EXISTS bus_queue (
+   id TEXT PRIMARY KEY,                -- envelope id (idempotency key)
+   ts INTEGER NOT NULL,
+   from_agent TEXT NOT NULL,
+   to_agent TEXT NOT NULL,
+   kind TEXT NOT NULL,
+   payload TEXT NOT NULL,              -- JSON string
+   hop INTEGER NOT NULL DEFAULT 0,
+   reply_to TEXT,
+   attempts INTEGER NOT NULL DEFAULT 0,
+diff --git a/packages/shared/test/schema.test.ts b/packages/shared/test/schema.test.ts
+index 18da633..2dcbbcc 100644
+--- a/packages/shared/test/schema.test.ts
++++ b/packages/shared/test/schema.test.ts
+@@ -10,19 +10,20 @@ const EXPECTED_TABLES = [
+ describe("skema sqlite (draft fase 0)", () => {
+   test("semua tabel inti tercipta dan idempotent", () => {
+     const db = new Database(":memory:");
+     applySchema(db);
+     applySchema(db); // idempotent — tak boleh throw
+     const rows = db.query("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[];
+     const names = rows.map(r => r.name);
+     for (const t of EXPECTED_TABLES) expect(names).toContain(t);
+   });
+ 
+-  test("FTS5 messages_fts tersedia", () => {
++  test("FTS5 messages_fts tersedia dan tersinkron otomatis via trigger", () => {
+     const db = new Database(":memory:");
+     applySchema(db);
++    // Tidak ada insert manual ke messages_fts — trigger AFTER INSERT pada
++    // `messages` yang menjaga sinkronisasi (external content table).
+     db.run("INSERT INTO messages (bot_id, channel, chat_id, direction, ts, body) VALUES ('bot-03','telegram','1','in',0,'halo dunia')");
+-    db.run("INSERT INTO messages_fts(rowid, body) SELECT id, body FROM messages");
+     const hit = db.query("SELECT rowid FROM messages_fts WHERE messages_fts MATCH 'halo'").all();
+     expect(hit.length).toBe(1);
+   });
+ });

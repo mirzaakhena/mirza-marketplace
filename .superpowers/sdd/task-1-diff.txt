@@ -1,0 +1,213 @@
+== commits ==
+7837e10 feat: scaffold monorepo mirza-harness (fase 0)
+
+== stat ==
+ .gitattributes                         |  1 +
+ .gitignore                             |  6 ++++
+ README.md                              | 15 ++++++++
+ bun.lock                               | 63 ++++++++++++++++++++++++++++++++++
+ package.json                           | 13 +++++++
+ packages/cc-stub/package.json          |  7 ++++
+ packages/cc-stub/src/index.ts          |  2 ++
+ packages/hostd/package.json            | 11 ++++++
+ packages/hostd/src/index.ts            |  2 ++
+ packages/pty-holder/package.json       |  7 ++++
+ packages/pty-holder/src/index.ts       |  2 ++
+ packages/shared/package.json           | 10 ++++++
+ packages/shared/src/index.ts           |  2 ++
+ packages/telegram-adapter/package.json |  7 ++++
+ packages/telegram-adapter/src/index.ts |  2 ++
+ tsconfig.json                          | 13 +++++++
+ 16 files changed, 163 insertions(+)
+
+== diff ==
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..6313b56
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1 @@
++* text=auto eol=lf
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..9b72477
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,6 @@
++node_modules/
++*.db
++*.db-wal
++*.db-shm
++dist/
++.superpowers/
+diff --git a/README.md b/README.md
+new file mode 100644
+index 0000000..a56f3e8
+--- /dev/null
++++ b/README.md
+@@ -0,0 +1,15 @@
++# mirza-harness
++
++Substrat baru fleet bot Claude Code milik Mirza: daemon `hostd` (supervisor + bus + state SQLite + channel adapters), `pty-holder` tipis, dan plugin `cc-stub`.
++
++- Design doc: `mirza-marketplace/docs/2026-07-03-harness-rewrite-design.md`
++- Kontrak penerimaan: inventaris 529 item di `mirza-marketplace/docs/2026-07-02-capability-inventory/`
++- Status: Fase 0 (skeleton). Sistem lama tetap produksi sampai migrasi selesai.
++- Konstrain mutlak: TANPA Claude Agent SDK / `claude -p` — seluruh usage lewat TUI interaktif.
++
++## Perintah
++- `bun install`
++- `bun test`
++- `bun run typecheck`
++- `bun run packages/hostd/src/main.ts` — jalankan daemon
++- `bun run packages/hostd/src/cli.ts doctor` — tanya kesehatan daemon
+diff --git a/package.json b/package.json
+new file mode 100644
+index 0000000..e81b942
+--- /dev/null
++++ b/package.json
+@@ -0,0 +1,13 @@
++{
++  "name": "mirza-harness",
++  "private": true,
++  "workspaces": ["packages/*"],
++  "scripts": {
++    "test": "bun test",
++    "typecheck": "tsc --noEmit"
++  },
++  "devDependencies": {
++    "@types/bun": "^1.3.0",
++    "typescript": "^5.6.0"
++  }
++}
+diff --git a/packages/cc-stub/package.json b/packages/cc-stub/package.json
+new file mode 100644
+index 0000000..416e02f
+--- /dev/null
++++ b/packages/cc-stub/package.json
+@@ -0,0 +1,7 @@
++{
++  "name": "@mirza-harness/cc-stub",
++  "version": "0.0.1",
++  "private": true,
++  "type": "module",
++  "exports": { ".": "./src/index.ts" }
++}
+diff --git a/packages/cc-stub/src/index.ts b/packages/cc-stub/src/index.ts
+new file mode 100644
+index 0000000..9d19fb5
+--- /dev/null
++++ b/packages/cc-stub/src/index.ts
+@@ -0,0 +1,2 @@
++// @mirza-harness/cc-stub — skeleton; diisi pada fase berikutnya (design doc §9).
++export const PKG = "cc-stub";
+diff --git a/packages/hostd/package.json b/packages/hostd/package.json
+new file mode 100644
+index 0000000..3a6aac3
+--- /dev/null
++++ b/packages/hostd/package.json
+@@ -0,0 +1,11 @@
++{
++  "name": "@mirza-harness/hostd",
++  "version": "0.0.1",
++  "private": true,
++  "type": "module",
++  "exports": { ".": "./src/index.ts" },
++  "dependencies": {
++    "@mirza-harness/shared": "workspace:*",
++    "zod": "^3.23.0"
++  }
++}
+diff --git a/packages/hostd/src/index.ts b/packages/hostd/src/index.ts
+new file mode 100644
+index 0000000..ac7defc
+--- /dev/null
++++ b/packages/hostd/src/index.ts
+@@ -0,0 +1,2 @@
++// @mirza-harness/hostd — skeleton; diisi pada fase berikutnya (design doc §9).
++export const PKG = "hostd";
+diff --git a/packages/pty-holder/package.json b/packages/pty-holder/package.json
+new file mode 100644
+index 0000000..3b26796
+--- /dev/null
++++ b/packages/pty-holder/package.json
+@@ -0,0 +1,7 @@
++{
++  "name": "@mirza-harness/pty-holder",
++  "version": "0.0.1",
++  "private": true,
++  "type": "module",
++  "exports": { ".": "./src/index.ts" }
++}
+diff --git a/packages/pty-holder/src/index.ts b/packages/pty-holder/src/index.ts
+new file mode 100644
+index 0000000..9ed0aa4
+--- /dev/null
++++ b/packages/pty-holder/src/index.ts
+@@ -0,0 +1,2 @@
++// @mirza-harness/pty-holder — skeleton; diisi pada fase berikutnya (design doc §9).
++export const PKG = "pty-holder";
+diff --git a/packages/shared/package.json b/packages/shared/package.json
+new file mode 100644
+index 0000000..b9ed964
+--- /dev/null
++++ b/packages/shared/package.json
+@@ -0,0 +1,10 @@
++{
++  "name": "@mirza-harness/shared",
++  "version": "0.0.1",
++  "private": true,
++  "type": "module",
++  "exports": { ".": "./src/index.ts" },
++  "dependencies": {
++    "zod": "^3.23.0"
++  }
++}
+diff --git a/packages/shared/src/index.ts b/packages/shared/src/index.ts
+new file mode 100644
+index 0000000..e9c3ec2
+--- /dev/null
++++ b/packages/shared/src/index.ts
+@@ -0,0 +1,2 @@
++// @mirza-harness/shared — skeleton; diisi pada fase berikutnya (design doc §9).
++export const PKG = "shared";
+diff --git a/packages/telegram-adapter/package.json b/packages/telegram-adapter/package.json
+new file mode 100644
+index 0000000..9654915
+--- /dev/null
++++ b/packages/telegram-adapter/package.json
+@@ -0,0 +1,7 @@
++{
++  "name": "@mirza-harness/telegram-adapter",
++  "version": "0.0.1",
++  "private": true,
++  "type": "module",
++  "exports": { ".": "./src/index.ts" }
++}
+diff --git a/packages/telegram-adapter/src/index.ts b/packages/telegram-adapter/src/index.ts
+new file mode 100644
+index 0000000..8f621b5
+--- /dev/null
++++ b/packages/telegram-adapter/src/index.ts
+@@ -0,0 +1,2 @@
++// @mirza-harness/telegram-adapter — skeleton; diisi pada fase berikutnya (design doc §9).
++export const PKG = "telegram-adapter";
+diff --git a/tsconfig.json b/tsconfig.json
+new file mode 100644
+index 0000000..fcb24c3
+--- /dev/null
++++ b/tsconfig.json
+@@ -0,0 +1,13 @@
++{
++  "compilerOptions": {
++    "target": "ESNext",
++    "module": "ESNext",
++    "moduleResolution": "bundler",
++    "strict": true,
++    "noEmit": true,
++    "skipLibCheck": true,
++    "types": ["bun"],
++    "paths": { "@mirza-harness/*": ["./packages/*/src"] }
++  },
++  "include": ["packages/*/src", "packages/*/test"]
++}

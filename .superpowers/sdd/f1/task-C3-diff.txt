@@ -1,0 +1,891 @@
+diff --git a/.gitignore b/.gitignore
+index 9b72477..eb4a0da 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,6 +1,7 @@
+ node_modules/
+ *.db
+ *.db-wal
+ *.db-shm
+ dist/
+ .superpowers/
++hostd.config.json
+diff --git a/hostd.config.example.json b/hostd.config.example.json
+new file mode 100644
+index 0000000..3bc33e9
+--- /dev/null
++++ b/hostd.config.example.json
+@@ -0,0 +1,9 @@
++{
++  "bots": [
++    {
++      "id": "bot-03",
++      "telegram_token": "123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
++      "workspace": "C:/Users/Mirza/workspace/bot-03"
++    }
++  ]
++}
+diff --git a/packages/hostd/package.json b/packages/hostd/package.json
+index 3a6aac3..0e53e60 100644
+--- a/packages/hostd/package.json
++++ b/packages/hostd/package.json
+@@ -1,11 +1,12 @@
+ {
+   "name": "@mirza-harness/hostd",
+   "version": "0.0.1",
+   "private": true,
+   "type": "module",
+   "exports": { ".": "./src/index.ts" },
+   "dependencies": {
+     "@mirza-harness/shared": "workspace:*",
++    "@mirza-harness/telegram-adapter": "workspace:*",
+     "zod": "^3.23.0"
+   }
+ }
+diff --git a/packages/hostd/src/adapters/telegram.ts b/packages/hostd/src/adapters/telegram.ts
+new file mode 100644
+index 0000000..ccfe0a8
+--- /dev/null
++++ b/packages/hostd/src/adapters/telegram.ts
+@@ -0,0 +1,78 @@
++import {
++  createPoller,
++  type Context,
++  type CreatePollerOptions,
++  type Poller,
++  type PollerStatus,
++} from "@mirza-harness/telegram-adapter";
++import type { HostdConfig } from "../config";
++
++/**
++ * Pemasangan N poller telegram-adapter di dalam hostd — satu poller per bot
++ * di `config.bots` (Task C3, Fase 1). Fase 1 hanya memasang poller dan
++ * melacak statusnya; belum menyambungkan `onInbound` ke pipeline nyata
++ * (bus/delivery/gate — Task C4 dst belum ada). `deps.onInbound` disediakan
++ * SEKARANG supaya wiring nanti tinggal mengisi callback ini, bukan
++ * mengubah bentuk `startTelegramAdapters` lagi.
++ */
++
++export interface TelegramAdapterDeps {
++  /** Dipanggil untuk setiap update masuk, per bot. Default: no-op (C4 belum ada). */
++  onInbound?: (botId: string, ctx: Context) => void | Promise<void>;
++  /**
++   * Injeksi factory poller — dipakai test untuk mock grammy (tanpa network
++   * nyata). Default: `createPoller` asli dari `@mirza-harness/telegram-adapter`.
++   */
++  createPoller?: (options: CreatePollerOptions) => Poller;
++}
++
++export interface TelegramAdaptersHandle {
++  /** botId -> poller yang sedang berjalan. */
++  pollers: ReadonlyMap<string, Poller>;
++  /**
++   * botId -> status poller TERBARU. Sumber untuk doctor komponen `adapters`
++   * (map botId->state) — dibaca langsung, bukan snapshot beku, karena
++   * `Map` yang sama diperbarui in-place setiap kali `onStatus` terpanggil.
++   */
++  statuses: ReadonlyMap<string, PollerStatus>;
++  /** Hentikan semua poller (idempoten — masing-masing poller.stop() sendiri idempoten). */
++  stopAll(): Promise<void>;
++}
++
++/**
++ * Buat + start satu poller grammy per entri `config.bots`. Token sudah
++ * di-trim & tervalidasi format oleh `loadConfig` (LOSS-5) sebelum sampai di
++ * sini — modul ini tidak mengulang sanitasi token.
++ */
++export function startTelegramAdapters(
++  config: HostdConfig,
++  deps: TelegramAdapterDeps = {},
++): TelegramAdaptersHandle {
++  const onInbound = deps.onInbound ?? (() => {});
++  const makePoller = deps.createPoller ?? createPoller;
++
++  const pollers = new Map<string, Poller>();
++  const statuses = new Map<string, PollerStatus>();
++
++  for (const bot of config.bots) {
++    statuses.set(bot.id, { state: "starting" });
++    const poller = makePoller({
++      token: bot.telegram_token,
++      onInbound: (ctx) => onInbound(bot.id, ctx),
++      onStatus: (status) => statuses.set(bot.id, status),
++    });
++    pollers.set(bot.id, poller);
++    // Fire-and-forget: siklus hidup poller dilacak lewat `statuses`, bukan
++    // lewat promise yang dikembalikan start() (itu hanya resolve saat poller
++    // berhenti — dead/stopped/clean exit).
++    void poller.start();
++  }
++
++  return {
++    pollers,
++    statuses,
++    async stopAll(): Promise<void> {
++      await Promise.all([...pollers.values()].map((poller) => poller.stop()));
++    },
++  };
++}
+diff --git a/packages/hostd/src/config.ts b/packages/hostd/src/config.ts
+new file mode 100644
+index 0000000..7c3b356
+--- /dev/null
++++ b/packages/hostd/src/config.ts
+@@ -0,0 +1,111 @@
++import { existsSync, readFileSync } from "node:fs";
++import { join } from "node:path";
++import { z } from "zod";
++
++/**
++ * Config hostd — Task C3, Fase 1. Dibaca dari `MIRZA_HOSTD_CONFIG` (path
++ * eksplisit) atau default `hostd.config.json` di `process.cwd()`. Bentuk:
++ * `{bots: [{id, telegram_token, workspace}]}` — lihat `hostd.config.example.json`
++ * di root repo untuk contoh isi.
++ *
++ * LOSS-5 (kelas bug diport dari kode acuan): token Telegram sering
++ * ter-copy-paste dengan spasi/CRLF/BOM menempel (dari .env, clipboard lintas
++ * OS, dsb). Kode acuan membaca token langsung dari env tanpa sanitasi —
++ * token yang kelihatan benar di mata manusia gagal auth secara diam-diam
++ * (Telegram menolak token dengan whitespace di dalamnya). Di sini
++ * `telegram_token` di-trim otomatis (BOM + whitespace/CR/LF di ujung) DAN
++ * divalidasi formatnya (`<numeric_id>:<35+ char>`) sebelum dipakai — gagal
++ * validasi menghasilkan pesan error yang jelas saat load, bukan kegagalan
++ * auth yang membingungkan saat runtime.
++ */
++
++const TELEGRAM_TOKEN_RE = /^\d+:[A-Za-z0-9_-]{30,}$/;
++
++const DEFAULT_CONFIG_FILENAME = "hostd.config.json";
++
++/** Strip BOM di awal + trim whitespace/CR/LF di ujung (LOSS-5). */
++function cleanToken(raw: string): string {
++  return raw.replace(/^﻿/, "").trim();
++}
++
++const BotConfigSchema = z
++  .object({
++    id: z.string().min(1, "bots[].id tidak boleh kosong"),
++    telegram_token: z
++      .string()
++      .transform(cleanToken)
++      .refine(
++        (t) => TELEGRAM_TOKEN_RE.test(t),
++        (t) => ({
++          message:
++            `telegram_token tidak valid setelah di-trim: "${t}". ` +
++            `Format yang benar: <id numerik>:<35+ karakter alfanumerik/_/->, ` +
++            `contoh "123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" ` +
++            `(lihat hostd.config.example.json di root repo).`,
++        }),
++      ),
++    workspace: z.string().min(1, "bots[].workspace tidak boleh kosong"),
++  })
++  .strict();
++
++export const HostdConfigSchema = z
++  .object({
++    bots: z.array(BotConfigSchema),
++  })
++  .strict();
++
++export type BotConfig = z.infer<typeof BotConfigSchema>;
++export type HostdConfig = z.infer<typeof HostdConfigSchema>;
++
++function resolveConfigPath(explicitPath?: string): string {
++  if (explicitPath && explicitPath.trim().length > 0) return explicitPath;
++  const fromEnv = process.env.MIRZA_HOSTD_CONFIG;
++  if (fromEnv && fromEnv.trim().length > 0) return fromEnv;
++  return join(process.cwd(), DEFAULT_CONFIG_FILENAME);
++}
++
++/**
++ * Baca + validasi config hostd. `path` eksplisit menang atas
++ * `MIRZA_HOSTD_CONFIG`, yang menang atas default `./hostd.config.json`.
++ * Melempar `Error` dengan pesan jelas (menyebut path yang dicoba + contoh)
++ * bila file tidak ada, bukan JSON valid, atau gagal validasi skema.
++ */
++export function loadConfig(path?: string): HostdConfig {
++  const configPath = resolveConfigPath(path);
++
++  if (!existsSync(configPath)) {
++    throw new Error(
++      `hostd config tidak ditemukan: ${configPath}\n` +
++        `  set env MIRZA_HOSTD_CONFIG=<path ke file config>, atau taruh ` +
++        `"${DEFAULT_CONFIG_FILENAME}" di working directory tempat hostd dijalankan.\n` +
++        `  contoh isi: lihat hostd.config.example.json di root repo mirza-harness ` +
++        `(salin ke ${DEFAULT_CONFIG_FILENAME} lalu isi telegram_token asli).`,
++    );
++  }
++
++  let raw: string;
++  try {
++    raw = readFileSync(configPath, "utf8");
++  } catch (err) {
++    throw new Error(`gagal baca hostd config di ${configPath}: ${(err as Error).message}`);
++  }
++
++  let parsed: unknown;
++  try {
++    parsed = JSON.parse(raw);
++  } catch (err) {
++    throw new Error(
++      `hostd config di ${configPath} bukan JSON valid: ${(err as Error).message}`,
++    );
++  }
++
++  const result = HostdConfigSchema.safeParse(parsed);
++  if (!result.success) {
++    const issues = result.error.issues
++      .map((issue) => `  - ${issue.path.join(".") || "(root)"}: ${issue.message}`)
++      .join("\n");
++    throw new Error(`hostd config di ${configPath} tidak valid:\n${issues}`);
++  }
++
++  return result.data;
++}
+diff --git a/packages/hostd/test/config.test.ts b/packages/hostd/test/config.test.ts
+new file mode 100644
+index 0000000..5140cb3
+--- /dev/null
++++ b/packages/hostd/test/config.test.ts
+@@ -0,0 +1,211 @@
++import { describe, expect, test } from "bun:test";
++import fs from "node:fs";
++import os from "node:os";
++import path from "node:path";
++import { HostdConfigSchema, loadConfig } from "../src/config";
++
++const VALID_TOKEN = "123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"; // 35 char setelah ':'
++
++function tmpConfigPath(name: string): string {
++  return path.join(
++    os.tmpdir(),
++    `mirza-hostd-config-test-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}-${name}.json`,
++  );
++}
++
++function writeConfig(p: string, content: string): void {
++  fs.writeFileSync(p, content, "utf8");
++}
++
++describe("loadConfig — file valid", () => {
++  test("membaca {bots:[{id,telegram_token,workspace}]} lewat path eksplisit", () => {
++    const p = tmpConfigPath("valid");
++    writeConfig(
++      p,
++      JSON.stringify({
++        bots: [{ id: "bot-03", telegram_token: VALID_TOKEN, workspace: "C:/workspace/bot-03" }],
++      }),
++    );
++    const cfg = loadConfig(p);
++    expect(cfg).toEqual({
++      bots: [{ id: "bot-03", telegram_token: VALID_TOKEN, workspace: "C:/workspace/bot-03" }],
++    });
++    fs.rmSync(p);
++  });
++
++  test("mendukung beberapa bot sekaligus", () => {
++    const p = tmpConfigPath("multi");
++    writeConfig(
++      p,
++      JSON.stringify({
++        bots: [
++          { id: "bot-a", telegram_token: VALID_TOKEN, workspace: "C:/ws/a" },
++          { id: "bot-b", telegram_token: VALID_TOKEN, workspace: "C:/ws/b" },
++        ],
++      }),
++    );
++    const cfg = loadConfig(p);
++    expect(cfg.bots).toHaveLength(2);
++    expect(cfg.bots.map((b) => b.id)).toEqual(["bot-a", "bot-b"]);
++    fs.rmSync(p);
++  });
++
++  test("path eksplisit menang atas MIRZA_HOSTD_CONFIG", () => {
++    const explicit = tmpConfigPath("explicit-wins");
++    const envPath = tmpConfigPath("env-path-should-not-be-used");
++    writeConfig(
++      explicit,
++      JSON.stringify({ bots: [{ id: "explicit", telegram_token: VALID_TOKEN, workspace: "C:/ws" }] }),
++    );
++    writeConfig(
++      envPath,
++      JSON.stringify({ bots: [{ id: "from-env", telegram_token: VALID_TOKEN, workspace: "C:/ws" }] }),
++    );
++    const prevEnv = process.env.MIRZA_HOSTD_CONFIG;
++    process.env.MIRZA_HOSTD_CONFIG = envPath;
++    try {
++      const cfg = loadConfig(explicit);
++      expect(cfg.bots[0]!.id).toBe("explicit");
++    } finally {
++      if (prevEnv === undefined) delete process.env.MIRZA_HOSTD_CONFIG;
++      else process.env.MIRZA_HOSTD_CONFIG = prevEnv;
++      fs.rmSync(explicit);
++      fs.rmSync(envPath);
++    }
++  });
++
++  test("MIRZA_HOSTD_CONFIG dipakai saat path eksplisit tak diberikan", () => {
++    const envPath = tmpConfigPath("env-path");
++    writeConfig(
++      envPath,
++      JSON.stringify({ bots: [{ id: "from-env", telegram_token: VALID_TOKEN, workspace: "C:/ws" }] }),
++    );
++    const prevEnv = process.env.MIRZA_HOSTD_CONFIG;
++    process.env.MIRZA_HOSTD_CONFIG = envPath;
++    try {
++      const cfg = loadConfig();
++      expect(cfg.bots[0]!.id).toBe("from-env");
++    } finally {
++      if (prevEnv === undefined) delete process.env.MIRZA_HOSTD_CONFIG;
++      else process.env.MIRZA_HOSTD_CONFIG = prevEnv;
++      fs.rmSync(envPath);
++    }
++  });
++});
++
++describe("loadConfig — LOSS-5: telegram_token di-trim", () => {
++  test("CRLF + spasi di sekeliling token ke-trim otomatis", () => {
++    const p = tmpConfigPath("crlf-token");
++    writeConfig(
++      p,
++      JSON.stringify({
++        bots: [{ id: "bot-03", telegram_token: `  ${VALID_TOKEN}\r\n`, workspace: "C:/ws" }],
++      }),
++    );
++    const cfg = loadConfig(p);
++    expect(cfg.bots[0]!.telegram_token).toBe(VALID_TOKEN);
++    fs.rmSync(p);
++  });
++
++  test("BOM di awal token ke-strip otomatis", () => {
++    const p = tmpConfigPath("bom-token");
++    writeConfig(
++      p,
++      JSON.stringify({
++        bots: [{ id: "bot-03", telegram_token: `﻿${VALID_TOKEN}`, workspace: "C:/ws" }],
++      }),
++    );
++    const cfg = loadConfig(p);
++    expect(cfg.bots[0]!.telegram_token).toBe(VALID_TOKEN);
++    fs.rmSync(p);
++  });
++});
++
++describe("loadConfig — format token salah", () => {
++  test("token tanpa ':' -> error jelas menyebut format yang benar", () => {
++    const p = tmpConfigPath("bad-format");
++    writeConfig(
++      p,
++      JSON.stringify({ bots: [{ id: "bot-03", telegram_token: "bukan-token-telegram", workspace: "C:/ws" }] }),
++    );
++    expect(() => loadConfig(p)).toThrow(/telegram_token tidak valid/);
++    try {
++      loadConfig(p);
++    } catch (err) {
++      expect((err as Error).message).toMatch(/format yang benar/i);
++      expect((err as Error).message).toMatch(/hostd\.config\.example\.json/);
++    }
++    fs.rmSync(p);
++  });
++
++  test("bagian setelah ':' terlalu pendek -> ditolak", () => {
++    const p = tmpConfigPath("short-secret");
++    writeConfig(
++      p,
++      JSON.stringify({ bots: [{ id: "bot-03", telegram_token: "123456789:tooShort", workspace: "C:/ws" }] }),
++    );
++    expect(() => loadConfig(p)).toThrow();
++    fs.rmSync(p);
++  });
++
++  test("id numerik hilang -> ditolak", () => {
++    const p = tmpConfigPath("no-numeric-id");
++    writeConfig(
++      p,
++      JSON.stringify({ bots: [{ id: "bot-03", telegram_token: `abc:${"x".repeat(35)}`, workspace: "C:/ws" }] }),
++    );
++    expect(() => loadConfig(p)).toThrow();
++    fs.rmSync(p);
++  });
++});
++
++describe("loadConfig — file hilang / invalid", () => {
++  test("file tak ada -> error menyebut path yang dicoba + contoh file", () => {
++    const missing = tmpConfigPath("does-not-exist");
++    expect(() => loadConfig(missing)).toThrow();
++    try {
++      loadConfig(missing);
++    } catch (err) {
++      const msg = (err as Error).message;
++      expect(msg).toContain(missing);
++      expect(msg).toMatch(/hostd\.config\.example\.json/);
++      expect(msg).toMatch(/MIRZA_HOSTD_CONFIG/);
++    }
++  });
++
++  test("JSON rusak -> error jelas (bukan crash JSON.parse mentah)", () => {
++    const p = tmpConfigPath("broken-json");
++    writeConfig(p, "{ bots: [ ini bukan json valid");
++    expect(() => loadConfig(p)).toThrow(/bukan JSON valid/);
++    fs.rmSync(p);
++  });
++
++  test("field tak dikenal -> ditolak (strict)", () => {
++    const p = tmpConfigPath("extra-field");
++    writeConfig(
++      p,
++      JSON.stringify({
++        bots: [{ id: "bot-03", telegram_token: VALID_TOKEN, workspace: "C:/ws" }],
++        extra: true,
++      }),
++    );
++    expect(() => loadConfig(p)).toThrow();
++    fs.rmSync(p);
++  });
++
++  test("bots bukan array -> ditolak", () => {
++    const p = tmpConfigPath("bots-not-array");
++    writeConfig(p, JSON.stringify({ bots: "nope" }));
++    expect(() => loadConfig(p)).toThrow();
++    fs.rmSync(p);
++  });
++});
++
++describe("HostdConfigSchema", () => {
++  test("diekspor dan bisa dipakai langsung (safeParse)", () => {
++    const result = HostdConfigSchema.safeParse({
++      bots: [{ id: "x", telegram_token: VALID_TOKEN, workspace: "C:/ws" }],
++    });
++    expect(result.success).toBe(true);
++  });
++});
+diff --git a/packages/telegram-adapter/src/poller.ts b/packages/telegram-adapter/src/poller.ts
+new file mode 100644
+index 0000000..a1c3275
+--- /dev/null
++++ b/packages/telegram-adapter/src/poller.ts
+@@ -0,0 +1,222 @@
++import { Bot, GrammyError, type Context } from "grammy";
++
++// Re-exported so consumers (mis. packages/hostd) can type onInbound callbacks
++// without adding their own direct dependency on grammy.
++export type { Context };
++
++/**
++ * Poller lifecycle — port dari `plugins/telegram/server.ts:99-206,2141-2195`
++ * (mirza-marketplace, kode acuan Task C3). Retry/backoff long-poll mengikuti
++ * kode acuan persis (delay = min(1000*attempt, 15000), reset attempt saat
++ * `onStart` sukses), dengan dua fix yang kode acuan TIDAK punya:
++ *
++ * - LOSS-6: kode acuan berhenti retry setelah 8x 409 Conflict beruntun, tapi
++ *   PROSES TETAP HIDUP (MCP stdin masih terbuka) — jadi "mati" hanya dari
++ *   sisi polling, bukan proses. Itu zombie: doctor/operator tidak tahu bot
++ *   sudah berhenti mendengarkan. Di hostd, supervisor adalah satu-satunya
++ *   sumber kebenaran hidup/mati poller — begitu ambang 409 tercapai, poller
++ *   ini eksplisit memanggil stop() atas dirinya sendiri DAN melapor
++ *   `{state:'dead', reason:'conflict-409'}` lewat onStatus, supaya doctor
++ *   hostd (komponen `adapters`) melihat merah dan operator tahu perlu
++ *   campur tangan — bukan diam-diam menganggur selamanya.
++ * - SCAR-061: kode acuan tidak memasang `bot.catch` eksplisit. Error yang
++ *   dilempar middleware/handler grammy di tengah pemrosesan satu update
++ *   (BUKAN error long-poll) jatuh ke default error handler grammy (log lalu
++ *   rethrow) — berpotensi jadi unhandledRejection yang mematikan proses.
++ *   Di sini `bot.catch` dipasang eksplisit: log + lapor
++ *   `{state:'degraded', reason}` TANPA memanggil stop() — satu update yang
++ *   gagal diproses tidak boleh menjatuhkan seluruh poller; long-poll lain
++ *   tetap jalan.
++ *
++ * SCAR-050 (SENGAJA TIDAK DIPORT): kode acuan punya takeover pid-file (baca
++ * `bot.pid`, kill proses lama yang masih pegang token) karena tiap sesi
++ * Claude Code menjalankan proses server.ts sendiri-sendiri tanpa supervisor
++ * bersama — jadi butuh mekanisme "singkirkan pemegang lama" sendiri. Di
++ * mirza-harness, hostd adalah SATU proses supervisor untuk semua poller;
++ * "satu poller per token" dijamin oleh model proses-tunggal hostd itu
++ * sendiri (tidak ada instance hostd kedua yang diam-diam start poller untuk
++ * token yang sama). Takeover pid-file DIGANTI oleh supervisi proses-tunggal
++ * hostd — jangan port logic pid-file ke modul ini.
++ */
++
++/** Status lifecycle poller, dilaporkan lewat `onStatus`. */
++export type PollerStatus =
++  | { state: "starting" }
++  | { state: "running"; username?: string }
++  | { state: "degraded"; reason: string }
++  | { state: "dead"; reason: string }
++  | { state: "stopped" };
++
++/**
++ * Subset API grammy `Bot` yang benar-benar dipakai poller ini. Dideklarasi
++ * eksplisit (bukan `import type { Bot }` langsung) supaya test bisa
++ * menyuntik mock murni lewat `botFactory` tanpa jaringan nyata.
++ */
++export interface PollerBot {
++  use(middleware: (ctx: Context, next: () => Promise<void>) => unknown): unknown;
++  start(options?: { onStart?: (info: { username: string }) => void }): Promise<void>;
++  stop(): Promise<void>;
++  /** grammy: properti yang di-assign handler, bukan method yang dipanggil bot. */
++  catch: ((err: unknown) => void) | undefined;
++}
++
++export type BotFactory = (token: string) => PollerBot;
++
++export interface CreatePollerOptions {
++  token: string;
++  /** Dipanggil untuk setiap update masuk. C4 (pipeline) belum ada — caller (hostd adapter) boleh pasang no-op. */
++  onInbound?: (ctx: Context) => void | Promise<void>;
++  onStatus?: (status: PollerStatus) => void;
++  /** Injeksi factory grammy `Bot` — dipakai test untuk mock (tanpa network). Default: `new Bot(token)`. */
++  botFactory?: BotFactory;
++  /** Ambang 409 Conflict beruntun sebelum poller dianggap dead (LOSS-6). Default 8 — ikut kode acuan. */
++  conflictThreshold?: number;
++  /**
++   * Fungsi delay retry (ms) per attempt. Default ikut kode acuan:
++   * `min(1000*attempt, 15000)`. Parameter ini HANYA untuk mempercepat test
++   * (backoff produksi dibiarkan default) — bukan bagian dari spec kode acuan.
++   */
++  retryDelayMs?: (attempt: number) => number;
++}
++
++export interface Poller {
++  /**
++   * Mulai long-poll (idempotent — panggilan kedua sebelum stop() adalah
++   * no-op, mengembalikan promise yang sama). Promise yang dikembalikan
++   * resolve saat loop poll berhenti (dead, stopped, atau clean exit) — jadi
++   * bersifat fire-and-forget bagi caller yang tidak butuh menunggunya, tapi
++   * bisa di-`await` (mis. di test) untuk tahu kapan siklus hidup berakhir.
++   */
++  start(): Promise<void>;
++  /** Hentikan long-poll (idempotent — aman dipanggil berkali-kali / sebelum start()). */
++  stop(): Promise<void>;
++}
++
++const CONFLICT_THRESHOLD_DEFAULT = 8;
++
++function defaultRetryDelayMs(attempt: number): number {
++  return Math.min(1000 * attempt, 15000);
++}
++
++/** 409 Conflict: instanceof GrammyError di jalur produksi, duck-typed di jalur test (mock). */
++function isConflict409(err: unknown): boolean {
++  if (err instanceof GrammyError) return err.error_code === 409;
++  return (
++    typeof err === "object" &&
++    err !== null &&
++    "error_code" in err &&
++    (err as { error_code?: unknown }).error_code === 409
++  );
++}
++
++export function createPoller(options: CreatePollerOptions): Poller {
++  const {
++    token,
++    onInbound,
++    onStatus,
++    conflictThreshold = CONFLICT_THRESHOLD_DEFAULT,
++    retryDelayMs = defaultRetryDelayMs,
++  } = options;
++  const botFactory: BotFactory = options.botFactory ?? ((t) => new Bot(t) as unknown as PollerBot);
++  const bot = botFactory(token);
++
++  let started = false;
++  let stopping = false;
++  let dead = false;
++  let loopPromise: Promise<void> | null = null;
++
++  const emit = (status: PollerStatus): void => {
++    try {
++      onStatus?.(status);
++    } catch {
++      /* listener status tidak boleh menjatuhkan poller */
++    }
++  };
++
++  if (onInbound) {
++    bot.use(async (ctx, next) => {
++      await onInbound(ctx);
++      await next();
++    });
++  }
++
++  // SCAR-061: pasang bot.catch eksplisit — error di tengah pemrosesan satu
++  // update dilog + dilaporkan degraded, TIDAK memanggil stop(). Long-poll
++  // tetap jalan; ini bukan kegagalan getUpdates.
++  bot.catch = (err: unknown): void => {
++    const reason = err instanceof Error ? err.message : String(err);
++    process.stderr.write(
++      `telegram poller: error saat proses update (degraded, polling tetap jalan): ${reason}\n`,
++    );
++    emit({ state: "degraded", reason });
++  };
++
++  async function stopInternal(): Promise<void> {
++    if (stopping) return;
++    stopping = true;
++    try {
++      await bot.stop();
++    } catch {
++      /* bot.stop() sebelum start / sudah stop — abaikan, stop() tetap idempoten */
++    }
++    if (!dead) emit({ state: "stopped" });
++  }
++
++  async function runLoop(): Promise<void> {
++    let conflictStreak = 0;
++    for (let attempt = 1; ; attempt++) {
++      if (stopping) return;
++      try {
++        await bot.start({
++          onStart: (info) => {
++            attempt = 0;
++            conflictStreak = 0;
++            emit({ state: "running", username: info.username });
++          },
++        });
++        return; // bot.stop() dipanggil — keluar bersih, bukan error
++      } catch (err) {
++        if (stopping) return;
++        // grammy: bot.stop() mid-connect menolak dgn "Aborted delay" — diharapkan, bukan error.
++        if (err instanceof Error && err.message === "Aborted delay") return;
++
++        const conflict = isConflict409(err);
++        if (conflict) {
++          conflictStreak++;
++          if (conflictStreak >= conflictThreshold) {
++            dead = true;
++            process.stderr.write(
++              `telegram poller: 409 Conflict bertahan setelah ${conflictStreak}x — poller lain masih pegang token ini. Berhenti (dead), BUKAN zombie.\n`,
++            );
++            emit({ state: "dead", reason: "conflict-409" });
++            await stopInternal();
++            return;
++          }
++        } else {
++          conflictStreak = 0;
++        }
++
++        const delay = retryDelayMs(attempt);
++        const detail = conflict
++          ? `409 Conflict${conflictStreak === 1 ? " — instance lain sedang polling token ini" : ""} (${conflictStreak}/${conflictThreshold})`
++          : `polling error: ${err}`;
++        process.stderr.write(`telegram poller: ${detail}, retry dlm ${delay / 1000}s\n`);
++        if (delay > 0) await new Promise((r) => setTimeout(r, delay));
++      }
++    }
++  }
++
++  return {
++    start(): Promise<void> {
++      if (started) return loopPromise ?? Promise.resolve();
++      started = true;
++      emit({ state: "starting" });
++      loopPromise = runLoop();
++      return loopPromise;
++    },
++    async stop(): Promise<void> {
++      await stopInternal();
++      if (loopPromise) await loopPromise.catch(() => {});
++    },
++  };
++}
+diff --git a/packages/telegram-adapter/test/poller.test.ts b/packages/telegram-adapter/test/poller.test.ts
+new file mode 100644
+index 0000000..4bcc63e
+--- /dev/null
++++ b/packages/telegram-adapter/test/poller.test.ts
+@@ -0,0 +1,195 @@
++import { describe, expect, spyOn, test } from "bun:test";
++import { createPoller, type PollerBot, type PollerStatus } from "../src/poller";
++
++/**
++ * grammy DIMOCK — tidak ada network nyata di test ini. `MockBot`
++ * mengimplementasikan subset `PollerBot` yang dipakai poller, dgn perilaku
++ * `start()` yang bisa diskrip per-panggilan (reject 409, resolve/onStart
++ * lalu menggantung sampai stop() dipanggil, atau menggantung tanpa onStart).
++ */
++type StartBehavior = "reject-409" | "reject-other" | "run" | "hang";
++
++class MockBot implements PollerBot {
++  catch: ((err: unknown) => void) | undefined;
++  startCalls = 0;
++  stopCalls = 0;
++  private index = 0;
++  private pendingResolve: (() => void) | null = null;
++
++  constructor(private behaviors: StartBehavior[]) {}
++
++  use(): unknown {
++    return undefined;
++  }
++
++  start(options?: { onStart?: (info: { username: string }) => void }): Promise<void> {
++    this.startCalls++;
++    const behavior = this.behaviors[this.index] ?? "hang";
++    this.index++;
++    return new Promise((resolve, reject) => {
++      if (behavior === "reject-409") {
++        queueMicrotask(() => reject(Object.assign(new Error("Conflict"), { error_code: 409 })));
++        return;
++      }
++      if (behavior === "reject-other") {
++        queueMicrotask(() => reject(new Error("ETIMEDOUT")));
++        return;
++      }
++      if (behavior === "run") {
++        options?.onStart?.({ username: "mockbot" });
++      }
++      // "run" dan "hang" sama-sama menggantung (meniru long-poll aktif) sampai stop() memanggil resolve.
++      this.pendingResolve = resolve;
++    });
++  }
++
++  stop(): Promise<void> {
++    this.stopCalls++;
++    this.pendingResolve?.();
++    this.pendingResolve = null;
++    return Promise.resolve();
++  }
++
++  /** Simulasikan grammy memanggil error handler di tengah pemrosesan satu update. */
++  triggerCatch(err: unknown): void {
++    this.catch?.(err);
++  }
++}
++
++function silenceStderr() {
++  return spyOn(process.stderr, "write").mockImplementation(() => true);
++}
++
++describe("createPoller — LOSS-6: 409 Conflict beruntun", () => {
++  test("8x 409 Conflict -> dead + stop(), tidak retry ke-9", async () => {
++    const stderrSpy = silenceStderr();
++    const bot = new MockBot(Array(8).fill("reject-409"));
++    const statuses: PollerStatus[] = [];
++    const poller = createPoller({
++      token: "123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
++      botFactory: () => bot,
++      onStatus: (s) => statuses.push(s),
++      retryDelayMs: () => 0,
++    });
++
++    await poller.start();
++
++    expect(bot.startCalls).toBe(8);
++    expect(bot.stopCalls).toBe(1);
++    expect(statuses.at(-1)).toEqual({ state: "dead", reason: "conflict-409" });
++    stderrSpy.mockRestore();
++  });
++
++  test("< 8x 409 lalu sukses -> reset, tidak pernah dead", async () => {
++    const stderrSpy = silenceStderr();
++    const bot = new MockBot([
++      "reject-409",
++      "reject-409",
++      "reject-409",
++      "run", // sukses sebelum ambang 8 tercapai -> reset attempt/conflictStreak
++    ]);
++    const statuses: PollerStatus[] = [];
++    const poller = createPoller({
++      token: "123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
++      botFactory: () => bot,
++      onStatus: (s) => statuses.push(s),
++      retryDelayMs: () => 0,
++    });
++
++    poller.start();
++    await Promise.resolve(); // biarkan microtask reject 3x + resolve start ke-4 jalan
++    await new Promise((r) => setImmediate(r));
++
++    expect(statuses.some((s) => s.state === "dead")).toBe(false);
++    expect(statuses.some((s) => s.state === "running")).toBe(true);
++
++    await poller.stop();
++    expect(bot.stopCalls).toBe(1);
++    stderrSpy.mockRestore();
++  });
++});
++
++describe("createPoller — SCAR-061: bot.catch tidak mematikan polling", () => {
++  test("error di tengah proses update -> onStatus degraded, TANPA stop()", async () => {
++    const stderrSpy = silenceStderr();
++    const bot = new MockBot(["run"]);
++    const statuses: PollerStatus[] = [];
++    const poller = createPoller({
++      token: "123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
++      botFactory: () => bot,
++      onStatus: (s) => statuses.push(s),
++      retryDelayMs: () => 0,
++    });
++
++    poller.start();
++    await Promise.resolve();
++    expect(statuses.some((s) => s.state === "running")).toBe(true);
++
++    bot.triggerCatch(new Error("middleware meledak"));
++
++    expect(statuses.at(-1)).toEqual({ state: "degraded", reason: "middleware meledak" });
++    // Poin inti SCAR-061: bot.stop() TIDAK dipanggil oleh error handler.
++    expect(bot.stopCalls).toBe(0);
++
++    await poller.stop();
++    expect(bot.stopCalls).toBe(1);
++    stderrSpy.mockRestore();
++  });
++});
++
++describe("createPoller — stop() idempoten", () => {
++  test("stop() berkali-kali hanya memanggil bot.stop() sekali, tidak throw", async () => {
++    const stderrSpy = silenceStderr();
++    const bot = new MockBot(["run"]);
++    const poller = createPoller({
++      token: "123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
++      botFactory: () => bot,
++      retryDelayMs: () => 0,
++    });
++
++    poller.start();
++    await Promise.resolve();
++
++    await poller.stop();
++    await poller.stop();
++    await poller.stop();
++
++    expect(bot.stopCalls).toBe(1);
++    stderrSpy.mockRestore();
++  });
++
++  test("stop() sebelum start() dipanggil tidak throw dan tidak memulai polling", async () => {
++    const stderrSpy = silenceStderr();
++    const bot = new MockBot(["run"]);
++    const poller = createPoller({
++      token: "123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
++      botFactory: () => bot,
++      retryDelayMs: () => 0,
++    });
++
++    await expect(poller.stop()).resolves.toBeUndefined();
++    expect(bot.startCalls).toBe(0);
++    stderrSpy.mockRestore();
++  });
++});
++
++describe("createPoller — onInbound", () => {
++  test("dipasang lewat bot.use saat disediakan", async () => {
++    const stderrSpy = silenceStderr();
++    const bot = new MockBot(["run"]);
++    const useSpy = spyOn(bot, "use");
++    let inboundCalled = false;
++    const poller = createPoller({
++      token: "123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
++      botFactory: () => bot,
++      onInbound: () => {
++        inboundCalled = true;
++      },
++      retryDelayMs: () => 0,
++    });
++    expect(useSpy).toHaveBeenCalledTimes(1);
++    void inboundCalled; // middleware sesungguhnya dijalankan oleh grammy, di luar cakupan mock ini
++    await poller.stop();
++    stderrSpy.mockRestore();
++  });
++});

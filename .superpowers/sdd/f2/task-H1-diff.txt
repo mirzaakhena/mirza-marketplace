@@ -1,0 +1,736 @@
+diff --git a/packages/cc-stub/hooks/session-start.ts b/packages/cc-stub/hooks/session-start.ts
+new file mode 100644
+index 0000000..1a3914d
+--- /dev/null
++++ b/packages/cc-stub/hooks/session-start.ts
+@@ -0,0 +1,202 @@
++#!/usr/bin/env bun
++/**
++ * Task H1, Fase 2 — SessionStart hook: reports `{bot_id, session_id, source,
++ * cwd}` to hostd via RPC `session.started`, then prints hostd's
++ * `additionalContext` back to Claude Code verbatim.
++ *
++ * Replaces `plugins/telegram/hooks/session-name-context.ts` (mirza-marketplace,
++ * recon-hooks.md §A): that hook read the session name from two shim files
++ * (`wrapper.current_session_name` / a registry keyed by sid) that could lag
++ * each other. hostd's `sessions` table (INFRA-5) is now the single writer of
++ * that name — the same row `agent_status`/`agent.status` reads — so this hook
++ * carries no name-resolution logic of its own; it just asks hostd.
++ *
++ * This is also hook-inversion §5 step 2 (recon-hooks.md §B): a fresh Claude
++ * Code session firing SessionStart is the signal hostd's bot-supervisor was
++ * waiting on to release the `/clear` barrier it armed in step 1
++ * (`BotSupervisor.clearSession()` -> `sessions.lifecycle='resetting'`) — see
++ * `rpc-handlers.ts`'s `handleSessionStarted` for the hostd side.
++ *
++ * Fails silent end-to-end: unreadable stdin, unparseable/incomplete JSON, or
++ * hostd unreachable/timeout all fall through to "print nothing, exit 0" —
++ * this hook must NEVER block or delay SessionStart. Unlike trailer-guard.ts
++ * (a security gate with a real fail-closed branch), there is no decision
++ * here worth blocking on — only a nice-to-have context injection.
++ *
++ * Deliberately does NOT reuse `../src/ipc-client.ts`'s `connectHostd`: that
++ * client sends `session.register {bot_id}` on every connect, which
++ * OVERWRITES hostd's `connections` map entry (server.ts) for this bot_id —
++ * fine for cc-stub's own long-lived MCP stdio process (the intended caller),
++ * but WRONG for this hook: it runs as a short-lived one-shot process on every
++ * SessionStart, so registering (then immediately disconnecting) would race
++ * with — and can clobber — the real persistent registration cc-stub's own
++ * process holds for `pushEvent`/`isRegistered`. `callHostdOnce` below is a
++ * minimal, self-contained connect -> single request -> read one reply ->
++ * disconnect, with no registration side effect at all.
++ */
++import { readFileSync } from "node:fs";
++import net from "node:net";
++import { PIPE_NAME_DEFAULT, RpcRequest, parseRpcMessage, type RpcRequestT } from "@mirza-harness/shared";
++import { resolveBotId } from "../src/tools";
++
++/** Hook must not block SessionStart for long — shorter than ipc-client.ts's 10s persistent-client default. */
++const CALL_TIMEOUT_MS = 5_000;
++
++// ---------------------------------------------------------------------------
++// stdin parsing — CC's SessionStart hook payload: {session_id, transcript_path,
++// cwd, hook_event_name, source} (source: "startup" | "resume" | "clear" |
++// "compact"). Only session_id/source/cwd matter here.
++// ---------------------------------------------------------------------------
++
++export interface SessionStartedParams {
++  bot_id: string;
++  session_id: string;
++  source: string;
++  cwd: string;
++}
++
++/**
++ * Parse CC's SessionStart stdin JSON into the fields `session.started` needs
++ * (bot_id filled in separately by the caller — see `resolveBotId`). Returns
++ * `null` if the payload isn't JSON or lacks a non-empty `session_id` — there
++ * is nothing meaningful to report to hostd without it, and this hook fails
++ * silent rather than guessing.
++ */
++export function parseSessionStartInput(raw: string, cwdFallback: string): Omit<SessionStartedParams, "bot_id"> | null {
++  let input: unknown;
++  try {
++    input = JSON.parse(raw);
++  } catch {
++    return null;
++  }
++  const obj = input as Record<string, unknown> | null;
++  const sessionId = obj?.session_id;
++  if (typeof sessionId !== "string" || sessionId.length === 0) return null;
++  const source = typeof obj?.source === "string" && obj.source.length > 0 ? obj.source : "unknown";
++  const cwd = typeof obj?.cwd === "string" && obj.cwd.length > 0 ? obj.cwd : cwdFallback;
++  return { session_id: sessionId, source, cwd };
++}
++
++/** CC SessionStart hook output shape (stdout, JSON). */
++export function formatHookOutput(additionalContext: string): string {
++  return JSON.stringify({
++    hookSpecificOutput: {
++      hookEventName: "SessionStart",
++      additionalContext,
++    },
++  });
++}
++
++// ---------------------------------------------------------------------------
++// Core logic — `call` injectable (mirrors ../src/tools.ts's `ToolCallDeps`
++// pattern) so tests exercise "POST benar / additionalContext dari balasan"
++// and "hostd tak terjangkau -> diam" without a real named pipe.
++// ---------------------------------------------------------------------------
++
++export interface SessionStartDeps {
++  call: (method: string, params: unknown) => Promise<unknown>;
++}
++
++/**
++ * Report `params` to hostd's `session.started` and return the ready-to-print
++ * hook-output string, or `null` if anything went wrong (hostd unreachable/
++ * timeout/error, or a malformed reply missing a non-empty `additionalContext`
++ * string) — caller prints nothing in that case, satisfying the "diam, jangan
++ * blokir SessionStart" requirement.
++ */
++export async function reportSessionStarted(params: SessionStartedParams, deps: SessionStartDeps): Promise<string | null> {
++  let result: unknown;
++  try {
++    result = await deps.call("session.started", params);
++  } catch {
++    return null;
++  }
++  const additionalContext = (result as { additionalContext?: unknown } | null)?.additionalContext;
++  if (typeof additionalContext !== "string" || additionalContext.length === 0) return null;
++  return formatHookOutput(additionalContext);
++}
++
++// ---------------------------------------------------------------------------
++// One-shot IPC call — connect, send ONE request, resolve/reject on the first
++// correlated reply, then the caller closes the socket. No `session.register`
++// (see module docstring above for why).
++// ---------------------------------------------------------------------------
++
++export function callHostdOnce(pipeName: string, method: string, params: unknown, timeoutMs = CALL_TIMEOUT_MS): Promise<unknown> {
++  return new Promise((resolve, reject) => {
++    let settled = false;
++    let buf = "";
++    const sock = net.connect(pipeName);
++
++    const timer = setTimeout(() => {
++      finish(new Error(`timeout menunggu balasan '${method}' dari hostd`));
++    }, timeoutMs);
++    (timer as unknown as { unref?: () => void }).unref?.();
++
++    function finish(err: Error | null, result?: unknown): void {
++      if (settled) return;
++      settled = true;
++      clearTimeout(timer);
++      sock.destroy();
++      if (err) reject(err);
++      else resolve(result);
++    }
++
++    sock.on("connect", () => {
++      const req: RpcRequestT = RpcRequest.parse({ jsonrpc: "2.0", id: 1, method, params });
++      sock.write(JSON.stringify(req) + "\n");
++    });
++
++    sock.on("data", d => {
++      buf += d.toString("utf8");
++      const nl = buf.indexOf("\n");
++      if (nl < 0) return;
++      const line = buf.slice(0, nl).trim();
++      if (!line) return;
++      try {
++        const msg = parseRpcMessage(line);
++        if ("method" in msg) return; // stray event (unexpected on this one-shot connection) — keep waiting for the real reply
++        if ("error" in msg) finish(new Error(msg.error.message));
++        else finish(null, msg.result);
++      } catch (e) {
++        finish(e instanceof Error ? e : new Error(String(e)));
++      }
++    });
++
++    // A raw socket-level error (ENOENT/ECONNREFUSED — no hostd listening on
++    // this pipe) is normalized to "hostd unreachable" (same wording
++    // ipc-client.ts's `call()` uses) rather than surfaced as Node's raw
++    // connect-error text — callers (`reportSessionStarted`) only branch on
++    // success/failure here, but a consistent message matters for anyone
++    // reading hostd/hook logs. The original message is kept alongside for
++    // debugging.
++    sock.on("error", err => finish(new Error(`hostd unreachable: ${err.message}`)));
++    sock.on("close", () => finish(new Error("hostd unreachable")));
++  });
++}
++
++// ---------------------------------------------------------------------------
++// Entrypoint.
++// ---------------------------------------------------------------------------
++
++async function main(): Promise<void> {
++  let raw = "";
++  try {
++    raw = readFileSync(0, "utf8");
++  } catch {
++    return;
++  }
++  const parsed = parseSessionStartInput(raw, process.cwd());
++  if (!parsed) return;
++
++  const botId = resolveBotId();
++  const params: SessionStartedParams = { ...parsed, bot_id: botId };
++  const pipeName = process.env.MIRZA_HOSTD_PIPE ?? PIPE_NAME_DEFAULT;
++
++  const output = await reportSessionStarted(params, {
++    call: (method, callParams) => callHostdOnce(pipeName, method, callParams),
++  });
++  if (output) process.stdout.write(output);
++}
++
++if (import.meta.main) void main();
+diff --git a/packages/cc-stub/test/session-start.test.ts b/packages/cc-stub/test/session-start.test.ts
+new file mode 100644
+index 0000000..24495b6
+--- /dev/null
++++ b/packages/cc-stub/test/session-start.test.ts
+@@ -0,0 +1,169 @@
++import { describe, expect, test } from "bun:test";
++import net from "node:net";
++import {
++  parseSessionStartInput,
++  formatHookOutput,
++  reportSessionStarted,
++  callHostdOnce,
++  type SessionStartedParams,
++} from "../hooks/session-start";
++
++describe("parseSessionStartInput", () => {
++  test("valid JSON with session_id/source/cwd -> parsed as-is", () => {
++    const raw = JSON.stringify({ session_id: "sess-1", source: "startup", cwd: "C:/workspace/bot-03", hook_event_name: "SessionStart" });
++    expect(parseSessionStartInput(raw, "C:/fallback")).toEqual({ session_id: "sess-1", source: "startup", cwd: "C:/workspace/bot-03" });
++  });
++
++  test("missing cwd in payload -> falls back to cwdFallback param", () => {
++    const raw = JSON.stringify({ session_id: "sess-1", source: "resume" });
++    expect(parseSessionStartInput(raw, "C:/fallback")).toEqual({ session_id: "sess-1", source: "resume", cwd: "C:/fallback" });
++  });
++
++  test("missing source in payload -> defaults to 'unknown'", () => {
++    const raw = JSON.stringify({ session_id: "sess-1", cwd: "C:/workspace/bot-03" });
++    expect(parseSessionStartInput(raw, "C:/fallback")).toEqual({ session_id: "sess-1", source: "unknown", cwd: "C:/workspace/bot-03" });
++  });
++
++  test("missing session_id -> null (nothing worth reporting)", () => {
++    const raw = JSON.stringify({ source: "startup", cwd: "C:/workspace/bot-03" });
++    expect(parseSessionStartInput(raw, "C:/fallback")).toBeNull();
++  });
++
++  test("empty-string session_id -> null", () => {
++    const raw = JSON.stringify({ session_id: "", cwd: "C:/workspace/bot-03" });
++    expect(parseSessionStartInput(raw, "C:/fallback")).toBeNull();
++  });
++
++  test("unparseable JSON -> null, not a throw", () => {
++    expect(parseSessionStartInput("not json{{{", "C:/fallback")).toBeNull();
++  });
++
++  test("empty stdin -> null", () => {
++    expect(parseSessionStartInput("", "C:/fallback")).toBeNull();
++  });
++});
++
++describe("formatHookOutput", () => {
++  test("wraps additionalContext in CC's SessionStart hookSpecificOutput shape", () => {
++    const out = JSON.parse(formatHookOutput('Current session name: "idle"'));
++    expect(out).toEqual({
++      hookSpecificOutput: {
++        hookEventName: "SessionStart",
++        additionalContext: 'Current session name: "idle"',
++      },
++    });
++  });
++});
++
++describe("reportSessionStarted — POST via injected `call`", () => {
++  const params: SessionStartedParams = { bot_id: "bot-03", session_id: "sess-1", source: "startup", cwd: "C:/workspace/bot-03" };
++
++  test("POST benar: sends session.started with the exact params, additionalContext from the reply is printed as hook output", async () => {
++    const calls: { method: string; params: unknown }[] = [];
++    const output = await reportSessionStarted(params, {
++      call: async (method, callParams) => {
++        calls.push({ method, params: callParams });
++        return { additionalContext: 'Current session name: "my-session"' };
++      },
++    });
++
++    expect(calls).toEqual([{ method: "session.started", params }]);
++    expect(JSON.parse(output!)).toEqual({
++      hookSpecificOutput: {
++        hookEventName: "SessionStart",
++        additionalContext: 'Current session name: "my-session"',
++      },
++    });
++  });
++
++  test("hostd unreachable (call() rejects) -> returns null, hook stays silent (exit 0 path)", async () => {
++    const output = await reportSessionStarted(params, {
++      call: async () => {
++        throw new Error("hostd unreachable");
++      },
++    });
++    expect(output).toBeNull();
++  });
++
++  test("hostd replies without a usable additionalContext -> null, not a crash", async () => {
++    const output = await reportSessionStarted(params, { call: async () => ({}) });
++    expect(output).toBeNull();
++  });
++
++  test("hostd replies with non-string additionalContext -> null", async () => {
++    const output = await reportSessionStarted(params, { call: async () => ({ additionalContext: 42 }) });
++    expect(output).toBeNull();
++  });
++
++  test("hostd replies with empty-string additionalContext -> null", async () => {
++    const output = await reportSessionStarted(params, { call: async () => ({ additionalContext: "" }) });
++    expect(output).toBeNull();
++  });
++});
++
++// ---------------------------------------------------------------------------
++// callHostdOnce — real named-pipe round trip against a minimal mock hostd
++// (mirrors ipc-client.test.ts's `startMockHostd` pattern), verifying this
++// one-shot client does NOT send `session.register` (unlike ipc-client.ts's
++// connectHostd — see session-start.ts's module docstring for why that would
++// be wrong here).
++// ---------------------------------------------------------------------------
++
++function startMockHostd(pipeName: string, handler: (msg: any, sock: net.Socket) => void): Promise<net.Server> {
++  return new Promise((resolve, reject) => {
++    const server = net.createServer(sock => {
++      let buf = "";
++      sock.on("data", d => {
++        buf += d.toString("utf8");
++        let nl: number;
++        while ((nl = buf.indexOf("\n")) >= 0) {
++          const line = buf.slice(0, nl).trim();
++          buf = buf.slice(nl + 1);
++          if (line) handler(JSON.parse(line), sock);
++        }
++      });
++    });
++    server.on("error", reject);
++    server.listen(pipeName, () => resolve(server));
++  });
++}
++
++function closeServer(server: net.Server): Promise<void> {
++  return new Promise(resolve => server.close(() => resolve()));
++}
++
++describe("callHostdOnce", () => {
++  test("connects, sends ONE request (no session.register), resolves with the correlated result, no lingering connection", async () => {
++    const pipeName = `\\\\.\\pipe\\cc-stub-session-start-test-ok-${process.pid}`;
++    const receivedMethods: string[] = [];
++    const server = await startMockHostd(pipeName, (msg, sock) => {
++      receivedMethods.push(msg.method);
++      sock.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { additionalContext: 'Current session name: "idle"' } }) + "\n");
++    });
++
++    const result = await callHostdOnce(pipeName, "session.started", { bot_id: "bot-03", session_id: "s1", source: "startup", cwd: "C:/x" });
++
++    expect(result).toEqual({ additionalContext: 'Current session name: "idle"' });
++    expect(receivedMethods).toEqual(["session.started"]); // never sent session.register
++
++    await closeServer(server);
++  });
++
++  test("hostd replies with an RpcFailure -> rejects with the server's error message", async () => {
++    const pipeName = `\\\\.\\pipe\\cc-stub-session-start-test-err-${process.pid}`;
++    const server = await startMockHostd(pipeName, (msg, sock) => {
++      sock.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, error: { code: -32600, message: "params tak valid" } }) + "\n");
++    });
++
++    await expect(callHostdOnce(pipeName, "session.started", {})).rejects.toThrow("params tak valid");
++
++    await closeServer(server);
++  });
++
++  test("no server listening on the pipe -> rejects fast with 'hostd unreachable', never blocks for the full timeout", async () => {
++    const pipeName = `\\\\.\\pipe\\cc-stub-session-start-test-unreachable-${process.pid}`;
++    const start = Date.now();
++    await expect(callHostdOnce(pipeName, "session.started", {}, 5000)).rejects.toThrow("hostd unreachable");
++    expect(Date.now() - start).toBeLessThan(4000); // well under the 5s timeoutMs — connection error fires immediately
++  });
++});
+diff --git a/packages/hostd/src/rpc-handlers.ts b/packages/hostd/src/rpc-handlers.ts
+index 628998a..d1676e5 100644
+--- a/packages/hostd/src/rpc-handlers.ts
++++ b/packages/hostd/src/rpc-handlers.ts
+@@ -1,18 +1,20 @@
+ import { randomUUID } from "node:crypto";
+ import type { Database } from "bun:sqlite";
++import { z } from "zod";
+ import type { OutboundSender } from "@mirza-harness/telegram-adapter";
+ import type { PollerStatus } from "@mirza-harness/telegram-adapter";
+ import { Envelope, TelegramOutboundParams, AgentStatusParams, AgentSendParams, type EnvelopeT } from "@mirza-harness/shared";
+-import type { HostdConfig } from "./config";
++import type { HostdConfig, BotConfig } from "./config";
+ import { enqueue } from "./bus/bus";
+ import { composeAgentPrompt } from "./bus/marker";
+ import type { DeliveryStats } from "./bus/delivery";
+ import type { DoctorSupervisorStatusLike } from "./doctor";
++import type { BotSupervisor } from "./supervisor/supervisor";
+ 
+ /**
+  * Task D2, Fase 1 — hostd's side of the cc-stub tools proxy: `server.ts`
+  * only wires these functions into its RPC method table (see
+  * `registerRpcHandlerDeps`); ALL validation (zod, from `@mirza-harness/shared`'s
+  * rpc.ts) and side effects (Telegram send, bus enqueue, config lookups)
+  * live here, per the brief's "hostd yang memvalidasi + eksekusi".
+  *
+@@ -50,16 +52,40 @@ export interface RpcHandlerDeps {
+   deliveryStats?: () => DeliveryStats;
+   /**
+    * Task S1, Fase 2 — same carry-through pattern as `deliveryStats`: not
+    * used by the 4 RPC handlers below, exists so `main.ts` can register one
+    * deps object that ALSO feeds `server.ts`'s `doctor` handler with real
+    * per-bot supervisor status (`startSupervisors(...).statuses()`).
+    */
+   supervisorStatuses?: () => Readonly<Record<string, DoctorSupervisorStatusLike>>;
++  /**
++   * Task H1, Fase 2 — bot_id -> BotSupervisor, needed so `session.started`
++   * (below) can release that bot's `/clear` barrier
++   * (`BotSupervisor.onSessionStarted()`, hook-inversion §5 step 2 —
++   * recon-hooks.md §B). `Pick<...>` rather than the full class: this is the
++   * only method `handleSessionStarted` needs, which keeps a test's fake
++   * supervisor to `{ onSessionStarted: () => ... }` — no need to construct a
++   * real `BotSupervisor` (which spawns a pty-holder child) just to verify the
++   * barrier-release call happened.
++   *
++   * Optional carry-through, same pattern as `deliveryStats`/`supervisorStatuses`
++   * above: tests exercising `handleSessionStarted` may omit it (barrier
++   * release then silently no-ops — the sessions upsert + reply still work).
++   *
++   * PRODUCTION WIRING NOTE: `main.ts` is outside this task's allowed file
++   * scope (see task brief), so its `registerRpcHandlerDeps({...})` call has
++   * NOT been updated to actually pass this field — needs
++   * `supervisors: supervisors.supervisors` added there (the `SupervisorsHandle`
++   * `startSupervisors(...)` already returns in main.ts has exactly this map)
++   * as a follow-up integration step, or `onSessionStarted()` never fires in
++   * the real running process and the queue barrier this method exists to
++   * release stays stuck until its own safety-timeout/alarm.
++   */
++  supervisors?: ReadonlyMap<string, Pick<BotSupervisor, "onSessionStarted">>;
+ }
+ 
+ function nowMs(deps: RpcHandlerDeps): number {
+   return (deps.now ?? Date.now)();
+ }
+ 
+ // ---------------------------------------------------------------------------
+ // telegram.outbound {bot_id, cmd} -> the bot's OutboundSender.
+@@ -182,8 +208,109 @@ export function handleAgentSend(params: unknown, deps: RpcHandlerDeps): AgentSen
+       kind: "prompt",
+       payload: { content: composed, meta: { from, hop: String(hop), kind: "agent-prompt" } },
+       hop,
+     });
+     const queued = enqueue(deps.db, env);
+     return queued ? { target, queued: true } : { target, queued: false, reason: "enqueue no-op (id sudah ada di bus_queue)" };
+   });
+ }
++
++// ---------------------------------------------------------------------------
++// session.started {bot_id, session_id, source, cwd} — Task H1, Fase 2.
++//
++// Called by cc-stub's SessionStart hook (`packages/cc-stub/hooks/session-start.ts`)
++// on every fresh Claude Code session. Three things happen, in order:
++//   1. Resolve WHICH configured bot this is — by `cwd` matching a
++//      `config.bots[].workspace` entry (recon-hooks.md §B: "bot dari mapping
++//      config workspace->bot"), falling back to the hook's self-reported
++//      `bot_id` only if no workspace matches. hostd is the single writer of
++//      state (§B's "peran" line) and shouldn't blindly trust an arbitrary
++//      `bot_id` string from a short-lived, unauthenticated hook process when
++//      the more reliable signal (which workspace it's actually running in)
++//      is available in the same payload.
++//   2. Upsert the `sessions` row (schema.ts) for this `session_id`: a brand
++//      new id gets a fresh row (name/lifecycle default 'idle'); an id that
++//      already exists (the SAME session firing SessionStart again — e.g.
++//      `source: "clear"` or "resume" for a session `BotSupervisor.clearSession()`
++//      had just marked `lifecycle='resetting'` via `setLatestSessionLifecycle`)
++//      only has its `lifecycle` flipped back to 'idle' (fix M4 from the S1
++//      review — a resetting session must not stay stuck once SessionStart
++//      actually fires) — `name`/`started_at` are left untouched on conflict so
++//      a session's name (S2's rename path) or its true original start time
++//      survive a clear/resume cycle. LOSS-1: no jsonl/encoding guessing
++//      anywhere in this path — the row is written from validated RPC params
++//      only.
++//   3. Release that bot's `/clear` barrier (`BotSupervisor.onSessionStarted()`
++//      -> `InjectionQueue.onSessionStarted()`) — hook-inversion §5 step 2,
++//      the whole point of this handler existing: a fresh SessionStart is the
++//      real, verifiable "the session actually cleared" signal that replaces
++//      the retired 10-minute jsonl-polling clear-barrier.
++//
++// Reply carries `additionalContext` built from `sessions.name` — INFRA-5:
++// the exact same source `handleAgentStatus` above reads, so the hook's
++// injected context and `agent_status`/`agent.status` can never disagree.
++// ---------------------------------------------------------------------------
++
++const SessionStartedParams = z
++  .object({
++    bot_id: z.string().min(1),
++    session_id: z.string().min(1),
++    source: z.string().min(1),
++    cwd: z.string().min(1),
++  })
++  .strict();
++
++export type SessionStartedParamsT = z.infer<typeof SessionStartedParams>;
++
++export interface SessionStartedResult {
++  additionalContext: string;
++}
++
++/** `C:\foo\bar\` and `C:/foo/bar` (and case) should compare equal cross-platform. */
++function normalizeWorkspacePath(p: string): string {
++  return p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
++}
++
++/** Resolve the config bot for a `session.started` call — workspace match first, `bot_id` as fallback. Throws (visible failure, §2.5) if neither resolves. */
++function resolveBotForSessionStarted(params: SessionStartedParamsT, config: HostdConfig): BotConfig {
++  const normalizedCwd = normalizeWorkspacePath(params.cwd);
++  const byWorkspace = config.bots.find(b => normalizeWorkspacePath(b.workspace) === normalizedCwd);
++  if (byWorkspace) return byWorkspace;
++
++  const byId = config.bots.find(b => b.id === params.bot_id);
++  if (byId) return byId;
++
++  const known = config.bots.map(b => `${b.id} (${b.workspace})`).join(", ") || "(none)";
++  throw new Error(
++    `session.started: cwd "${params.cwd}" (bot_id klaim "${params.bot_id}") tidak cocok workspace bot manapun di hostd config. Known: ${known}`,
++  );
++}
++
++export function handleSessionStarted(params: unknown, deps: RpcHandlerDeps): SessionStartedResult {
++  const parsed = SessionStartedParams.parse(params);
++  const bot = resolveBotForSessionStarted(parsed, deps.config);
++  const startedAt = Math.floor(nowMs(deps) / 1000);
++
++  // `sessions.bot_id` has a `REFERENCES bots(id)` foreign key (schema.ts) but
++  // nothing in the current production wiring (main.ts) ever populates the
++  // `bots` table — ensure the row exists here so the INSERT below can't fail
++  // an FK check on a bot's very first session. Idempotent no-op once present.
++  deps.db.run(
++    `INSERT INTO bots (id, workspace) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET workspace = excluded.workspace`,
++    [bot.id, bot.workspace],
++  );
++
++  deps.db.run(
++    `INSERT INTO sessions (id, bot_id, name, lifecycle, started_at)
++     VALUES (?, ?, 'idle', 'idle', ?)
++     ON CONFLICT(id) DO UPDATE SET bot_id = excluded.bot_id, lifecycle = 'idle'`,
++    [parsed.session_id, bot.id, startedAt],
++  );
++
++  // Hook-inversion §5 step 2 — see module-level comment above.
++  deps.supervisors?.get(bot.id)?.onSessionStarted();
++
++  const row = deps.db.query(`SELECT name FROM sessions WHERE id = ?`).get(parsed.session_id) as { name: string } | null;
++  const name = row?.name ?? "idle";
++
++  return { additionalContext: `Current session name: "${name}"` };
++}
+diff --git a/packages/hostd/src/server.ts b/packages/hostd/src/server.ts
+index c9b9c5c..b6a806a 100644
+--- a/packages/hostd/src/server.ts
++++ b/packages/hostd/src/server.ts
+@@ -1,13 +1,20 @@
+ import net from "node:net";
+ import { z } from "zod";
+ import { RpcRequest, ChannelConfirmParams, type RpcEventT, parseRpcMessage } from "@mirza-harness/shared";
+ import { doctorReport } from "./doctor";
+-import { handleTelegramOutbound, handleAgentList, handleAgentStatus, handleAgentSend, type RpcHandlerDeps } from "./rpc-handlers";
++import {
++  handleTelegramOutbound,
++  handleAgentList,
++  handleAgentStatus,
++  handleAgentSend,
++  handleSessionStarted,
++  type RpcHandlerDeps,
++} from "./rpc-handlers";
+ 
+ type Handler = (params: unknown, sock: net.Socket) => unknown | Promise<unknown>;
+ 
+ /** Delegate yang dipanggil saat method `channel.confirm {envelope_id, attempt_token}` diterima. */
+ export type ConfirmDelegate = (envelopeId: string, attemptToken: string) => unknown;
+ 
+ /**
+  * Registry delegate confirm — di-inject dari wiring hostd (mis. main.ts)
+@@ -86,16 +93,18 @@ const handlers: Record<string, Handler> = {
+   },
+   // Task D2 — cc-stub tools proxy. Semua 4 method di bawah delegasi murni ke
+   // rpc-handlers.ts lewat `rpcDeps` (di-inject main.ts); tanpa wiring, error
+   // terlihat (requireRpcDeps), bukan diam-diam sukses/kosong.
+   "telegram.outbound": params => handleTelegramOutbound(params, requireRpcDeps()),
+   "agent.list": params => handleAgentList(params, requireRpcDeps()),
+   "agent.status": params => handleAgentStatus(params, requireRpcDeps()),
+   "agent.send": params => handleAgentSend(params, requireRpcDeps()),
++  // Task H1, Fase 2 — cc-stub's SessionStart hook (`packages/cc-stub/hooks/session-start.ts`).
++  "session.started": params => handleSessionStarted(params, requireRpcDeps()),
+ };
+ 
+ /** Apakah bot_id punya koneksi cc-stub terdaftar saat ini. */
+ export function isRegistered(botId: string): boolean {
+   return connections.has(botId);
+ }
+ 
+ /**
+diff --git a/packages/hostd/test/rpc-handlers.test.ts b/packages/hostd/test/rpc-handlers.test.ts
+index e08ce8e..5c6b600 100644
+--- a/packages/hostd/test/rpc-handlers.test.ts
++++ b/packages/hostd/test/rpc-handlers.test.ts
+@@ -2,16 +2,17 @@ import { describe, expect, test } from "bun:test";
+ import { openDb } from "../src/state/db";
+ import { claimNext } from "../src/bus/bus";
+ import { parseAgentPrompt } from "../src/bus/marker";
+ import {
+   handleTelegramOutbound,
+   handleAgentList,
+   handleAgentStatus,
+   handleAgentSend,
++  handleSessionStarted,
+   type RpcHandlerDeps,
+ } from "../src/rpc-handlers";
+ import type { OutboundSender } from "@mirza-harness/telegram-adapter";
+ import type { HostdConfig } from "../src/config";
+ 
+ function makeConfig(overrides: Partial<HostdConfig> = {}): HostdConfig {
+   return {
+     bots: [
+@@ -172,8 +173,108 @@ describe("handleAgentSend", () => {
+ 
+   test("hop_count over MAX_HOP -> zod rejects upfront", () => {
+     const deps = baseDeps();
+     expect(() =>
+       handleAgentSend({ from: "bot-01", target: "bot-02", payload: { kind: "prompt", body: "hi", hop_count: 6 } }, deps),
+     ).toThrow();
+   });
+ });
++
++describe("handleSessionStarted", () => {
++  test("brand-new session_id -> row inserted, lifecycle+name default 'idle', additionalContext reflects it", () => {
++    const deps = baseDeps({ now: () => 5000 });
++
++    const result = handleSessionStarted({ bot_id: "bot-01", session_id: "sess-new", source: "startup", cwd: "C:/workspace/bot-01" }, deps);
++
++    expect(result).toEqual({ additionalContext: 'Current session name: "idle"' });
++    const row = deps.db.query(`SELECT id, bot_id, name, lifecycle, started_at FROM sessions WHERE id = ?`).get("sess-new");
++    expect(row).toEqual({ id: "sess-new", bot_id: "bot-01", name: "idle", lifecycle: "idle", started_at: 5 });
++  });
++
++  test("resolves the bot via cwd->workspace mapping, not the hook's self-reported bot_id", () => {
++    const deps = baseDeps();
++    // bot_id claimed is bot-02, but cwd matches bot-01's workspace — workspace mapping wins.
++    const result = handleSessionStarted({ bot_id: "bot-02", session_id: "sess-x", source: "startup", cwd: "C:/workspace/bot-01" }, deps);
++    expect(result).toEqual({ additionalContext: 'Current session name: "idle"' });
++    const row = deps.db.query(`SELECT bot_id FROM sessions WHERE id = ?`).get("sess-x") as { bot_id: string };
++    expect(row.bot_id).toBe("bot-01");
++  });
++
++  test("cwd doesn't match any workspace -> falls back to bot_id match", () => {
++    const deps = baseDeps();
++    const result = handleSessionStarted({ bot_id: "bot-02", session_id: "sess-y", source: "startup", cwd: "C:/somewhere/else" }, deps);
++    expect(result).toEqual({ additionalContext: 'Current session name: "idle"' });
++    const row = deps.db.query(`SELECT bot_id FROM sessions WHERE id = ?`).get("sess-y") as { bot_id: string };
++    expect(row.bot_id).toBe("bot-02");
++  });
++
++  test("neither cwd nor bot_id resolve to a known bot -> clear error, nothing written", () => {
++    const deps = baseDeps();
++    expect(() =>
++      handleSessionStarted({ bot_id: "ghost-bot", session_id: "sess-z", source: "startup", cwd: "C:/nowhere" }, deps),
++    ).toThrow(/tidak cocok workspace bot manapun/);
++    expect(deps.db.query(`SELECT * FROM sessions WHERE id = ?`).get("sess-z")).toBeNull();
++  });
++
++  test("no `bots` row pre-populated (production reality today) -> FK satisfied by handler's own upsert, not a crash", () => {
++    const deps = baseDeps();
++    expect(deps.db.query(`SELECT * FROM bots WHERE id = ?`).get("bot-01")).toBeNull();
++    expect(() =>
++      handleSessionStarted({ bot_id: "bot-01", session_id: "sess-fk", source: "startup", cwd: "C:/workspace/bot-01" }, deps),
++    ).not.toThrow();
++    expect(deps.db.query(`SELECT * FROM bots WHERE id = ?`).get("bot-01")).not.toBeNull();
++  });
++
++  test("existing session_id previously marked 'resetting' with a custom name -> lifecycle flips to 'idle', name/started_at preserved (fix M4)", () => {
++    const deps = baseDeps();
++    deps.db.run(`INSERT INTO bots (id, workspace) VALUES (?, ?)`, ["bot-01", "C:/workspace/bot-01"]);
++    deps.db.run(`INSERT INTO sessions (id, bot_id, name, lifecycle, started_at) VALUES (?, ?, ?, ?, ?)`, [
++      "sess-resume",
++      "bot-01",
++      "my-renamed-session",
++      "resetting",
++      1000,
++    ]);
++
++    const result = handleSessionStarted({ bot_id: "bot-01", session_id: "sess-resume", source: "clear", cwd: "C:/workspace/bot-01" }, deps);
++
++    expect(result).toEqual({ additionalContext: 'Current session name: "my-renamed-session"' });
++    const row = deps.db.query(`SELECT name, lifecycle, started_at FROM sessions WHERE id = ?`).get("sess-resume");
++    expect(row).toEqual({ name: "my-renamed-session", lifecycle: "idle", started_at: 1000 });
++  });
++
++  test("releases the resolved bot's supervisor barrier via onSessionStarted() (fake supervisor)", () => {
++    let released = 0;
++    const supervisors = new Map([["bot-01", { onSessionStarted: () => { released += 1; } }]]);
++    const deps = baseDeps({ supervisors });
++
++    handleSessionStarted({ bot_id: "bot-01", session_id: "sess-barrier", source: "startup", cwd: "C:/workspace/bot-01" }, deps);
++
++    expect(released).toBe(1);
++  });
++
++  test("only the resolved bot's supervisor is released, not another bot's", () => {
++    const released: string[] = [];
++    const supervisors = new Map([
++      ["bot-01", { onSessionStarted: () => released.push("bot-01") }],
++      ["bot-02", { onSessionStarted: () => released.push("bot-02") }],
++    ]);
++    const deps = baseDeps({ supervisors });
++
++    handleSessionStarted({ bot_id: "bot-02", session_id: "sess-barrier-2", source: "startup", cwd: "C:/workspace/bot-02" }, deps);
++
++    expect(released).toEqual(["bot-02"]);
++  });
++
++  test("no `supervisors` dep wired -> barrier release silently no-ops (row still written, reply still returned)", () => {
++    const deps = baseDeps();
++    expect(() =>
++      handleSessionStarted({ bot_id: "bot-01", session_id: "sess-no-supervisor", source: "startup", cwd: "C:/workspace/bot-01" }, deps),
++    ).not.toThrow();
++    expect(deps.db.query(`SELECT * FROM sessions WHERE id = ?`).get("sess-no-supervisor")).not.toBeNull();
++  });
++
++  test("bad params shape (missing session_id) -> zod error, nothing written", () => {
++    const deps = baseDeps();
++    expect(() => handleSessionStarted({ bot_id: "bot-01", source: "startup", cwd: "C:/workspace/bot-01" }, deps)).toThrow();
++  });
++});

@@ -1,0 +1,1597 @@
+== stat (scope C1) ==
+ packages/telegram-adapter/package.json             |   6 +-
+ packages/telegram-adapter/src/album-buffer.ts      |  94 ++++++++
+ packages/telegram-adapter/src/buttons.ts           | 129 +++++++++++
+ packages/telegram-adapter/src/chunk.ts             | 118 ++++++++++
+ packages/telegram-adapter/src/index.ts             |   8 +-
+ packages/telegram-adapter/src/markdown.ts          |  93 ++++++++
+ packages/telegram-adapter/src/paginated-picker.ts  |  88 ++++++++
+ .../telegram-adapter/test/album-buffer.test.ts     | 245 +++++++++++++++++++++
+ packages/telegram-adapter/test/buttons.test.ts     | 234 ++++++++++++++++++++
+ packages/telegram-adapter/test/chunk.test.ts       | 161 ++++++++++++++
+ packages/telegram-adapter/test/markdown.test.ts    | 143 ++++++++++++
+ .../telegram-adapter/test/paginated-picker.test.ts | 186 ++++++++++++++++
+ 12 files changed, 1502 insertions(+), 3 deletions(-)
+
+== diff ==
+diff --git a/packages/telegram-adapter/package.json b/packages/telegram-adapter/package.json
+index 9654915..029576c 100644
+--- a/packages/telegram-adapter/package.json
++++ b/packages/telegram-adapter/package.json
+@@ -1,7 +1,11 @@
+ {
+   "name": "@mirza-harness/telegram-adapter",
+   "version": "0.0.1",
+   "private": true,
+   "type": "module",
+-  "exports": { ".": "./src/index.ts" }
++  "exports": { ".": "./src/index.ts" },
++  "dependencies": {
++    "grammy": "^1.21.0",
++    "telegramify-markdown": "^1.3.3"
++  }
+ }
+diff --git a/packages/telegram-adapter/src/album-buffer.ts b/packages/telegram-adapter/src/album-buffer.ts
+new file mode 100644
+index 0000000..2c00422
+--- /dev/null
++++ b/packages/telegram-adapter/src/album-buffer.ts
+@@ -0,0 +1,94 @@
++// Ported 1:1 from plugins/telegram/album-buffer.ts (mirza-marketplace).
++// Only import/style conventions adapted (semicolons, double quotes); logic untouched.
++
++export interface AlbumBufferOpts<T> {
++  debounceMs: number;
++  hardCapMs: number;
++  maxItems: number;
++  onFlush: (key: string, items: T[]) => Promise<void> | void;
++}
++
++export interface AlbumBuffer<T> {
++  add: (key: string, item: T) => void;
++  size: () => number;
++  drainAll: () => Promise<void>;
++}
++
++interface Bucket<T> {
++  items: T[];
++  debounceTimer: ReturnType<typeof setTimeout>;
++  hardTimer: ReturnType<typeof setTimeout>;
++}
++
++export function createAlbumBuffer<T>(opts: AlbumBufferOpts<T>): AlbumBuffer<T> {
++  const buckets = new Map<string, Bucket<T>>();
++
++  function flush(key: string): void {
++    const bucket = buckets.get(key);
++    if (!bucket) return;
++    buckets.delete(key);
++    clearTimeout(bucket.debounceTimer);
++    clearTimeout(bucket.hardTimer);
++    try {
++      const ret = opts.onFlush(key, bucket.items);
++      if (ret && typeof (ret as Promise<void>).then === "function") {
++        (ret as Promise<void>).catch(err => {
++          console.error(`[album-buffer] onFlush rejected for key=${key}:`, err);
++        });
++      }
++    } catch (err) {
++      console.error(`[album-buffer] onFlush threw for key=${key}:`, err);
++    }
++  }
++
++  function add(key: string, item: T): void {
++    const existing = buckets.get(key);
++    if (existing) {
++      existing.items.push(item);
++      clearTimeout(existing.debounceTimer);
++      existing.debounceTimer = setTimeout(() => flush(key), opts.debounceMs);
++      if (existing.items.length >= opts.maxItems) {
++        flush(key);
++      }
++      return;
++    }
++    const bucket: Bucket<T> = {
++      items: [item],
++      debounceTimer: setTimeout(() => flush(key), opts.debounceMs),
++      hardTimer: setTimeout(() => flush(key), opts.hardCapMs),
++    };
++    buckets.set(key, bucket);
++    if (bucket.items.length >= opts.maxItems) {
++      flush(key);
++    }
++  }
++
++  function size(): number {
++    return buckets.size;
++  }
++
++  async function drainAll(): Promise<void> {
++    const pendingKeys = [...buckets.keys()];
++    const pendingPromises: Array<Promise<unknown>> = [];
++    for (const key of pendingKeys) {
++      const bucket = buckets.get(key);
++      if (!bucket) continue;
++      buckets.delete(key);
++      clearTimeout(bucket.debounceTimer);
++      clearTimeout(bucket.hardTimer);
++      try {
++        const ret = opts.onFlush(key, bucket.items);
++        if (ret && typeof (ret as Promise<void>).then === "function") {
++          pendingPromises.push((ret as Promise<unknown>).catch(err => {
++            console.error(`[album-buffer] drainAll onFlush rejected key=${key}:`, err);
++          }));
++        }
++      } catch (err) {
++        console.error(`[album-buffer] drainAll onFlush threw key=${key}:`, err);
++      }
++    }
++    await Promise.all(pendingPromises);
++  }
++
++  return { add, size, drainAll };
++}
+diff --git a/packages/telegram-adapter/src/buttons.ts b/packages/telegram-adapter/src/buttons.ts
+new file mode 100644
+index 0000000..b897bc5
+--- /dev/null
++++ b/packages/telegram-adapter/src/buttons.ts
+@@ -0,0 +1,129 @@
++// Ported 1:1 from plugins/telegram/buttons.ts (mirza-marketplace).
++// Only import/style conventions adapted (semicolons, double quotes); logic untouched.
++// Covers SCAR-052 (callback_id shape keeps callback_data payload well under
++// Telegram's 64-byte limit once prefixed with "ai:").
++
++import { InlineKeyboard } from "grammy";
++
++const CALLBACK_ID_RE = /^[a-z0-9_]{1,32}$/;
++const MAX_LABEL_LEN = 64;
++const MAX_ROWS = 8;
++const MAX_BUTTONS_PER_ROW = 8;
++
++export const AI_CALLBACK_PREFIX = "ai:";
++
++export type ButtonSpec = { label: string; callback_id: string };
++export type ButtonRow = ButtonSpec[];
++
++export type ValidateResult =
++  | { ok: true; rows: ButtonRow[] }
++  | { ok: false; error: string };
++
++/**
++ * Validate untyped JSON input as a buttons specification.
++ * Shape: ButtonSpec[][] — outer array = rows, inner array = buttons in a row.
++ *
++ * Rules:
++ *  - 1..8 rows, each with 1..8 buttons
++ *  - label: non-empty string, max 64 chars
++ *  - callback_id: matches /^[a-z0-9_]{1,32}$/
++ *  - callback_id must be unique across the whole spec
++ */
++export function validateButtons(input: unknown): ValidateResult {
++  if (!Array.isArray(input)) return { ok: false, error: "buttons must be an array of rows" };
++  if (input.length === 0) return { ok: false, error: "buttons must contain at least one row" };
++  if (input.length > MAX_ROWS) return { ok: false, error: `too many rows (max ${MAX_ROWS})` };
++
++  const seenIds = new Set<string>();
++  const rows: ButtonRow[] = [];
++
++  for (let r = 0; r < input.length; r++) {
++    const row = input[r];
++    if (!Array.isArray(row)) return { ok: false, error: `row ${r} must be an array` };
++    if (row.length === 0) return { ok: false, error: `row ${r} is empty` };
++    if (row.length > MAX_BUTTONS_PER_ROW) {
++      return { ok: false, error: `row ${r} has too many buttons (max ${MAX_BUTTONS_PER_ROW})` };
++    }
++
++    const parsedRow: ButtonRow = [];
++    for (let c = 0; c < row.length; c++) {
++      const btn = row[c] as Record<string, unknown> | null;
++      if (typeof btn !== "object" || btn === null) {
++        return { ok: false, error: `row ${r} col ${c}: button must be an object` };
++      }
++      const label = btn.label;
++      const callback_id = btn.callback_id;
++
++      if (typeof label !== "string" || label.length === 0) {
++        return { ok: false, error: `row ${r} col ${c}: label must be a non-empty string` };
++      }
++      if (label.length > MAX_LABEL_LEN) {
++        return { ok: false, error: `row ${r} col ${c}: label too long (max ${MAX_LABEL_LEN})` };
++      }
++      if (typeof callback_id !== "string") {
++        return { ok: false, error: `row ${r} col ${c}: callback_id must be a string` };
++      }
++      if (!CALLBACK_ID_RE.test(callback_id)) {
++        return {
++          ok: false,
++          error: `row ${r} col ${c}: callback_id "${callback_id}" must match /^[a-z0-9_]{1,32}$/`,
++        };
++      }
++      if (seenIds.has(callback_id)) {
++        return { ok: false, error: `duplicate callback_id "${callback_id}"` };
++      }
++      seenIds.add(callback_id);
++      parsedRow.push({ label, callback_id });
++    }
++    rows.push(parsedRow);
++  }
++
++  return { ok: true, rows };
++}
++
++/**
++ * Parse the data payload of an inline-button callback for AI-issued buttons.
++ * Returns null if the payload is not an ai-namespace callback or is malformed.
++ */
++export function parseAiCallbackData(data: string): { callback_id: string } | null {
++  if (!data.startsWith(AI_CALLBACK_PREFIX)) return null;
++  const callback_id = data.slice(AI_CALLBACK_PREFIX.length);
++  if (!CALLBACK_ID_RE.test(callback_id)) return null;
++  return { callback_id };
++}
++
++/**
++ * Build a grammy InlineKeyboard from validated button rows.
++ * Each button's callback_data is prefixed with `ai:` for namespace isolation
++ * from the permission flow (`perm:*`).
++ */
++export function buildKeyboard(rows: ButtonRow[]): InlineKeyboard {
++  const kb = new InlineKeyboard();
++  for (let r = 0; r < rows.length; r++) {
++    for (const btn of rows[r]) {
++      kb.text(btn.label, `${AI_CALLBACK_PREFIX}${btn.callback_id}`);
++    }
++    if (r < rows.length - 1) kb.row();
++  }
++  return kb;
++}
++
++/**
++ * Find the button label whose callback_data matches the given payload, by
++ * scanning the inline_keyboard structure of a Telegram message. Returns
++ * undefined if not found (e.g., the original buttons were edited away).
++ */
++export function findButtonLabel(
++  inlineKeyboard: ReadonlyArray<ReadonlyArray<{ text?: string; callback_data?: string }>> | undefined,
++  callbackData: string,
++): string | undefined {
++  if (!inlineKeyboard) return undefined;
++  for (const row of inlineKeyboard) {
++    for (const btn of row) {
++      if (btn.callback_data === callbackData && typeof btn.text === "string") {
++        return btn.text;
++      }
++    }
++  }
++  return undefined;
++}
+diff --git a/packages/telegram-adapter/src/chunk.ts b/packages/telegram-adapter/src/chunk.ts
+new file mode 100644
+index 0000000..355e389
+--- /dev/null
++++ b/packages/telegram-adapter/src/chunk.ts
+@@ -0,0 +1,118 @@
++// Extracted from plugins/telegram/server.ts (mirza-marketplace):
++//   - chunkText() ports chunk() at server.ts:477-496 (renamed only).
++//   - planOutbound() ports the chunk-planning block at server.ts:~702-800
++//     (the `format === 'markdown'` branch of the `reply` tool handler).
++// Turned into a standalone pure module — no network I/O, no grammy/access
++// dependency. The caller (adapter's send layer) is responsible for actually
++// calling bot.api.sendMessage per part and, on a MarkdownV2 parse-entity
++// error, retrying with fallback(part) — mirroring server.ts's try/catch
++// around bot.api.sendMessage.
++
++import { commonMarkToMarkdownV2 } from "./markdown";
++
++/** Telegram's hard message-length ceiling (SCAR-046). */
++export const MAX_CHUNK_LIMIT = 4096;
++
++export type ChunkMode = "length" | "newline";
++export type ReplyFormat = "text" | "markdown" | "markdownv2";
++
++/**
++ * Split `text` into pieces no longer than `limit`.
++ *
++ * mode 'length': hard-cuts at exactly `limit` chars.
++ * mode 'newline': prefers the last paragraph break (\n\n), then line break
++ * (\n), then space, within the limit window; falls back to a hard cut at
++ * `limit` if none of those are found past the halfway point.
++ */
++export function chunkText(text: string, limit: number, mode: ChunkMode): string[] {
++  if (text.length <= limit) return [text];
++  const out: string[] = [];
++  let rest = text;
++  while (rest.length > limit) {
++    let cut = limit;
++    if (mode === "newline") {
++      // Prefer the last double-newline (paragraph), then single newline,
++      // then space. Fall back to hard cut.
++      const para = rest.lastIndexOf("\n\n", limit);
++      const line = rest.lastIndexOf("\n", limit);
++      const space = rest.lastIndexOf(" ", limit);
++      cut = para > limit / 2 ? para : line > limit / 2 ? line : space > 0 ? space : limit;
++    }
++    out.push(rest.slice(0, cut));
++    rest = rest.slice(cut).replace(/^\n+/, "");
++  }
++  if (rest) out.push(rest);
++  return out;
++}
++
++export interface OutboundPart {
++  text: string;
++  parse_mode?: "MarkdownV2";
++}
++
++export interface PlanOutboundResult {
++  parts: OutboundPart[];
++  /**
++   * Given a part returned in `parts`, returns the plain-text (unconverted)
++   * fallback to send instead — for use when the actual Telegram send throws
++   * a "can't parse entities" MarkdownV2 error (SCAR-048). For format:'text'
++   * or already-plain parts this simply returns the same text.
++   */
++  fallback: (part: OutboundPart) => string;
++}
++
++/**
++ * Plan how to split+render `text` for a Telegram reply.
++ *
++ * format 'text': plain chunking via chunkText(text, limit, mode); no
++ * parse_mode, no conversion.
++ *
++ * format 'markdownv2': raw passthrough chunked with chunkText(text, limit,
++ * mode); caller is assumed to have already escaped MarkdownV2 themselves
++ * (legacy path) — every part gets parse_mode 'MarkdownV2' (SCAR-049).
++ *
++ * format 'markdown': the auto-convert path. The RAW CommonMark is chunked
++ * FIRST, against a margin of floor(limit/2) rather than the full limit, and
++ * paragraph-boundary splitting ('newline' mode) is forced regardless of the
++ * caller's chunk mode. Only after chunking is each raw piece converted to
++ * MarkdownV2 individually (SCAR-047). This order matters: converting the
++ * whole text before chunking can split a MarkdownV2 entity across the cut
++ * (`*bold` opened in chunk 1, closed in chunk 2), which Telegram rejects.
++ * Chunking the raw text at half the limit leaves headroom for escaping to
++ * inflate the string without the converted chunk blowing past `limit`; if a
++ * pathological escape blow-up still pushes a chunk over `limit`, that piece
++ * is planned as plain text (no parse_mode) instead of failing (SCAR-048).
++ */
++export function planOutbound(
++  text: string,
++  format: ReplyFormat,
++  limit: number,
++  mode: ChunkMode = "length",
++): PlanOutboundResult {
++  const rawByPart = new WeakMap<OutboundPart, string>();
++  let parts: OutboundPart[];
++
++  if (format === "markdown") {
++    const margin = Math.max(1, Math.floor(limit / 2));
++    // Paragraph-boundary splitting keeps inline entities intact far more
++    // often than a hard length cut, so force 'newline' here.
++    parts = chunkText(text, margin, "newline").map(raw => {
++      const converted = commonMarkToMarkdownV2(raw);
++      const part: OutboundPart =
++        converted.length <= limit ? { text: converted, parse_mode: "MarkdownV2" } : { text: raw };
++      rawByPart.set(part, raw);
++      return part;
++    });
++  } else {
++    const mv2 = format === "markdownv2";
++    parts = chunkText(text, limit, mode).map(t => {
++      const part: OutboundPart = mv2 ? { text: t, parse_mode: "MarkdownV2" } : { text: t };
++      rawByPart.set(part, t);
++      return part;
++    });
++  }
++
++  const fallback = (part: OutboundPart): string => rawByPart.get(part) ?? part.text;
++
++  return { parts, fallback };
++}
+diff --git a/packages/telegram-adapter/src/index.ts b/packages/telegram-adapter/src/index.ts
+index 8f621b5..6391f43 100644
+--- a/packages/telegram-adapter/src/index.ts
++++ b/packages/telegram-adapter/src/index.ts
+@@ -1,2 +1,6 @@
+-// @mirza-harness/telegram-adapter — skeleton; diisi pada fase berikutnya (design doc §9).
+-export const PKG = "telegram-adapter";
++// @mirza-harness/telegram-adapter — pure telegram modules (Task C1, Fase 1).
++export * from "./album-buffer";
++export * from "./buttons";
++export * from "./markdown";
++export * from "./paginated-picker";
++export * from "./chunk";
+diff --git a/packages/telegram-adapter/src/markdown.ts b/packages/telegram-adapter/src/markdown.ts
+new file mode 100644
+index 0000000..c6d0d2c
+--- /dev/null
++++ b/packages/telegram-adapter/src/markdown.ts
+@@ -0,0 +1,93 @@
++// Ported from plugins/telegram/markdown.ts (mirza-marketplace), with FUNC-2 fix
++// applied during porting (see wrapGfmTablesAsCodeBlocks below). Only
++// import/style conventions adapted otherwise (semicolons, double quotes).
++
++import telegramifyMarkdown from "telegramify-markdown";
++
++/**
++ * FUNC-2 fix: telegramify-markdown fails silently on GFM tables — it emits
++ * the pipe/dash table syntax verbatim without escaping the MarkdownV2
++ * special characters (`|`, `-`, `.` etc.) that appear in table cells and
++ * separator rows. Telegram then rejects the message ("can't parse entities")
++ * with no indication the table was the cause.
++ *
++ * Fix: pre-process the input — detect GFM table blocks (a header row
++ * followed by a `---`/`:--:` separator row) that live outside existing
++ * fenced code blocks, and wrap each one in a ``` fenced code block before
++ * handing the text to telegramify-markdown. Inside a fence, MarkdownV2 only
++ * requires escaping backslash/backtick, so the pipes and dashes survive
++ * untouched and Telegram renders the table as monospace text instead of the
++ * message failing to send.
++ */
++function isTableSeparatorRow(line: string): boolean {
++  return /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(line) && line.includes("-");
++}
++
++function isPotentialTableRow(line: string): boolean {
++  return line.includes("|") && line.trim().length > 0;
++}
++
++function wrapGfmTablesAsCodeBlocks(input: string): string {
++  const lines = input.split("\n");
++  const out: string[] = [];
++  let inFence = false;
++  let i = 0;
++
++  while (i < lines.length) {
++    const line = lines[i]!;
++
++    if (/^\s*```/.test(line)) {
++      inFence = !inFence;
++      out.push(line);
++      i++;
++      continue;
++    }
++
++    if (
++      !inFence &&
++      isPotentialTableRow(line) &&
++      i + 1 < lines.length &&
++      isTableSeparatorRow(lines[i + 1]!)
++    ) {
++      const tableLines = [line, lines[i + 1]!];
++      let j = i + 2;
++      while (j < lines.length && lines[j]!.trim() !== "" && lines[j]!.includes("|")) {
++        tableLines.push(lines[j]!);
++        j++;
++      }
++      out.push("```");
++      out.push(...tableLines);
++      out.push("```");
++      i = j;
++      continue;
++    }
++
++    out.push(line);
++    i++;
++  }
++
++  return out.join("\n");
++}
++
++/**
++ * Convert a CommonMark-style string into Telegram MarkdownV2.
++ *
++ * The point is to free the AI from remembering MarkdownV2's escape rules
++ * (every `. - ( ) ! +` etc. outside markup must be backslash-escaped or the
++ * Telegram API rejects the message with HTTP 400). The AI writes normal
++ * markdown — **bold**, *italic*, `inline code`, fenced code blocks, links —
++ * and this function produces a string the server can hand to `sendMessage`
++ * with `parse_mode: 'MarkdownV2'`.
++ *
++ * Backed by the `telegramify-markdown` package (remark-based). GFM tables are
++ * pre-wrapped in code fences first — see wrapGfmTablesAsCodeBlocks (FUNC-2).
++ */
++export function commonMarkToMarkdownV2(input: string): string {
++  // Library throws on empty/null in some versions — short-circuit defensively
++  // so the reply tool doesn't surface a confusing error for an empty message.
++  if (!input) return "";
++  // "keep" matches the source plugin's behavior of calling the library with
++  // no second argument (its untyped JS default) — pinned explicitly here to
++  // satisfy this repo's strict tsc --noEmit, no behavior change intended.
++  return telegramifyMarkdown(wrapGfmTablesAsCodeBlocks(input), "keep");
++}
+diff --git a/packages/telegram-adapter/src/paginated-picker.ts b/packages/telegram-adapter/src/paginated-picker.ts
+new file mode 100644
+index 0000000..b8270a5
+--- /dev/null
++++ b/packages/telegram-adapter/src/paginated-picker.ts
+@@ -0,0 +1,88 @@
++// Ported 1:1 from plugins/telegram/paginated-picker.ts (mirza-marketplace).
++// Only import/style conventions adapted (semicolons, double quotes); logic untouched.
++
++/**
++ * Pure helper that renders one page of a Telegram inline-keyboard picker.
++ *
++ * Used by /switch, /delete, and /archive in meta-commands.ts. All three
++ * pickers share the layout below. Keeping the renderer in one place avoids
++ * drift between commands.
++ *
++ *   [session label …]      } up to MAX_SESSIONS_PER_PAGE single-cell rows
++ *   …
++ *   [⬅️ Prev] [📄 N/M] [Next ➡️]    nav row — Prev omitted on page 1,
++ *                                    Next omitted on last page,
++ *                                    whole row omitted when totalPages === 1.
++ *   [❌ Cancel]                      always last row.
++ *
++ * The page indicator button uses a no-op callback (`<prefix>_page_noop`) —
++ * tapping it acks silently in the callback handler.
++ */
++
++export const MAX_SESSIONS_PER_PAGE = 6;
++const MAX_LABEL_CHARS = 60;
++
++export interface PickerButton {
++  label: string;
++  callbackData: string;
++}
++
++export interface RenderPickerPageInput<S> {
++  /** All sessions to paginate (full set, not pre-sliced). */
++  sessions: ReadonlyArray<S>;
++  /** 1-based requested page. Clamped to [1, totalPages]. */
++  page: number;
++  /** Callback prefix WITHOUT trailing underscore, e.g. `meta:switch`. */
++  callbackPrefix: string;
++  /** Callback for the cancel button row. */
++  cancelCallback: string;
++  /** How to display a session in its row. */
++  labelOf: (s: S) => string;
++  /** How to encode the session-tap callback. */
++  sessionCallbackOf: (s: S) => string;
++}
++
++export interface RenderPickerPageOutput {
++  rows: PickerButton[][];
++  /** Clamped page actually rendered. */
++  currentPage: number;
++  /** Total pages given the session count. Minimum 1 (empty list = 1 page). */
++  totalPages: number;
++}
++
++function trimLabel(s: string): string {
++  return s.length > MAX_LABEL_CHARS ? s.slice(0, MAX_LABEL_CHARS - 1) + "…" : s;
++}
++
++export function renderPickerPage<S>(input: RenderPickerPageInput<S>): RenderPickerPageOutput {
++  const { sessions, callbackPrefix, cancelCallback, labelOf, sessionCallbackOf } = input;
++  const totalPages = Math.max(1, Math.ceil(sessions.length / MAX_SESSIONS_PER_PAGE));
++  const currentPage = Math.min(Math.max(1, input.page), totalPages);
++
++  const start = (currentPage - 1) * MAX_SESSIONS_PER_PAGE;
++  const slice = sessions.slice(start, start + MAX_SESSIONS_PER_PAGE);
++
++  const rows: PickerButton[][] = [];
++  for (const s of slice) {
++    rows.push([{ label: trimLabel(labelOf(s)), callbackData: sessionCallbackOf(s) }]);
++  }
++
++  if (totalPages > 1) {
++    const nav: PickerButton[] = [];
++    if (currentPage > 1) {
++      nav.push({ label: "⬅️ Prev", callbackData: `${callbackPrefix}_page_${currentPage - 1}` });
++    }
++    nav.push({
++      label: `📄 ${currentPage}/${totalPages}`,
++      callbackData: `${callbackPrefix}_page_noop`,
++    });
++    if (currentPage < totalPages) {
++      nav.push({ label: "Next ➡️", callbackData: `${callbackPrefix}_page_${currentPage + 1}` });
++    }
++    rows.push(nav);
++  }
++
++  rows.push([{ label: "❌ Cancel", callbackData: cancelCallback }]);
++
++  return { rows, currentPage, totalPages };
++}
+diff --git a/packages/telegram-adapter/test/album-buffer.test.ts b/packages/telegram-adapter/test/album-buffer.test.ts
+new file mode 100644
+index 0000000..9039303
+--- /dev/null
++++ b/packages/telegram-adapter/test/album-buffer.test.ts
+@@ -0,0 +1,245 @@
++// Ported 1:1 from plugins/telegram/album-buffer.test.ts (mirza-marketplace).
++// Only import path and style conventions adapted (semicolons, double quotes).
++
++import { test, expect, describe } from "bun:test";
++import { createAlbumBuffer } from "../src/album-buffer";
++
++const wait = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
++
++describe("album-buffer: debounce flush", () => {
++  test("single item flushes after debounce window", async () => {
++    const flushed: Array<{ key: string; items: number[] }> = [];
++    const buf = createAlbumBuffer<number>({
++      debounceMs: 40,
++      hardCapMs: 1000,
++      maxItems: 10,
++      onFlush: (key, items) => { flushed.push({ key, items }); },
++    });
++
++    buf.add("A", 1);
++    expect(flushed).toEqual([]);
++    await wait(80);
++    expect(flushed).toEqual([{ key: "A", items: [1] }]);
++    expect(buf.size()).toBe(0);
++  });
++});
++
++describe("album-buffer: debounce reset", () => {
++  test("3 items in window flush as single batch after last item + debounce", async () => {
++    const flushed: Array<{ key: string; items: number[] }> = [];
++    const buf = createAlbumBuffer<number>({
++      debounceMs: 40,
++      hardCapMs: 1000,
++      maxItems: 10,
++      onFlush: (key, items) => { flushed.push({ key, items }); },
++    });
++
++    buf.add("A", 1);
++    await wait(20);
++    buf.add("A", 2);
++    await wait(20);
++    buf.add("A", 3);
++    expect(flushed).toEqual([]); // total elapsed ~40ms, debounce reset means we should not have flushed yet
++    await wait(80);
++    expect(flushed).toEqual([{ key: "A", items: [1, 2, 3] }]);
++  });
++});
++
++describe("album-buffer: hard cap", () => {
++  test("continuous stream flushes at hardCapMs even though debounce keeps resetting", async () => {
++    const flushed: Array<{ key: string; items: number[] }> = [];
++    const buf = createAlbumBuffer<number>({
++      debounceMs: 80,
++      hardCapMs: 200,
++      maxItems: 100,
++      onFlush: (key, items) => { flushed.push({ key, items }); },
++    });
++
++    // Stream items every 40ms — debounce (80ms) keeps resetting,
++    // but hard cap (200ms) should fire and flush.
++    // All 5 items land at t≈0,40,80,120,160 — all before the 200ms hard cap.
++    const t0 = Date.now();
++    buf.add("A", 1);
++    await wait(40); buf.add("A", 2);
++    await wait(40); buf.add("A", 3);
++    await wait(40); buf.add("A", 4);
++    await wait(40); buf.add("A", 5);
++    // Total elapsed ~160ms — wait another 100ms for hard cap (200ms) to fire.
++    await wait(100);
++    const elapsed = Date.now() - t0;
++
++    expect(flushed.length).toBe(1);
++    expect(flushed[0].key).toBe("A");
++    expect(flushed[0].items.length).toBe(5);
++    expect(elapsed).toBeLessThan(400); // sanity: didn't wait debounce
++    expect(buf.size()).toBe(0);
++  });
++});
++
++describe("album-buffer: max items", () => {
++  test("reaching maxItems flushes immediately without waiting debounce", async () => {
++    const flushed: Array<{ key: string; items: number[] }> = [];
++    const buf = createAlbumBuffer<number>({
++      debounceMs: 1000, // intentionally long
++      hardCapMs: 5000, // intentionally long
++      maxItems: 3,
++      onFlush: (key, items) => { flushed.push({ key, items }); },
++    });
++
++    const t0 = Date.now();
++    buf.add("A", 1);
++    buf.add("A", 2);
++    buf.add("A", 3);
++    // Should flush before any timer fires.
++    await wait(20);
++    const elapsed = Date.now() - t0;
++
++    expect(flushed).toEqual([{ key: "A", items: [1, 2, 3] }]);
++    expect(elapsed).toBeLessThan(100); // way under debounceMs
++  });
++
++  test("item N+1 after max-flush starts a fresh bucket", async () => {
++    const flushed: Array<{ key: string; items: number[] }> = [];
++    const buf = createAlbumBuffer<number>({
++      debounceMs: 40,
++      hardCapMs: 200,
++      maxItems: 2,
++      onFlush: (key, items) => { flushed.push({ key, items }); },
++    });
++
++    buf.add("A", 1);
++    buf.add("A", 2); // triggers max-flush
++    await wait(10);
++    buf.add("A", 3); // fresh bucket
++    await wait(80);
++
++    expect(flushed).toEqual([
++      { key: "A", items: [1, 2] },
++      { key: "A", items: [3] },
++    ]);
++  });
++});
++
++describe("album-buffer: multi-key isolation", () => {
++  test("interleaved keys flush separately with correct items", async () => {
++    const flushed: Array<{ key: string; items: number[] }> = [];
++    const buf = createAlbumBuffer<number>({
++      debounceMs: 40,
++      hardCapMs: 1000,
++      maxItems: 100,
++      onFlush: (key, items) => { flushed.push({ key, items }); },
++    });
++
++    buf.add("A", 1);
++    buf.add("B", 10);
++    buf.add("A", 2);
++    buf.add("B", 20);
++    buf.add("A", 3);
++    await wait(80);
++
++    expect(flushed).toHaveLength(2);
++    const a = flushed.find(f => f.key === "A")!;
++    const b = flushed.find(f => f.key === "B")!;
++    expect(a.items).toEqual([1, 2, 3]);
++    expect(b.items).toEqual([10, 20]);
++  });
++});
++
++describe("album-buffer: drainAll", () => {
++  test("drainAll flushes all pending buckets and resolves", async () => {
++    const flushed: Array<{ key: string; items: number[] }> = [];
++    const buf = createAlbumBuffer<number>({
++      debounceMs: 1000, // long enough that nothing flushes naturally
++      hardCapMs: 5000,
++      maxItems: 100,
++      onFlush: async (key, items) => {
++        await wait(10);
++        flushed.push({ key, items });
++      },
++    });
++
++    buf.add("A", 1);
++    buf.add("B", 2);
++    buf.add("A", 3);
++    expect(buf.size()).toBe(2);
++
++    await buf.drainAll();
++
++    expect(buf.size()).toBe(0);
++    expect(flushed).toHaveLength(2);
++    expect(flushed.find(f => f.key === "A")!.items).toEqual([1, 3]);
++    expect(flushed.find(f => f.key === "B")!.items).toEqual([2]);
++  });
++
++  test("drainAll on empty buffer is no-op", async () => {
++    const buf = createAlbumBuffer<number>({
++      debounceMs: 40,
++      hardCapMs: 1000,
++      maxItems: 10,
++      onFlush: () => {},
++    });
++    await expect(buf.drainAll()).resolves.toBeUndefined();
++  });
++});
++
++describe("album-buffer: error isolation", () => {
++  test("onFlush throw does not corrupt buffer state", async () => {
++    const errors: unknown[] = [];
++    const onError = console.error;
++    console.error = (...args: unknown[]) => { errors.push(args); };
++
++    try {
++      const buf = createAlbumBuffer<number>({
++        debounceMs: 40,
++        hardCapMs: 1000,
++        maxItems: 10,
++        onFlush: () => { throw new Error("boom"); },
++      });
++
++      buf.add("A", 1);
++      await wait(80);
++
++      expect(buf.size()).toBe(0);
++      expect(errors.length).toBeGreaterThan(0);
++
++      // Buffer still functional after error.
++      let secondCalled = false;
++      const buf2 = createAlbumBuffer<number>({
++        debounceMs: 40,
++        hardCapMs: 1000,
++        maxItems: 10,
++        onFlush: () => { secondCalled = true; },
++      });
++      buf2.add("B", 2);
++      await wait(80);
++      expect(secondCalled).toBe(true);
++    } finally {
++      console.error = onError;
++    }
++  });
++
++  test("onFlush rejection (async throw) does not crash", async () => {
++    const errors: unknown[] = [];
++    const onError = console.error;
++    console.error = (...args: unknown[]) => { errors.push(args); };
++
++    try {
++      const buf = createAlbumBuffer<number>({
++        debounceMs: 40,
++        hardCapMs: 1000,
++        maxItems: 10,
++        onFlush: async () => { throw new Error("async boom"); },
++      });
++
++      buf.add("A", 1);
++      await wait(80);
++      // Give the rejected promise a tick to surface.
++      await wait(20);
++
++      expect(buf.size()).toBe(0);
++      expect(errors.length).toBeGreaterThan(0);
++    } finally {
++      console.error = onError;
++    }
++  });
++});
+diff --git a/packages/telegram-adapter/test/buttons.test.ts b/packages/telegram-adapter/test/buttons.test.ts
+new file mode 100644
+index 0000000..4cae4c0
+--- /dev/null
++++ b/packages/telegram-adapter/test/buttons.test.ts
+@@ -0,0 +1,234 @@
++// Ported 1:1 from plugins/telegram/buttons.test.ts (mirza-marketplace).
++// Only import path and style conventions adapted (semicolons, double quotes).
++
++import { describe, test, expect } from "bun:test";
++import {
++  validateButtons,
++  parseAiCallbackData,
++  buildKeyboard,
++  findButtonLabel,
++  AI_CALLBACK_PREFIX,
++} from "../src/buttons";
++
++describe("buttons: validateButtons", () => {
++  test("accepts a valid single row with two buttons", () => {
++    const r = validateButtons([
++      [
++        { label: "Yes", callback_id: "yes" },
++        { label: "No", callback_id: "no" },
++      ],
++    ]);
++    expect(r.ok).toBe(true);
++    if (r.ok) {
++      expect(r.rows.length).toBe(1);
++      expect(r.rows[0].length).toBe(2);
++      expect(r.rows[0][0]).toEqual({ label: "Yes", callback_id: "yes" });
++    }
++  });
++
++  test("accepts multi-row vertical layout", () => {
++    const r = validateButtons([
++      [{ label: "Option A", callback_id: "opt_a" }],
++      [{ label: "Option B", callback_id: "opt_b" }],
++      [{ label: "Manual", callback_id: "manual" }],
++    ]);
++    expect(r.ok).toBe(true);
++    if (r.ok) expect(r.rows.length).toBe(3);
++  });
++
++  test("rejects non-array input", () => {
++    expect(validateButtons("hello").ok).toBe(false);
++    expect(validateButtons(null).ok).toBe(false);
++    expect(validateButtons({}).ok).toBe(false);
++    expect(validateButtons(42).ok).toBe(false);
++  });
++
++  test("rejects empty rows array", () => {
++    expect(validateButtons([]).ok).toBe(false);
++  });
++
++  test("rejects empty inner row", () => {
++    expect(validateButtons([[]]).ok).toBe(false);
++  });
++
++  test("rejects non-array row", () => {
++    expect(validateButtons(["not-an-array"]).ok).toBe(false);
++  });
++
++  test("rejects button that is not an object", () => {
++    expect(validateButtons([["not-object"]]).ok).toBe(false);
++    expect(validateButtons([[42]]).ok).toBe(false);
++    expect(validateButtons([[null]]).ok).toBe(false);
++  });
++
++  test("rejects missing label", () => {
++    expect(validateButtons([[{ callback_id: "yes" }]]).ok).toBe(false);
++  });
++
++  test("rejects empty label", () => {
++    expect(validateButtons([[{ label: "", callback_id: "yes" }]]).ok).toBe(false);
++  });
++
++  test("rejects label exceeding 64 chars", () => {
++    const longLabel = "x".repeat(65);
++    expect(validateButtons([[{ label: longLabel, callback_id: "yes" }]]).ok).toBe(false);
++  });
++
++  test("accepts label exactly 64 chars", () => {
++    const maxLabel = "x".repeat(64);
++    expect(validateButtons([[{ label: maxLabel, callback_id: "yes" }]]).ok).toBe(true);
++  });
++
++  test("rejects callback_id with uppercase", () => {
++    expect(validateButtons([[{ label: "Yes", callback_id: "YES" }]]).ok).toBe(false);
++  });
++
++  test("rejects callback_id with dash", () => {
++    expect(validateButtons([[{ label: "Yes", callback_id: "opt-a" }]]).ok).toBe(false);
++  });
++
++  test("rejects callback_id with colon (would collide with namespace separator)", () => {
++    expect(validateButtons([[{ label: "Yes", callback_id: "opt:a" }]]).ok).toBe(false);
++  });
++
++  test("rejects empty callback_id", () => {
++    expect(validateButtons([[{ label: "Yes", callback_id: "" }]]).ok).toBe(false);
++  });
++
++  test("rejects callback_id exceeding 32 chars", () => {
++    const longId = "x".repeat(33);
++    expect(validateButtons([[{ label: "Yes", callback_id: longId }]]).ok).toBe(false);
++  });
++
++  test("accepts callback_id exactly 32 chars", () => {
++    const maxId = "x".repeat(32);
++    expect(validateButtons([[{ label: "Yes", callback_id: maxId }]]).ok).toBe(true);
++  });
++
++  test("rejects duplicate callback_id in same call (same row)", () => {
++    expect(
++      validateButtons([
++        [
++          { label: "A", callback_id: "opt" },
++          { label: "B", callback_id: "opt" },
++        ],
++      ]).ok,
++    ).toBe(false);
++  });
++
++  test("rejects duplicate callback_id across rows", () => {
++    expect(
++      validateButtons([
++        [{ label: "A", callback_id: "opt" }],
++        [{ label: "B", callback_id: "opt" }],
++      ]).ok,
++    ).toBe(false);
++  });
++
++  test("rejects too many rows", () => {
++    const tooMany = Array.from({ length: 9 }, (_, i) => [
++      { label: "X", callback_id: `o${i}` },
++    ]);
++    expect(validateButtons(tooMany).ok).toBe(false);
++  });
++
++  test("accepts exactly 8 rows (boundary)", () => {
++    const eightRows = Array.from({ length: 8 }, (_, i) => [
++      { label: "X", callback_id: `o${i}` },
++    ]);
++    expect(validateButtons(eightRows).ok).toBe(true);
++  });
++
++  test("rejects too many buttons per row", () => {
++    const tooMany = Array.from({ length: 9 }, (_, i) => ({
++      label: "X",
++      callback_id: `o${i}`,
++    }));
++    expect(validateButtons([tooMany]).ok).toBe(false);
++  });
++});
++
++describe("buttons: parseAiCallbackData", () => {
++  test("parses valid ai: prefix", () => {
++    expect(parseAiCallbackData("ai:yes")).toEqual({ callback_id: "yes" });
++    expect(parseAiCallbackData("ai:opt_a")).toEqual({ callback_id: "opt_a" });
++  });
++
++  test("returns null for missing prefix", () => {
++    expect(parseAiCallbackData("yes")).toBe(null);
++    expect(parseAiCallbackData("perm:allow:abc12")).toBe(null);
++  });
++
++  test("returns null for malformed callback_id", () => {
++    expect(parseAiCallbackData("ai:Y")).toBe(null); // uppercase
++    expect(parseAiCallbackData("ai:a-b")).toBe(null); // dash
++    expect(parseAiCallbackData("ai:")).toBe(null); // empty
++  });
++
++  test("returns null for callback_id too long", () => {
++    expect(parseAiCallbackData(`ai:${"x".repeat(33)}`)).toBe(null);
++  });
++
++  test("handles colon in payload conservatively", () => {
++    // 'ai:foo:bar' — extracting after first prefix would yield 'foo:bar' which
++    // fails CALLBACK_ID_RE → null. Defends against payload smuggling.
++    expect(parseAiCallbackData("ai:foo:bar")).toBe(null);
++  });
++});
++
++describe("buttons: buildKeyboard", () => {
++  test("builds keyboard with ai: prefixed callback_data", () => {
++    const kb = buildKeyboard([
++      [
++        { label: "Yes", callback_id: "yes" },
++        { label: "No", callback_id: "no" },
++      ],
++    ]);
++    const json = kb.inline_keyboard;
++    expect(json.length).toBe(1); // 1 row
++    expect(json[0].length).toBe(2); // 2 buttons
++    expect(json[0][0]).toMatchObject({ text: "Yes", callback_data: "ai:yes" });
++    expect(json[0][1]).toMatchObject({ text: "No", callback_data: "ai:no" });
++  });
++
++  test("multi-row keyboard", () => {
++    const kb = buildKeyboard([
++      [{ label: "A", callback_id: "a" }],
++      [{ label: "B", callback_id: "b" }],
++    ]);
++    expect(kb.inline_keyboard.length).toBe(2);
++    expect(kb.inline_keyboard[0][0]).toMatchObject({ text: "A", callback_data: "ai:a" });
++    expect(kb.inline_keyboard[1][0]).toMatchObject({ text: "B", callback_data: "ai:b" });
++  });
++});
++
++describe("buttons: findButtonLabel", () => {
++  test("finds matching button label", () => {
++    const kb = [
++      [{ text: "Yes", callback_data: "ai:yes" }, { text: "No", callback_data: "ai:no" }],
++    ];
++    expect(findButtonLabel(kb, "ai:no")).toBe("No");
++    expect(findButtonLabel(kb, "ai:yes")).toBe("Yes");
++  });
++
++  test("returns undefined when not found", () => {
++    const kb = [[{ text: "Yes", callback_data: "ai:yes" }]];
++    expect(findButtonLabel(kb, "ai:no")).toBeUndefined();
++  });
++
++  test("returns undefined when keyboard is undefined", () => {
++    expect(findButtonLabel(undefined, "ai:yes")).toBeUndefined();
++  });
++
++  test("skips buttons without text or callback_data", () => {
++    const kb = [[{ text: "Yes" }, { callback_data: "ai:no" }]];
++    expect(findButtonLabel(kb, "ai:no")).toBeUndefined();
++    expect(findButtonLabel(kb, "ai:yes")).toBeUndefined();
++  });
++});
++
++describe("buttons: AI_CALLBACK_PREFIX", () => {
++  test("is the canonical prefix", () => {
++    expect(AI_CALLBACK_PREFIX).toBe("ai:");
++  });
++});
+diff --git a/packages/telegram-adapter/test/chunk.test.ts b/packages/telegram-adapter/test/chunk.test.ts
+new file mode 100644
+index 0000000..7bc5786
+--- /dev/null
++++ b/packages/telegram-adapter/test/chunk.test.ts
+@@ -0,0 +1,161 @@
++// New test suite for chunk.ts — extracted from plugins/telegram/server.ts
++// (chunk() at server.ts:477-496, chunk-planning block at server.ts:~702-800).
++// Covers SCAR-046 (hard-cap + paragraph-boundary preference), SCAR-047 (raw
++// chunking at margin=limit/2 before conversion, keeping entities intact),
++// SCAR-048 (fallback to plain text — both the automatic pre-emptive
++// fallback and the caller-invoked fallback() escape hatch), and SCAR-049
++// (format 'markdown' auto-convert vs 'markdownv2' raw passthrough).
++
++import { describe, test, expect } from "bun:test";
++import { chunkText, planOutbound, MAX_CHUNK_LIMIT } from "../src/chunk";
++
++describe("chunkText: SCAR-046 hard cap + boundary preference", () => {
++  test("text at or under the limit is returned as a single piece", () => {
++    expect(chunkText("hello", 10, "length")).toEqual(["hello"]);
++    expect(chunkText("x".repeat(10), 10, "length")).toEqual(["x".repeat(10)]);
++  });
++
++  test("mode 'length' hard-cuts every piece to exactly the limit (except the tail)", () => {
++    const text = "x".repeat(25);
++    const out = chunkText(text, 10, "length");
++    expect(out).toEqual(["x".repeat(10), "x".repeat(10), "x".repeat(5)]);
++    for (const piece of out) expect(piece.length).toBeLessThanOrEqual(10);
++  });
++
++  test("mode 'newline' prefers a paragraph break (\\n\\n) over a hard cut", () => {
++    const text = "A".repeat(10) + "\n\n" + "B".repeat(10);
++    const out = chunkText(text, 15, "newline");
++    expect(out).toEqual(["A".repeat(10), "B".repeat(10)]);
++  });
++
++  test("mode 'newline' prefers a single newline over a space within the same window", () => {
++    // "AAA BBB\nCCC" — both a space (idx 3) and a newline (idx 7) sit inside
++    // the limit window; the newline should win.
++    const text = "AAA BBB\nCCC";
++    const out = chunkText(text, 9, "newline");
++    expect(out).toEqual(["AAA BBB", "CCC"]);
++  });
++
++  test("mode 'newline' falls back to a space when no newline is available", () => {
++    const text = "AAAAAA BBBBBB";
++    const out = chunkText(text, 8, "newline");
++    expect(out).toEqual(["AAAAAA", " BBBBBB"]);
++  });
++
++  test("mode 'newline' hard-cuts at the limit when no whitespace boundary exists", () => {
++    const text = "X".repeat(20);
++    const out = chunkText(text, 8, "newline");
++    expect(out).toEqual(["X".repeat(8), "X".repeat(8), "X".repeat(4)]);
++  });
++
++  test("MAX_CHUNK_LIMIT is Telegram's 4096-char hard cap", () => {
++    expect(MAX_CHUNK_LIMIT).toBe(4096);
++  });
++
++  test("no chunk ever exceeds MAX_CHUNK_LIMIT, for either mode, on a long text", () => {
++    const paragraph = "word ".repeat(50) + "\n\n"; // ~252 chars incl. break
++    const longText = paragraph.repeat(40); // ~10k chars
++    for (const mode of ["length", "newline"] as const) {
++      const out = chunkText(longText, MAX_CHUNK_LIMIT, mode);
++      expect(out.length).toBeGreaterThan(1);
++      for (const piece of out) expect(piece.length).toBeLessThanOrEqual(MAX_CHUNK_LIMIT);
++      // Round-trip: re-joining recovers the original modulo the newlines the
++      // algorithm strips at each cut point.
++      expect(out.join("").length).toBeGreaterThan(0);
++    }
++  });
++});
++
++describe("planOutbound: SCAR-049 format handling", () => {
++  test("format 'text' passes chunks through with no conversion and no parse_mode", () => {
++    const { parts } = planOutbound("plain text.", "text", 100);
++    expect(parts).toEqual([{ text: "plain text." }]);
++  });
++
++  test("format 'markdown' auto-converts CommonMark to MarkdownV2", () => {
++    const { parts } = planOutbound("**bold** text.", "markdown", 100);
++    expect(parts.length).toBe(1);
++    expect(parts[0]!.parse_mode).toBe("MarkdownV2");
++    expect(parts[0]!.text).toContain("*bold*");
++    expect(parts[0]!.text).not.toContain("**");
++  });
++
++  test("format 'markdownv2' is a raw passthrough (no conversion, no double-escaping)", () => {
++    const alreadyEscaped = "already \\*escaped\\* text\\.";
++    const { parts } = planOutbound(alreadyEscaped, "markdownv2", 100);
++    expect(parts).toEqual([{ text: alreadyEscaped, parse_mode: "MarkdownV2" }]);
++  });
++});
++
++describe("planOutbound: SCAR-047 raw-first chunking at margin=limit/2", () => {
++  test("markdown format chunks the RAW text at half the limit, not the full limit", () => {
++    const bold1 = "**" + "a".repeat(20) + "**"; // 24 chars, complete entity
++    const bold2 = "**" + "b".repeat(20) + "**"; // 24 chars, complete entity
++    const text = `${bold1}\n\n${bold2}`; // 50 chars total
++
++    // Under the FULL limit (60) this text needs no splitting at all.
++    expect(chunkText(text, 60, "newline")).toEqual([text]);
++
++    // But planOutbound's markdown path chunks the raw text at margin =
++    // floor(60/2) = 30, which forces a split at the paragraph boundary.
++    const { parts } = planOutbound(text, "markdown", 60);
++    expect(parts.length).toBe(2);
++  });
++
++  test("each chunk's converted entity is complete — bold markers are not split across chunks", () => {
++    const bold1 = "**" + "a".repeat(20) + "**";
++    const bold2 = "**" + "b".repeat(20) + "**";
++    const text = `${bold1}\n\n${bold2}`;
++    const { parts } = planOutbound(text, "markdown", 60);
++
++    expect(parts.length).toBe(2);
++    expect(parts[0]!.text).toContain("a".repeat(20));
++    expect(parts[1]!.text).toContain("b".repeat(20));
++
++    for (const part of parts) {
++      // Count unescaped '*' — an odd count would mean a dangling/broken
++      // entity (the open half of a bold span landed in a different chunk).
++      const unescaped = part.text.replace(/\\\*/g, "");
++      const starCount = (unescaped.match(/\*/g) ?? []).length;
++      expect(starCount % 2).toBe(0);
++      expect(starCount).toBeGreaterThan(0);
++    }
++  });
++});
++
++describe("planOutbound: SCAR-048 plain-text fallback", () => {
++  test("pre-emptive fallback: a chunk whose conversion blows past the limit is planned as plain text", () => {
++    // 20 literal periods (no markdown structure) — telegramify-markdown
++    // escapes every '.' to '\.', roughly doubling length plus a trailing
++    // newline, so it overflows a limit set at exactly 2x the raw length.
++    const raw = ".".repeat(20);
++    const limit = 40; // margin = 20 === raw.length, so raw is NOT re-split
++    const { parts } = planOutbound(raw, "markdown", limit);
++
++    expect(parts.length).toBe(1);
++    expect(parts[0]!.parse_mode).toBeUndefined();
++    expect(parts[0]!.text).toBe(raw); // fell back to the untouched raw text
++  });
++
++  test("fallback(part) returns the original raw markdown for a successfully-converted chunk", () => {
++    const raw = "**bold** and a period.";
++    const { parts, fallback } = planOutbound(raw, "markdown", 200);
++    expect(parts.length).toBe(1);
++    expect(parts[0]!.parse_mode).toBe("MarkdownV2");
++    expect(parts[0]!.text).not.toBe(raw); // converted differs from raw
++
++    const plain = fallback(parts[0]!);
++    expect(plain).toBe(raw); // caller can resend this verbatim as plain text
++  });
++
++  test("fallback(part) is a no-op (identity) for format 'text' parts", () => {
++    const { parts, fallback } = planOutbound("plain text.", "text", 100);
++    expect(fallback(parts[0]!)).toBe("plain text.");
++  });
++
++  test("fallback(part) returns the same passthrough text for format 'markdownv2'", () => {
++    const raw = "already \\*escaped\\*";
++    const { parts, fallback } = planOutbound(raw, "markdownv2", 100);
++    expect(fallback(parts[0]!)).toBe(raw);
++  });
++});
+diff --git a/packages/telegram-adapter/test/markdown.test.ts b/packages/telegram-adapter/test/markdown.test.ts
+new file mode 100644
+index 0000000..6bef459
+--- /dev/null
++++ b/packages/telegram-adapter/test/markdown.test.ts
+@@ -0,0 +1,143 @@
++// Ported from plugins/telegram/markdown.test.ts (mirza-marketplace).
++// Import path and style conventions adapted (semicolons, double quotes).
++// FUNC-2 fix test (GFM table pre-processing) added at the bottom — new,
++// not present in the source plugin.
++
++import { describe, test, expect } from "bun:test";
++import { commonMarkToMarkdownV2 } from "../src/markdown";
++
++describe("markdown: commonMarkToMarkdownV2", () => {
++  test("returns empty string for empty input", () => {
++    expect(commonMarkToMarkdownV2("")).toBe("");
++  });
++
++  test("escapes period in plain text", () => {
++    expect(commonMarkToMarkdownV2("Hello world.")).toContain("\\.");
++  });
++
++  test("escapes parentheses in plain text", () => {
++    expect(commonMarkToMarkdownV2("a (b) c")).toContain("\\(");
++    expect(commonMarkToMarkdownV2("a (b) c")).toContain("\\)");
++  });
++
++  test("escapes hyphen in plain text", () => {
++    expect(commonMarkToMarkdownV2("A - B")).toContain("\\-");
++  });
++
++  test("escapes exclamation and bang chars", () => {
++    expect(commonMarkToMarkdownV2("hi!")).toContain("\\!");
++  });
++
++  test("converts double-asterisk bold to single-asterisk MV2 bold", () => {
++    const out = commonMarkToMarkdownV2("**bold**");
++    expect(out).toContain("*bold*");
++    expect(out).not.toContain("**");
++  });
++
++  test("converts single-asterisk italic to underscore MV2 italic", () => {
++    const out = commonMarkToMarkdownV2("Some *italic* text");
++    expect(out).toContain("_italic_");
++  });
++
++  test("preserves inline code with backticks", () => {
++    const out = commonMarkToMarkdownV2("Run `npm install`.");
++    expect(out).toContain("`npm install`");
++  });
++
++  test("preserves fenced code blocks", () => {
++    const md = "```\nconst x = 42;\nconsole.log(x);\n```";
++    const out = commonMarkToMarkdownV2(md);
++    expect(out).toContain("```");
++    expect(out).toContain("const x = 42;");
++  });
++
++  test("preserves link markup", () => {
++    const out = commonMarkToMarkdownV2("see [Google](https://google.com)");
++    expect(out).toContain("[Google](https://google.com)");
++  });
++
++  test("does not escape chars inside inline code", () => {
++    // Inside `...` Telegram treats content as literal until the closing
++    // backtick; per the MV2 spec only backslash and backtick need to be
++    // escaped inside the entity. Period etc. should NOT be wrapped.
++    const out = commonMarkToMarkdownV2("Set `x.y.z` value");
++    expect(out).toContain("`x.y.z`");
++  });
++
++  test("round-trip-ish: bold + period stays valid MV2", () => {
++    // Common failure mode pre-fix: AI writes "**Step 1.**", forgets to escape
++    // the period inside MV2, API returns 400. After conversion the period
++    // outside the bold span must be escaped.
++    const out = commonMarkToMarkdownV2("**Step 1.**");
++    // Bold span uses single asterisks in MV2
++    expect(out).toMatch(/\*Step 1\\?\.\*/);
++  });
++
++  test("handles mixed markup + special chars without crashing", () => {
++    const md =
++      "# Header\n\n" +
++      "Some **bold** with *italic*, `code`, and a [link](https://example.com).\n\n" +
++      "- Item one\n- Item two (with parens)\n\n" +
++      '```ts\nconst x = "hello";\n```\n';
++    const out = commonMarkToMarkdownV2(md);
++    // Just verify it produced output, didn't throw, and escaped at least one
++    // special character in the plain-text portion.
++    expect(out.length).toBeGreaterThan(0);
++    expect(out).toContain("\\.");
++  });
++});
++
++describe("markdown: FUNC-2 GFM table pre-processing", () => {
++  test("real GFM table is wrapped in a code fence instead of failing silently", () => {
++    const md =
++      "# Report\n\n" +
++      "| Name | Age | City |\n" +
++      "| --- | --- | --- |\n" +
++      "| Alice | 30 | NYC |\n" +
++      "| Bob | 25 | LA |\n\n" +
++      "Some text after.\n";
++    const out = commonMarkToMarkdownV2(md);
++
++    // Table survives inside a fenced code block — pipes/dashes untouched.
++    expect(out).toContain("```\n| Name | Age | City |");
++    expect(out).toContain("| --- | --- | --- |");
++    expect(out).toContain("| Alice | 30 | NYC |");
++    expect(out).toContain("| Bob | 25 | LA |");
++
++    // Fence must actually close (even number of ``` markers).
++    const fenceCount = (out.match(/```/g) ?? []).length;
++    expect(fenceCount % 2).toBe(0);
++    expect(fenceCount).toBeGreaterThanOrEqual(2);
++
++    // Text outside the table still gets normal MV2 treatment (header bolded,
++    // trailing period escaped).
++    expect(out).toContain("*Report*");
++    expect(out).toContain("Some text after\\.");
++  });
++
++  test("table with alignment markers (:---:) is also detected", () => {
++    const md =
++      "| Left | Center | Right |\n" +
++      "| :--- | :---: | ---: |\n" +
++      "| a | b | c |\n";
++    const out = commonMarkToMarkdownV2(md);
++    expect(out).toContain("```\n| Left | Center | Right |");
++    expect(out).toContain("| :--- | :---: | ---: |");
++  });
++
++  test("table inside an existing fenced code block is left alone (not double-wrapped)", () => {
++    const md =
++      "```\n" +
++      "| a | b |\n" +
++      "| --- | --- |\n" +
++      "```\n";
++    const out = commonMarkToMarkdownV2(md);
++    const fenceCount = (out.match(/```/g) ?? []).length;
++    expect(fenceCount).toBe(2); // untouched — no nested wrapping
++  });
++
++  test("prose containing a bare pipe character (not a table) is unaffected", () => {
++    const out = commonMarkToMarkdownV2("Use a | b as separator.");
++    expect(out).not.toContain("```");
++  });
++});
+diff --git a/packages/telegram-adapter/test/paginated-picker.test.ts b/packages/telegram-adapter/test/paginated-picker.test.ts
+new file mode 100644
+index 0000000..095e913
+--- /dev/null
++++ b/packages/telegram-adapter/test/paginated-picker.test.ts
+@@ -0,0 +1,186 @@
++// Ported 1:1 from plugins/telegram/paginated-picker.test.ts (mirza-marketplace).
++// Only import path and style conventions adapted (semicolons, double quotes).
++
++import { describe, test, expect } from "bun:test";
++import { renderPickerPage, MAX_SESSIONS_PER_PAGE } from "../src/paginated-picker";
++
++interface FakeSession {
++  shortId: string;
++  label: string;
++}
++
++const fakes = (n: number): FakeSession[] =>
++  Array.from({ length: n }, (_, i) => ({
++    shortId: `id${String(i).padStart(2, "0")}`,
++    label: `session ${i}`,
++  }));
++
++const labelOf = (s: FakeSession) => s.label;
++const cbOf = (s: FakeSession) => `meta:switch_${s.shortId}`;
++
++describe("renderPickerPage", () => {
++  test("MAX_SESSIONS_PER_PAGE is 6", () => {
++    expect(MAX_SESSIONS_PER_PAGE).toBe(6);
++  });
++
++  test("single page (<=6 sessions): no nav row, just sessions + cancel", () => {
++    const sessions = fakes(3);
++    const { rows, currentPage, totalPages } = renderPickerPage({
++      sessions,
++      page: 1,
++      callbackPrefix: "meta:switch",
++      cancelCallback: "meta:switch_cancel",
++      labelOf,
++      sessionCallbackOf: cbOf,
++    });
++    expect(currentPage).toBe(1);
++    expect(totalPages).toBe(1);
++    expect(rows.length).toBe(4); // 3 sessions + cancel, no nav
++    expect(rows[0]).toEqual([{ label: "session 0", callbackData: "meta:switch_id00" }]);
++    expect(rows[3]).toEqual([{ label: "❌ Cancel", callbackData: "meta:switch_cancel" }]);
++  });
++
++  test("exactly MAX (6) sessions: no nav row", () => {
++    const sessions = fakes(6);
++    const { rows, totalPages } = renderPickerPage({
++      sessions,
++      page: 1,
++      callbackPrefix: "meta:switch",
++      cancelCallback: "meta:switch_cancel",
++      labelOf,
++      sessionCallbackOf: cbOf,
++    });
++    expect(totalPages).toBe(1);
++    expect(rows.length).toBe(7); // 6 sessions + cancel
++  });
++
++  test("two pages: nav row with indicator + Next only on page 1", () => {
++    const sessions = fakes(9); // 6 + 3
++    const { rows, currentPage, totalPages } = renderPickerPage({
++      sessions,
++      page: 1,
++      callbackPrefix: "meta:switch",
++      cancelCallback: "meta:switch_cancel",
++      labelOf,
++      sessionCallbackOf: cbOf,
++    });
++    expect(currentPage).toBe(1);
++    expect(totalPages).toBe(2);
++    expect(rows.length).toBe(8); // 6 sessions + nav + cancel
++    expect(rows[6]).toEqual([
++      { label: "📄 1/2", callbackData: "meta:switch_page_noop" },
++      { label: "Next ➡️", callbackData: "meta:switch_page_2" },
++    ]);
++    expect(rows[7]).toEqual([{ label: "❌ Cancel", callbackData: "meta:switch_cancel" }]);
++  });
++
++  test("two pages: nav row with Prev + indicator on last page", () => {
++    const sessions = fakes(9);
++    const { rows, currentPage } = renderPickerPage({
++      sessions,
++      page: 2,
++      callbackPrefix: "meta:switch",
++      cancelCallback: "meta:switch_cancel",
++      labelOf,
++      sessionCallbackOf: cbOf,
++    });
++    expect(currentPage).toBe(2);
++    expect(rows.length).toBe(5); // 3 sessions on page 2 + nav + cancel
++    expect(rows[0]).toEqual([{ label: "session 6", callbackData: "meta:switch_id06" }]);
++    expect(rows[3]).toEqual([
++      { label: "⬅️ Prev", callbackData: "meta:switch_page_1" },
++      { label: "📄 2/2", callbackData: "meta:switch_page_noop" },
++    ]);
++  });
++
++  test("three pages: middle page has Prev, indicator, Next", () => {
++    const sessions = fakes(15); // 3 pages of 6/6/3
++    const { rows, currentPage, totalPages } = renderPickerPage({
++      sessions,
++      page: 2,
++      callbackPrefix: "meta:switch",
++      cancelCallback: "meta:switch_cancel",
++      labelOf,
++      sessionCallbackOf: cbOf,
++    });
++    expect(currentPage).toBe(2);
++    expect(totalPages).toBe(3);
++    expect(rows.length).toBe(8);
++    expect(rows[6]).toEqual([
++      { label: "⬅️ Prev", callbackData: "meta:switch_page_1" },
++      { label: "📄 2/3", callbackData: "meta:switch_page_noop" },
++      { label: "Next ➡️", callbackData: "meta:switch_page_3" },
++    ]);
++  });
++
++  test("out-of-range page clamps to last page", () => {
++    const sessions = fakes(9);
++    const { currentPage, totalPages } = renderPickerPage({
++      sessions,
++      page: 99,
++      callbackPrefix: "meta:switch",
++      cancelCallback: "meta:switch_cancel",
++      labelOf,
++      sessionCallbackOf: cbOf,
++    });
++    expect(totalPages).toBe(2);
++    expect(currentPage).toBe(2);
++  });
++
++  test("page < 1 clamps to 1", () => {
++    const sessions = fakes(9);
++    const { currentPage } = renderPickerPage({
++      sessions,
++      page: 0,
++      callbackPrefix: "meta:switch",
++      cancelCallback: "meta:switch_cancel",
++      labelOf,
++      sessionCallbackOf: cbOf,
++    });
++    expect(currentPage).toBe(1);
++  });
++
++  test("label longer than 60 chars is truncated with ellipsis", () => {
++    const sessions: FakeSession[] = [{ shortId: "abcdef00", label: "a".repeat(80) }];
++    const { rows } = renderPickerPage({
++      sessions,
++      page: 1,
++      callbackPrefix: "meta:switch",
++      cancelCallback: "meta:switch_cancel",
++      labelOf,
++      sessionCallbackOf: cbOf,
++    });
++    expect(rows[0]![0]!.label.length).toBeLessThanOrEqual(60);
++    expect(rows[0]![0]!.label.endsWith("…")).toBe(true);
++  });
++
++  test("zero sessions yields just the cancel row", () => {
++    const { rows, totalPages } = renderPickerPage<FakeSession>({
++      sessions: [],
++      page: 1,
++      callbackPrefix: "meta:switch",
++      cancelCallback: "meta:switch_cancel",
++      labelOf,
++      sessionCallbackOf: cbOf,
++    });
++    expect(totalPages).toBe(1);
++    expect(rows).toEqual([[{ label: "❌ Cancel", callbackData: "meta:switch_cancel" }]]);
++  });
++
++  test("callback prefix is preserved verbatim (works for delete, archive too)", () => {
++    const sessions = fakes(8);
++    const { rows } = renderPickerPage({
++      sessions,
++      page: 1,
++      callbackPrefix: "meta:archive",
++      cancelCallback: "meta:archive_cancel",
++      labelOf,
++      sessionCallbackOf: s => `meta:archive_${s.shortId}`,
++    });
++    expect(rows[0]).toEqual([{ label: "session 0", callbackData: "meta:archive_id00" }]);
++    expect(rows[6]).toEqual([
++      { label: "📄 1/2", callbackData: "meta:archive_page_noop" },
++      { label: "Next ➡️", callbackData: "meta:archive_page_2" },
++    ]);
++  });
++});

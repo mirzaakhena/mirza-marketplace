@@ -1,0 +1,964 @@
+diff --git a/packages/pty-holder/README.md b/packages/pty-holder/README.md
+new file mode 100644
+index 0000000..9af8ae5
+--- /dev/null
++++ b/packages/pty-holder/README.md
+@@ -0,0 +1,62 @@
++# @mirza-harness/pty-holder
++
++Thin child process that holds one PTY-spawned Claude Code session and speaks
++a stdio NDJSON JSON-RPC protocol with its parent — see `src/ipc.ts` for the
++wire contract (`inject` / `inject-slash` / `resize` / `shutdown` requests,
++`pty-exit` / `pty-error` / `injected` events). It has no knowledge of
++session ids, session names, or the supervisor's injection barrier/queue —
++that all lives one layer up (recon-wrapper §A).
++
++## Runtime: Node, not Bun
++
++`node-pty` is a native addon compiled against Node's ABI. It is not known to
++build/load correctly under Bun's runtime, so this package's *executable*
++code (`pty.ts`, `main.ts` — anything that imports `node-pty`) always runs
++under **Node** (`engines.node >= 18`), started via:
++
++```sh
++node --import tsx src/main.ts
++```
++
++`tsx` transpiles the `.ts` entry on the fly — the same approach the
++reference wrapper used (`plugins/pty-controller/wrapper/package.json`'s
++`"wrapper": "tsx src/wrapper.ts"` script), proven to work with node-pty. A
++compiled `dist/` build (`tsc`/`esbuild`) is an equally valid alternative for
++a future phase that wants to drop the `tsx` runtime dependency in
++production; not done here since `tsx` is already the proven path and keeps
++this package's setup identical to kode acuan.
++
++The **pure logic** — `inject.ts` (chunk/pacing math) and `ipc.ts` (zod
++schemas + envelope builders) — imports nothing native and has no such
++constraint.
++
++## Tests
++
++- `bun test packages/pty-holder` (or from the repo root: `bun test`) — unit
++  tests for `inject.ts` and `ipc.ts` only. No `node-pty` import anywhere in
++  this suite, so it's safe to run under Bun's test runner.
++- `test-integration.mjs` — a REAL end-to-end smoke test: spawns an actual PTY
++  (via `node-pty`) running a plain interactive shell (`cmd.exe` on Windows /
++  `$SHELL -i` elsewhere — deliberately **not** `claude`), then drives it
++  through this package's real `planInject` / `planInjectSlash` / `runPlan`
++  and asserts the typed text — including a body spanning multiple
++  100-code-point chunks — arrives at the shell intact. This touches the
++  native module, so it is intentionally **not** part of `bun test`; run it
++  manually from this package directory:
++
++  ```sh
++  node --import tsx test-integration.mjs
++  # or, via the package script:
++  npm run test:integration
++  bun run test:integration
++  ```
++
++## Env vars (spawn chain)
++
++- `CLAUDE_BIN` — binary to launch (default `claude`).
++- `CLAUDE_ARGS` — space-separated flags appended after `CLAUDE_BIN` (default
++  matches kode acuan: `--dangerously-skip-permissions
++  --dangerously-load-development-channels
++  plugin:telegram@mirza-marketplace`; set to `""` for vanilla `claude`).
++- `SHELL` — Unix login shell to spawn through (default `/bin/sh`); ignored on
++  Windows, which always launches `cmd.exe /c "<command>"` (SCAR-025).
+diff --git a/packages/pty-holder/package.json b/packages/pty-holder/package.json
+index 3b26796..fd82730 100644
+--- a/packages/pty-holder/package.json
++++ b/packages/pty-holder/package.json
+@@ -1,7 +1,20 @@
+ {
+   "name": "@mirza-harness/pty-holder",
+   "version": "0.0.1",
+   "private": true,
+   "type": "module",
+-  "exports": { ".": "./src/index.ts" }
++  "engines": { "node": ">=18" },
++  "exports": { ".": "./src/index.ts" },
++  "scripts": {
++    "start": "node --import tsx src/main.ts",
++    "test:integration": "node --import tsx test-integration.mjs"
++  },
++  "dependencies": {
++    "@mirza-harness/shared": "workspace:*",
++    "node-pty": "^1.1.0",
++    "zod": "^3.23.0"
++  },
++  "devDependencies": {
++    "tsx": "^4.19.0"
++  }
+ }
+diff --git a/packages/pty-holder/src/index.ts b/packages/pty-holder/src/index.ts
+index 9ed0aa4..5843122 100644
+--- a/packages/pty-holder/src/index.ts
++++ b/packages/pty-holder/src/index.ts
+@@ -1,2 +1,7 @@
+-// @mirza-harness/pty-holder — skeleton; diisi pada fase berikutnya (design doc §9).
+-export const PKG = "pty-holder";
++// @mirza-harness/pty-holder — public, node-pty-free surface (pacing logic +
++// IPC protocol schemas/types). Deliberately does NOT re-export `pty.ts` or
++// `main.ts`: those touch the native node-pty module, and this barrel must
++// stay safe to import (e.g. from a future supervisor package) without
++// dragging that in. Run the holder itself via `main.ts` (see README).
++export * from "./inject";
++export * from "./ipc";
+diff --git a/packages/pty-holder/src/inject.ts b/packages/pty-holder/src/inject.ts
+new file mode 100644
+index 0000000..5876796
+--- /dev/null
++++ b/packages/pty-holder/src/inject.ts
+@@ -0,0 +1,104 @@
++/**
++ * Pure pacing/splitting logic for typing into a PTY-hosted Claude Code
++ * session. Kept free of any node-pty import so it stays unit-testable under
++ * `bun:test` (pty.ts, which touches the native module, cannot load there —
++ * see that file's docstring and the package README).
++ *
++ * Ported from `plugins/pty-controller/wrapper/src/wrapper.ts` (kode acuan)
++ * `injectSlashCommand`/`injectText` (lines 594-628) and
++ * `plugins/pty-controller/wrapper/src/prompt-inject.ts`'s `chunkPromptText`,
++ * generalized behind the pty-holder IPC contract's two request shapes:
++ * `inject {text, submit}` and `inject-slash {command, confirmAfterMs?}`.
++ * pty.ts turns the `InjectStep[]` plans below into real `setTimeout` +
++ * `pty.write` calls against a live PTY.
++ */
++
++/** Code points per write when typing a long body (SCAR-007/020). */
++export const CHUNK_SIZE = 100;
++
++/** Pause between chunk writes so Claude Code's TUI input drains before the
++ * next slice lands — a single large write over Windows ConPTY overflows the
++ * input buffer and silently drops the head, keeping only the tail
++ * (SCAR-019). */
++export const CHUNK_DELAY_MS = 30;
++
++/**
++ * Delay between writing text and the trailing submitting `\r` (SCAR-001/029).
++ * Splitting into two writes mimics a human pause between typing and pressing
++ * Enter — CC's autocomplete picker (for namespaced commands like
++ * `/telegram:foo`) otherwise swallows a `\r` arriving in the same chunk as
++ * the text instead of treating it as a top-level submit.
++ */
++export const SUBMIT_DELAY_MS = 250;
++
++/** Bounds `inject-slash`'s optional `confirmAfterMs` is clamped into (SCAR-035). */
++export const CONFIRM_AFTER_MS_MIN = 50;
++export const CONFIRM_AFTER_MS_MAX = 5000;
++
++/** One paced write: `text` should land `delayMs` after the plan starts. */
++export interface InjectStep {
++  readonly delayMs: number;
++  readonly text: string;
++}
++
++/**
++ * Split `text` into `size`-code-point slices (default `CHUNK_SIZE`).
++ *
++ * Splits on code points (`Array.from`), not UTF-16 units, so a chunk
++ * boundary never bisects a surrogate pair — messages may contain emoji, and
++ * a split surrogate would corrupt the stream. `chunks.join('')` always
++ * reconstructs the input.
++ */
++export function chunkText(text: string, size: number = CHUNK_SIZE): string[] {
++  const codePoints = Array.from(text);
++  const out: string[] = [];
++  for (let i = 0; i < codePoints.length; i += size) out.push(codePoints.slice(i, i + size).join(""));
++  return out;
++}
++
++/** Clamp `ms` into `[CONFIRM_AFTER_MS_MIN, CONFIRM_AFTER_MS_MAX]` (SCAR-035). */
++export function clampConfirmDelay(ms: number): number {
++  return Math.min(CONFIRM_AFTER_MS_MAX, Math.max(CONFIRM_AFTER_MS_MIN, ms));
++}
++
++/**
++ * Plan the paced writes for the `inject` request: type `text` in
++ * `CHUNK_SIZE`-code-point slices, `CHUNK_DELAY_MS` apart, then — if
++ * `submit` — a trailing `\r` write `SUBMIT_DELAY_MS` after the last chunk
++ * lands.
++ *
++ * Mirrors kode acuan's `injectText` pacing exactly: `elapsed` advances by
++ * `CHUNK_DELAY_MS` after EVERY chunk (including the last), and the final
++ * `\r`'s delay is `elapsed + SUBMIT_DELAY_MS` — for empty text (no chunks)
++ * this reduces to a bare `\r` at `SUBMIT_DELAY_MS`.
++ */
++export function planInject(text: string, submit: boolean): InjectStep[] {
++  const chunks = chunkText(text, CHUNK_SIZE);
++  const steps: InjectStep[] = [];
++  let elapsed = 0;
++  for (const chunk of chunks) {
++    steps.push({ delayMs: elapsed, text: chunk });
++    elapsed += CHUNK_DELAY_MS;
++  }
++  if (submit) steps.push({ delayMs: elapsed + SUBMIT_DELAY_MS, text: "\r" });
++  return steps;
++}
++
++/**
++ * Plan the paced writes for the `inject-slash` request: write `command` in
++ * one shot (slash commands are short — no chunking needed), submit with a
++ * `\r` after `SUBMIT_DELAY_MS`, and — if `confirmAfterMs` is given — a
++ * SECOND `\r` a clamped `confirmAfterMs` after the first one lands (SCAR-035;
++ * for commands that show a follow-up confirmation prompt needing another
++ * Enter, e.g. a destructive-action y/n).
++ */
++export function planInjectSlash(command: string, confirmAfterMs?: number): InjectStep[] {
++  const steps: InjectStep[] = [
++    { delayMs: 0, text: command },
++    { delayMs: SUBMIT_DELAY_MS, text: "\r" },
++  ];
++  if (confirmAfterMs !== undefined) {
++    steps.push({ delayMs: SUBMIT_DELAY_MS + clampConfirmDelay(confirmAfterMs), text: "\r" });
++  }
++  return steps;
++}
+diff --git a/packages/pty-holder/src/ipc.ts b/packages/pty-holder/src/ipc.ts
+new file mode 100644
+index 0000000..373d0db
+--- /dev/null
++++ b/packages/pty-holder/src/ipc.ts
+@@ -0,0 +1,94 @@
++import { z } from "zod";
++import type { RpcEventT, RpcRequestT } from "@mirza-harness/shared";
++
++/**
++ * pty-holder's parent<->child wire contract: stdio NDJSON JSON-RPC, reusing
++ * `@mirza-harness/shared`'s generic `RpcRequest`/`RpcEvent` envelope
++ * (jsonrpc/id/method/params) and adding this package's own `params` shapes
++ * per method plus its event payload types.
++ *
++ * Requests (parent -> child, carry `id`, get an `RpcResponse` back):
++ *  - `inject`       {id, text, submit}            — type a body, optionally submit.
++ *  - `inject-slash` {id, command, confirmAfterMs?} — type+submit a slash command.
++ *  - `resize`       {cols, rows}                   — propagate a terminal resize.
++ *  - `shutdown`     (no params)                     — terminate the held PTY.
++ *
++ * Events (child -> parent, no `id`):
++ *  - `pty-exit`  {code, signal} — the held process exited; the holder is about to too.
++ *  - `pty-error` {message}      — the PTY failed to spawn or a write/resize threw.
++ *  - `injected`  {id}           — the requested keystrokes have been WRITTEN to the
++ *    PTY (ack level = "typed", not "Claude Code processed them semantically" —
++ *    pty-holder has no session/name/barrier knowledge, see module docs).
++ *
++ * `id` on `inject`/`inject-slash` is the caller's own correlation id, echoed
++ * back verbatim on the `injected` event once that request's write plan
++ * finishes — it is NOT the JSON-RPC envelope id (though callers may choose
++ * to reuse the same value for both).
++ */
++
++export const InjectParams = z
++  .object({
++    id: z.string().min(1),
++    text: z.string(),
++    submit: z.boolean(),
++  })
++  .strict();
++export type InjectParamsT = z.infer<typeof InjectParams>;
++
++export const InjectSlashParams = z
++  .object({
++    id: z.string().min(1),
++    command: z.string().min(1),
++    confirmAfterMs: z.number().finite().optional(),
++  })
++  .strict();
++export type InjectSlashParamsT = z.infer<typeof InjectSlashParams>;
++
++export const ResizeParams = z
++  .object({
++    cols: z.number().int().positive(),
++    rows: z.number().int().positive(),
++  })
++  .strict();
++export type ResizeParamsT = z.infer<typeof ResizeParams>;
++
++/** `shutdown` takes no params — schema exists so callers/tests have something to `.parse(undefined)` against. */
++export const ShutdownParams = z.undefined();
++
++export interface PtyExitEvent {
++  code: number;
++  /** node-pty reports the exit signal as its numeric code, not a name; `null` when the process exited normally. */
++  signal: number | null;
++}
++
++export interface PtyErrorEvent {
++  message: string;
++}
++
++export interface InjectedEvent {
++  id: string;
++}
++
++/** Serialize one NDJSON message (request/response/event) and write it with a trailing `\n`. */
++export function writeLine(stream: NodeJS.WritableStream, msg: unknown): void {
++  stream.write(JSON.stringify(msg) + "\n");
++}
++
++/** Build an `RpcEvent` envelope (jsonrpc 2.0, no id) for `writeLine`. */
++export function makeEvent(method: string, params: unknown): RpcEventT {
++  return { jsonrpc: "2.0", method, params };
++}
++
++/** Build a successful `RpcResponse` for a given request id. */
++export function makeResult(id: RpcRequestT["id"], result: unknown): { jsonrpc: "2.0"; id: RpcRequestT["id"]; result: unknown } {
++  return { jsonrpc: "2.0", id, result };
++}
++
++/** Build a failed `RpcResponse` for a given request id. */
++export function makeError(
++  id: RpcRequestT["id"],
++  code: number,
++  message: string,
++): { jsonrpc: "2.0"; id: RpcRequestT["id"]; error: { code: number; message: string } } {
++  return { jsonrpc: "2.0", id, error: { code, message } };
++}
+diff --git a/packages/pty-holder/src/main.ts b/packages/pty-holder/src/main.ts
+new file mode 100644
+index 0000000..4e59dc9
+--- /dev/null
++++ b/packages/pty-holder/src/main.ts
+@@ -0,0 +1,174 @@
++import { readFileSync } from "node:fs";
++import { dirname, join } from "node:path";
++import { fileURLToPath } from "node:url";
++import type { IPty } from "node-pty";
++import { parseRpcMessage, type RpcRequestT } from "@mirza-harness/shared";
++import { planInject, planInjectSlash } from "./inject";
++import { InjectParams, InjectSlashParams, ResizeParams, makeError, makeEvent, makeResult, writeLine } from "./ipc";
++import { runPlan, spawnClaudePty } from "./pty";
++
++/**
++ * pty-holder entrypoint: a thin child process that holds one PTY-spawned
++ * Claude Code session and speaks the `ipc.ts` NDJSON JSON-RPC protocol with
++ * its parent over stdio — nothing else. It has NO knowledge of session ids,
++ * session names, or the supervisor's injection barrier/queue (recon-wrapper
++ * §A); those all moved up a layer. Run with `node --import tsx src/main.ts`
++ * (or a build step) — see the package README for why Node, not Bun, and why
++ * `tsx` rather than a bare `.ts` entry.
++ *
++ * stdin: NDJSON `RpcRequest`s (`inject`/`inject-slash`/`resize`/`shutdown`).
++ * stdout: NDJSON `RpcResponse`s (one per request) plus events
++ * (`pty-exit`/`pty-error`/`injected`) — see ipc.ts's module doc for the full
++ * contract. Raw PTY output is intentionally NOT forwarded on stdout (that
++ * stream is reserved for the protocol); nothing in this package parses or
++ * needs the terminal's rendered contents.
++ */
++
++// VER-1: report this package's OWN version (from its package.json), never a
++// hardcoded/duplicated string.
++const __dirname = dirname(fileURLToPath(import.meta.url));
++export const VERSION: string = (JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf8")) as { version: string })
++  .version;
++
++function emitEvent(method: string, params: unknown): void {
++  writeLine(process.stdout, makeEvent(method, params));
++}
++
++function respond(id: RpcRequestT["id"], result: unknown): void {
++  writeLine(process.stdout, makeResult(id, result));
++}
++
++function respondErr(id: RpcRequestT["id"], code: number, message: string): void {
++  writeLine(process.stdout, makeError(id, code, message));
++}
++
++function errMessage(err: unknown): string {
++  return err instanceof Error ? err.message : String(err);
++}
++
++export function main(): void {
++  process.stderr.write(`pty-holder v${VERSION} starting (pid ${process.pid})\n`);
++
++  let pty: IPty;
++  try {
++    pty = spawnClaudePty();
++  } catch (err) {
++    emitEvent("pty-error", { message: errMessage(err) });
++    process.exitCode = 1;
++    return;
++  }
++  process.stderr.write(`pty-holder: spawned claude (pty pid ${pty.pid})\n`);
++
++  let shuttingDown = false;
++  function shutdown(code: number): void {
++    if (shuttingDown) return;
++    shuttingDown = true;
++    try {
++      pty.kill();
++    } catch {
++      /* already dead */
++    }
++    process.stdin.pause();
++    process.exitCode = code;
++  }
++
++  pty.onExit(({ exitCode, signal }) => {
++    emitEvent("pty-exit", { code: exitCode, signal: signal ?? null });
++    shutdown(exitCode ?? 0);
++  });
++
++  function dispatch(req: RpcRequestT): void {
++    switch (req.method) {
++      case "inject": {
++        const parsed = InjectParams.safeParse(req.params);
++        if (!parsed.success) {
++          respondErr(req.id, -32602, `invalid params for 'inject': ${parsed.error.message}`);
++          return;
++        }
++        const { id, text, submit } = parsed.data;
++        respond(req.id, { queued: true });
++        try {
++          runPlan(pty, planInject(text, submit), () => emitEvent("injected", { id }));
++        } catch (err) {
++          emitEvent("pty-error", { message: errMessage(err) });
++        }
++        return;
++      }
++      case "inject-slash": {
++        const parsed = InjectSlashParams.safeParse(req.params);
++        if (!parsed.success) {
++          respondErr(req.id, -32602, `invalid params for 'inject-slash': ${parsed.error.message}`);
++          return;
++        }
++        const { id, command, confirmAfterMs } = parsed.data;
++        respond(req.id, { queued: true });
++        try {
++          runPlan(pty, planInjectSlash(command, confirmAfterMs), () => emitEvent("injected", { id }));
++        } catch (err) {
++          emitEvent("pty-error", { message: errMessage(err) });
++        }
++        return;
++      }
++      case "resize": {
++        const parsed = ResizeParams.safeParse(req.params);
++        if (!parsed.success) {
++          respondErr(req.id, -32602, `invalid params for 'resize': ${parsed.error.message}`);
++          return;
++        }
++        try {
++          pty.resize(parsed.data.cols, parsed.data.rows);
++          respond(req.id, { ok: true });
++        } catch (err) {
++          const message = errMessage(err);
++          emitEvent("pty-error", { message });
++          respondErr(req.id, -32000, message);
++        }
++        return;
++      }
++      case "shutdown": {
++        respond(req.id, { ok: true });
++        shutdown(0);
++        return;
++      }
++      default:
++        respondErr(req.id, -32601, `unknown method '${req.method}'`);
++    }
++  }
++
++  let buf = "";
++  process.stdin.setEncoding("utf8");
++  process.stdin.on("data", chunk => {
++    buf += chunk;
++    let nl: number;
++    while ((nl = buf.indexOf("\n")) >= 0) {
++      const line = buf.slice(0, nl).trim();
++      buf = buf.slice(nl + 1);
++      if (!line) continue;
++      let msg;
++      try {
++        msg = parseRpcMessage(line);
++      } catch (err) {
++        process.stderr.write(`pty-holder: dropping malformed line from parent: ${errMessage(err)}\n`);
++        continue;
++      }
++      if ("method" in msg && "id" in msg) {
++        dispatch(msg);
++      } else {
++        process.stderr.write(`pty-holder: ignoring unexpected message shape from parent: ${line}\n`);
++      }
++    }
++  });
++
++  process.on("SIGINT", () => {
++    try {
++      pty.kill("SIGINT");
++    } catch {
++      /* already dead */
++    }
++  });
++  process.on("SIGTERM", () => shutdown(0));
++}
++
++if (import.meta.main) {
++  main();
++}
+diff --git a/packages/pty-holder/src/pty.ts b/packages/pty-holder/src/pty.ts
+new file mode 100644
+index 0000000..9b128a2
+--- /dev/null
++++ b/packages/pty-holder/src/pty.ts
+@@ -0,0 +1,81 @@
++import { spawn, type IPty } from "node-pty";
++import type { InjectStep } from "./inject";
++
++/**
++ * PTY spawn chain + paced-write executor. Touches the native `node-pty`
++ * module, so — unlike `inject.ts`/`ipc.ts` — this file is NEVER imported
++ * from a `bun:test` file (native binary, compiled for Node's ABI; loading
++ * it under Bun's test runner is unsupported — see the package README and
++ * `test-integration.mjs` for how this file is actually exercised).
++ *
++ * Spawn chain ported verbatim from kode acuan
++ * (`plugins/pty-controller/wrapper/src/wrapper.ts:553-587,255-267,368-369`,
++ * SCAR-025): Windows launches `cmd.exe /c "<claude command>"`; Unix launches
++ * an interactive login shell (`$SHELL -l -i -c "<claude command>"`) so
++ * `claude` resolves through the user's PATH/rc-files — skipping the shell
++ * triggers a `posix_spawnp ENOENT` for the npm-installed shim. Unlike the
++ * reference wrapper, this holder carries NO session/resume knowledge: it
++ * always launches the same `BASE_CLAUDE_ARGS`, never a `--resume <id>`
++ * variant — that decision belongs to whatever process is composing the
++ * command / env before spawning this child.
++ */
++
++const CLAUDE_BIN = process.env.CLAUDE_BIN ?? "claude";
++// Same defaults as kode acuan: skip the interactive permission prompts and
++// preload mirza-marketplace's telegram channel plugin. Override with
++// CLAUDE_ARGS (set to "" for vanilla `claude`, or any custom flag string).
++const DEFAULT_CLAUDE_ARGS =
++  "--dangerously-skip-permissions " + "--dangerously-load-development-channels plugin:telegram@mirza-marketplace";
++const BASE_CLAUDE_ARGS = (process.env.CLAUDE_ARGS ?? DEFAULT_CLAUDE_ARGS)
++  .trim()
++  .split(/\s+/)
++  .filter(Boolean);
++const isWindows = process.platform === "win32";
++const userShell = process.env.SHELL || "/bin/sh";
++const shell = isWindows ? "cmd.exe" : userShell;
++
++export interface SpawnPtyOptions {
++  cols?: number;
++  rows?: number;
++  cwd?: string;
++  env?: NodeJS.ProcessEnv;
++}
++
++/**
++ * Spawn Claude Code under a fresh PTY (SCAR-025 spawn chain). `cols`/`rows`
++ * default to 100x30 (kode acuan's fallback when the parent has no real
++ * terminal size to hand down); `cwd` defaults to `process.cwd()`; `env` is
++ * merged over `process.env` (parent-supplied overrides win).
++ */
++export function spawnClaudePty(opts: SpawnPtyOptions = {}): IPty {
++  const cols = opts.cols ?? 100;
++  const rows = opts.rows ?? 30;
++  const claudeCmd = [CLAUDE_BIN, ...BASE_CLAUDE_ARGS].join(" ");
++  const args = isWindows ? ["/c", claudeCmd] : ["-l", "-i", "-c", claudeCmd];
++  return spawn(shell, args, {
++    name: "xterm-256color",
++    cols,
++    rows,
++    cwd: opts.cwd ?? process.cwd(),
++    env: { ...(process.env as Record<string, string | undefined>), ...(opts.env ?? {}) },
++  });
++}
++
++/**
++ * Execute a paced write plan (from `inject.ts`'s `planInject`/`planInjectSlash`)
++ * against a live PTY: each step's `text` is written `step.delayMs` after the
++ * plan starts, and `onDone` fires once the LAST write has actually gone out
++ * — this is the "keystrokes written" ack point (the IPC `injected` event),
++ * not a claim that Claude Code has processed them.
++ */
++export function runPlan(pty: IPty, steps: readonly InjectStep[], onDone?: () => void): void {
++  if (steps.length === 0) {
++    onDone?.();
++    return;
++  }
++  for (const step of steps) {
++    setTimeout(() => pty.write(step.text), step.delayMs);
++  }
++  const lastDelayMs = steps[steps.length - 1]!.delayMs;
++  setTimeout(() => onDone?.(), lastDelayMs);
++}
+diff --git a/packages/pty-holder/test-integration.mjs b/packages/pty-holder/test-integration.mjs
+new file mode 100644
+index 0000000..c80ebf8
+--- /dev/null
++++ b/packages/pty-holder/test-integration.mjs
+@@ -0,0 +1,132 @@
++#!/usr/bin/env node
++// Manual integration smoke test for pty-holder — NOT part of `bun test`.
++//
++// Spawns a REAL PTY (via node-pty) running a plain interactive shell
++// (`cmd.exe` on Windows / `$SHELL -i` elsewhere — deliberately NOT `claude`),
++// then drives it through this package's actual `planInject`/
++// `planInjectSlash`/`runPlan` (the exact code path pty-holder uses to type
++// into a live Claude Code session), and asserts the typed text arrives back
++// through the shell's own echo intact — proving the chunk/pacing logic
++// survives a real platform PTY layer (Windows ConPTY / Unix pty), not just
++// the pure-math unit tests in test/inject.test.ts.
++//
++// Run manually:
++//   node --import tsx test-integration.mjs
++//   npm run test:integration   (from this package directory)
++//   bun run test:integration
++//
++// `node-pty` is a native module compiled for Node's ABI — this script must
++// run under Node, never under `bun test` (see README.md).
++
++import { spawn } from "node-pty";
++import { runPlan } from "./src/pty.ts";
++import { planInject, planInjectSlash } from "./src/inject.ts";
++
++function wait(ms) {
++  return new Promise(resolve => setTimeout(resolve, ms));
++}
++
++async function waitFor(cond, timeoutMs, label) {
++  const start = Date.now();
++  while (!cond()) {
++    if (Date.now() - start > timeoutMs) throw new Error(`timeout waiting for: ${label}`);
++    await wait(50);
++  }
++}
++
++function log(msg) {
++  process.stdout.write(`[test-integration] ${msg}\n`);
++}
++
++function runPlanAsync(pty, steps) {
++  return new Promise((resolve, reject) => {
++    try {
++      runPlan(pty, steps, resolve);
++    } catch (err) {
++      reject(err);
++    }
++  });
++}
++
++async function main() {
++  const isWindows = process.platform === "win32";
++  const shell = isWindows ? "cmd.exe" : process.env.SHELL || "/bin/sh";
++  const args = isWindows ? [] : ["-i"];
++
++  log(`spawning interactive shell: ${shell} ${args.join(" ")} (NOT claude)`);
++  const pty = spawn(shell, args, {
++    name: "xterm-256color",
++    cols: 100,
++    rows: 30,
++    cwd: process.cwd(),
++    env: process.env,
++  });
++
++  let output = "";
++  pty.onData(d => {
++    output += d;
++  });
++
++  let exited = false;
++  let exitInfo = null;
++  pty.onExit(info => {
++    exited = true;
++    exitInfo = info;
++  });
++
++  let failures = 0;
++
++  try {
++    // Let the shell settle (prompt banner etc.) before typing anything.
++    await wait(800);
++
++    // --- Test 1: planInject (chunked typing + submit) round-trips a marker ---
++    const marker1 = `PTY_HOLDER_INTEG_${process.pid}_${Date.now()}`;
++    const cmd1 = `echo ${marker1}`;
++    log(`test 1: planInject — typing '${cmd1}' via chunked pacing`);
++    await runPlanAsync(pty, planInject(cmd1, true));
++    await waitFor(() => output.includes(marker1), 5000, `marker1 (${marker1}) echoed back`);
++    log(`PASS test 1: marker1 observed intact in PTY output`);
++
++    // --- Test 2: planInjectSlash (single-shot write + delayed \r) ---
++    const marker2 = `PTY_HOLDER_INTEG_SLASH_${process.pid}_${Date.now()}`;
++    const cmd2 = `echo ${marker2}`;
++    log(`test 2: planInjectSlash — typing '${cmd2}'`);
++    await runPlanAsync(pty, planInjectSlash(cmd2));
++    await waitFor(() => output.includes(marker2), 5000, `marker2 (${marker2}) echoed back`);
++    log(`PASS test 2: marker2 observed intact in PTY output`);
++
++    // --- Test 3: a long body spanning multiple 100-code-point chunk boundaries ---
++    const marker3 = `PTYHOLDERINTEGLONG${process.pid}`;
++    const filler = "x".repeat(250); // 3 chunks: 100 / 100 / 50
++    const body3 = `${marker3}${filler}`;
++    const cmd3 = `echo ${body3}`;
++    log(`test 3: planInject — long body spanning multiple chunk boundaries`);
++    await runPlanAsync(pty, planInject(cmd3, true));
++    await waitFor(() => output.includes(body3), 8000, `marker3 long body echoed back intact`);
++    log(`PASS test 3: long multi-chunk body arrived intact (no truncation/reorder)`);
++  } catch (err) {
++    failures++;
++    log(`FAIL: ${err && err.message ? err.message : err}`);
++  } finally {
++    try {
++      pty.write("exit\r");
++    } catch {
++      /* ignore */
++    }
++    await wait(300);
++    try {
++      pty.kill();
++    } catch {
++      /* ignore */
++    }
++  }
++
++  log(`done. exited=${exited} exitInfo=${JSON.stringify(exitInfo)} failures=${failures}`);
++  process.exit(failures > 0 ? 1 : 0);
++}
++
++main().catch(err => {
++  process.stderr.write(`[test-integration] uncaught: ${err && err.stack ? err.stack : err}\n`);
++  process.exit(1);
++});
+diff --git a/packages/pty-holder/test/inject.test.ts b/packages/pty-holder/test/inject.test.ts
+new file mode 100644
+index 0000000..6b0e666
+--- /dev/null
++++ b/packages/pty-holder/test/inject.test.ts
+@@ -0,0 +1,149 @@
++import { describe, expect, test } from "bun:test";
++import {
++  CHUNK_DELAY_MS,
++  CHUNK_SIZE,
++  CONFIRM_AFTER_MS_MAX,
++  CONFIRM_AFTER_MS_MIN,
++  SUBMIT_DELAY_MS,
++  chunkText,
++  clampConfirmDelay,
++  planInject,
++  planInjectSlash,
++} from "../src/inject";
++
++describe("chunkText", () => {
++  test("empty string yields no chunks", () => {
++    expect(chunkText("", 100)).toEqual([]);
++  });
++
++  test("shorter than the chunk size yields a single chunk", () => {
++    expect(chunkText("hello", 100)).toEqual(["hello"]);
++  });
++
++  test("splits into multiple chunks of the given size", () => {
++    expect(chunkText("abcdefghij", 4)).toEqual(["abcd", "efgh", "ij"]);
++  });
++
++  test("exact multiple of the chunk size leaves no empty trailing chunk", () => {
++    const text = "abcdefgh"; // 8 chars, size 4
++    const chunks = chunkText(text, 4);
++    expect(chunks).toEqual(["abcd", "efgh"]);
++    expect(chunks.join("")).toBe(text);
++  });
++
++  test("never splits a surrogate pair (emoji) at a chunk boundary", () => {
++    // Each 😀 is 2 UTF-16 units but 1 code point. A naive String.slice(0,2)
++    // chunking (UTF-16 units) would bisect the second emoji's surrogate pair.
++    const text = "😀😀😀";
++    const chunks = chunkText(text, 2);
++    expect(chunks).toEqual(["😀😀", "😀"]);
++    expect(chunks.join("")).toBe(text);
++    for (const chunk of chunks) {
++      // A corrupted chunk (lone surrogate) round-trips through Array.from
++      // differently than the original — this equality catches that.
++      expect(chunk).toBe(Array.from(chunk).join(""));
++    }
++  });
++
++  test("round-trips arbitrary text with emoji through join", () => {
++    const text = "The quick brown 🦊 jumps over the lazy 🐶 — 1234567890".repeat(20);
++    expect(chunkText(text, 100).join("")).toBe(text);
++  });
++
++  test("defaults to CHUNK_SIZE (100) code points", () => {
++    const text = "x".repeat(250);
++    const chunks = chunkText(text);
++    expect(chunks.length).toBe(3);
++    expect(chunks[0]!.length).toBe(CHUNK_SIZE);
++    expect(chunks[2]!.length).toBe(50);
++  });
++});
++
++describe("clampConfirmDelay", () => {
++  test("passes values already inside the range through unchanged", () => {
++    expect(clampConfirmDelay(1000)).toBe(1000);
++  });
++
++  test("clamps below the floor up to CONFIRM_AFTER_MS_MIN", () => {
++    expect(clampConfirmDelay(0)).toBe(CONFIRM_AFTER_MS_MIN);
++    expect(clampConfirmDelay(-500)).toBe(CONFIRM_AFTER_MS_MIN);
++  });
++
++  test("clamps above the ceiling down to CONFIRM_AFTER_MS_MAX", () => {
++    expect(clampConfirmDelay(999_999)).toBe(CONFIRM_AFTER_MS_MAX);
++  });
++
++  test("boundary values pass through unchanged", () => {
++    expect(clampConfirmDelay(CONFIRM_AFTER_MS_MIN)).toBe(CONFIRM_AFTER_MS_MIN);
++    expect(clampConfirmDelay(CONFIRM_AFTER_MS_MAX)).toBe(CONFIRM_AFTER_MS_MAX);
++  });
++});
++
++describe("planInject", () => {
++  test("submit=false with short text: one chunk write, no trailing \\r", () => {
++    expect(planInject("hello", false)).toEqual([{ delayMs: 0, text: "hello" }]);
++  });
++
++  test("submit=true with short text: chunk write then \\r at SUBMIT_DELAY_MS after it", () => {
++    const steps = planInject("hello", true);
++    expect(steps).toEqual([
++      { delayMs: 0, text: "hello" },
++      { delayMs: CHUNK_DELAY_MS + SUBMIT_DELAY_MS, text: "\r" },
++    ]);
++  });
++
++  test("empty text with submit=true is a bare \\r at SUBMIT_DELAY_MS", () => {
++    expect(planInject("", true)).toEqual([{ delayMs: SUBMIT_DELAY_MS, text: "\r" }]);
++  });
++
++  test("empty text with submit=false produces no steps at all", () => {
++    expect(planInject("", false)).toEqual([]);
++  });
++
++  test("long text is paced CHUNK_DELAY_MS apart across chunk boundaries", () => {
++    const text = "a".repeat(250); // -> 3 chunks of 100/100/50
++    const steps = planInject(text, true);
++    expect(steps).toEqual([
++      { delayMs: 0, text: "a".repeat(100) },
++      { delayMs: CHUNK_DELAY_MS, text: "a".repeat(100) },
++      { delayMs: 2 * CHUNK_DELAY_MS, text: "a".repeat(50) },
++      { delayMs: 3 * CHUNK_DELAY_MS + SUBMIT_DELAY_MS, text: "\r" },
++    ]);
++  });
++
++  test("a chunk boundary never bisects a surrogate pair inside a real plan", () => {
++    const text = "😀".repeat(3);
++    const steps = planInject(text, false);
++    const texts = steps.map(s => s.text);
++    expect(texts.join("")).toBe(text);
++    for (const t of texts) expect(t).toBe(Array.from(t).join(""));
++  });
++});
++
++describe("planInjectSlash", () => {
++  test("plain command: write then \\r at SUBMIT_DELAY_MS, no confirm step", () => {
++    expect(planInjectSlash("/clear")).toEqual([
++      { delayMs: 0, text: "/clear" },
++      { delayMs: SUBMIT_DELAY_MS, text: "\r" },
++    ]);
++  });
++
++  test("with confirmAfterMs inside the clamp range: adds a second \\r that many ms after the first", () => {
++    const steps = planInjectSlash("/dangerous", 1000);
++    expect(steps).toEqual([
++      { delayMs: 0, text: "/dangerous" },
++      { delayMs: SUBMIT_DELAY_MS, text: "\r" },
++      { delayMs: SUBMIT_DELAY_MS + 1000, text: "\r" },
++    ]);
++  });
++
++  test("confirmAfterMs below the floor is clamped up to CONFIRM_AFTER_MS_MIN", () => {
++    const steps = planInjectSlash("/x", 1);
++    expect(steps[2]).toEqual({ delayMs: SUBMIT_DELAY_MS + CONFIRM_AFTER_MS_MIN, text: "\r" });
++  });
++
++  test("confirmAfterMs above the ceiling is clamped down to CONFIRM_AFTER_MS_MAX", () => {
++    const steps = planInjectSlash("/x", 999_999);
++    expect(steps[2]).toEqual({ delayMs: SUBMIT_DELAY_MS + CONFIRM_AFTER_MS_MAX, text: "\r" });
++  });
++});
+diff --git a/packages/pty-holder/test/ipc.test.ts b/packages/pty-holder/test/ipc.test.ts
+new file mode 100644
+index 0000000..9e5b747
+--- /dev/null
++++ b/packages/pty-holder/test/ipc.test.ts
+@@ -0,0 +1,80 @@
++import { describe, expect, test } from "bun:test";
++import { InjectParams, InjectSlashParams, ResizeParams, makeError, makeEvent, makeResult, writeLine } from "../src/ipc";
++
++describe("InjectParams", () => {
++  test("accepts a valid inject request", () => {
++    const parsed = InjectParams.safeParse({ id: "a1", text: "hello", submit: true });
++    expect(parsed.success).toBe(true);
++  });
++
++  test("rejects a missing required field", () => {
++    expect(InjectParams.safeParse({ id: "a1", text: "hello" }).success).toBe(false);
++  });
++
++  test("rejects an empty id", () => {
++    expect(InjectParams.safeParse({ id: "", text: "hello", submit: true }).success).toBe(false);
++  });
++
++  test("rejects unknown extra keys (strict)", () => {
++    expect(InjectParams.safeParse({ id: "a1", text: "hi", submit: false, extra: 1 }).success).toBe(false);
++  });
++});
++
++describe("InjectSlashParams", () => {
++  test("accepts a request without confirmAfterMs", () => {
++    expect(InjectSlashParams.safeParse({ id: "a1", command: "/clear" }).success).toBe(true);
++  });
++
++  test("accepts a request with confirmAfterMs", () => {
++    expect(InjectSlashParams.safeParse({ id: "a1", command: "/clear", confirmAfterMs: 500 }).success).toBe(true);
++  });
++
++  test("rejects an empty command", () => {
++    expect(InjectSlashParams.safeParse({ id: "a1", command: "" }).success).toBe(false);
++  });
++
++  test("rejects unknown extra keys (strict)", () => {
++    expect(InjectSlashParams.safeParse({ id: "a1", command: "/x", bogus: true }).success).toBe(false);
++  });
++});
++
++describe("ResizeParams", () => {
++  test("accepts positive integer cols/rows", () => {
++    expect(ResizeParams.safeParse({ cols: 100, rows: 30 }).success).toBe(true);
++  });
++
++  test("rejects zero/negative/non-integer values", () => {
++    expect(ResizeParams.safeParse({ cols: 0, rows: 30 }).success).toBe(false);
++    expect(ResizeParams.safeParse({ cols: -1, rows: 30 }).success).toBe(false);
++    expect(ResizeParams.safeParse({ cols: 100.5, rows: 30 }).success).toBe(false);
++  });
++});
++
++describe("writeLine / makeEvent / makeResult / makeError", () => {
++  function captureWrites(): { calls: string[]; stream: { write: (s: string) => boolean } } {
++    const calls: string[] = [];
++    return { calls, stream: { write: (s: string) => (calls.push(s), true) } };
++  }
++
++  test("writeLine JSON-serializes with a trailing newline", () => {
++    const { calls, stream } = captureWrites();
++    writeLine(stream as unknown as NodeJS.WritableStream, { a: 1 });
++    expect(calls).toEqual(['{"a":1}\n']);
++  });
++
++  test("makeEvent builds a valid no-id RpcEvent envelope", () => {
++    expect(makeEvent("injected", { id: "x1" })).toEqual({ jsonrpc: "2.0", method: "injected", params: { id: "x1" } });
++  });
++
++  test("makeResult builds a success envelope carrying the request id", () => {
++    expect(makeResult(7, { queued: true })).toEqual({ jsonrpc: "2.0", id: 7, result: { queued: true } });
++  });
++
++  test("makeError builds a failure envelope carrying the request id", () => {
++    expect(makeError("id-1", -32602, "bad params")).toEqual({
++      jsonrpc: "2.0",
++      id: "id-1",
++      error: { code: -32602, message: "bad params" },
++    });
++  });
++});
