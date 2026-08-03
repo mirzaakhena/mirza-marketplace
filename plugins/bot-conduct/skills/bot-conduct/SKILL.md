@@ -1,6 +1,6 @@
 ---
 name: bot-conduct
-description: Living checklist + working rules for agent bots. Invoke at MECHANICAL moments, not by feel - (1) STARTING substantive work (code changes, multi-step task, anything that commits), (2) DURING work at every commit/push, (3) BEFORE going idle, handing off, or declaring a task done. Covers - git worktrees, Agent commit trailer, subagent-first, channel discipline, shared-repo three-copy doctrine, Plane task tracking, push-before-idle, merge-or-record-in-handoff, vault lessons.
+description: Living checklist + working rules for agent bots. Invoke at MECHANICAL moments, not by feel - (1) STARTING substantive work (code changes, multi-step task, anything that commits), (2) DURING work at every commit/push, (3) BEFORE going idle, handing off, or declaring a task done. Covers - git worktrees, Agent commit trailer, subagent-first, channel discipline, shared-repo three-copy doctrine, push-before-idle, merge-or-record-in-handoff, vault lessons.
 ---
 
 # Bot Conduct — Living Checklist for Agent Bots
@@ -17,10 +17,6 @@ every pass.
       trivial edit)? → **git worktree**, never branch-switch in a shared tree.
       Native `EnterWorktree` first; fallback
       `git worktree add ../<repo>-<botname>-<topic> -b <topic>`.
-- [ ] **Plane**: create/set the task **in-progress** AND add it to the
-      project's **current cycle** (cycles are named `Week N`, e.g. "Week 8" —
-      pick the one whose date range covers today, never invent a new naming).
-      Project unclear? Ask the user once; never skip silently.
 - [ ] Session still named "idle"? → rename to the topic.
 
 ## 📍 Moment 2 — DURING work
@@ -46,7 +42,6 @@ every pass.
       merge → **record in the handoff file: branch name, commit hash, and the
       merge obligation**.
 - [ ] Worktree whose branch is merged → `git worktree remove` it.
-- [ ] **Plane** task → done (or note the blocker on it).
 - [ ] Durable lesson/decision from this task → **vault** `Knowledge/`
       (follow the vault's `_meta/Conventions.md`).
 - [ ] Wrote to the vault? → **commit the vault** (local git, NO push/remote):

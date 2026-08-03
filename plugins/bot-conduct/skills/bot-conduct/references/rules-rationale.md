@@ -11,14 +11,6 @@ a shared working tree yanks files out from under them; a worktree gives you a
 private copy with shared history. Clean up (`git worktree remove`) after
 merging — stale worktrees pile up and confuse the next audit.
 
-## Plane task before starting (Moment 1)
-
-The user's recurring pain: work happens with no task in in-progress, so
-nothing shows WHAT is being worked on right now, and week attribution is
-lost. Creating the task BEFORE starting is the only variant that works —
-"I'll create it after" loses to the next interruption. (Added 2026-07-17,
-living-checklist initiative.)
-
 ## Subagent-first (Moment 2)
 
 The main loop's first duty is staying responsive. Long searches, broad
