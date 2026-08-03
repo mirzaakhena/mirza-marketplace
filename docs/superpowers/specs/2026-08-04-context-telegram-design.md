@@ -232,6 +232,39 @@ Catatan: justru karena bridge dipasang di lapisan project, Pagar 1 menjadi wajib
 — pendahulunya hampir pasti berada di lapisan yang berbeda dari tempat bridge
 dipasang. Itu bukan kebetulan; itu bentuk bug §3 diucapkan sebagai aturan.
 
+### 5.5 Di mana berkas tangkapan disimpan, dan bagaimana bridge tahu bot mana
+
+**Berkas tangkapan disimpan terpusat**, bukan di dalam folder project:
+
+```
+~/.claude/mirza-bots/status/<nama-bot>.json
+```
+
+Alasannya konsistensi dengan sistem baru — README `mirza-bots` menyatakan
+seluruh state terpusat di `~/.claude/mirza-bots/`, dan `sessions/<bot>.id`
+sudah memakai pola nama yang sama. Engine yang menjawab `/context` membaca dari
+sana; ia tidak perlu tahu folder project mana pun.
+
+**Bridge mengenali bot-nya lewat pola yang sudah ada dan sudah terbukti**, bukan
+mekanisme baru — `hooks/session-start.ts:96-99` sudah memecahkan masalah identik:
+
+```
+cwd = process.env.CLAUDE_PROJECT_DIR ?? process.cwd()
+cari nama bot di config.json yang bots[nama].home == cwd (setelah normalize)
+```
+
+Bila tidak ada bot yang `home`-nya cocok, bridge **tidak menulis apa pun** dan
+tetap meneruskan ke statusline pendahulu. Perilaku itu meniru `session-start.ts`
+yang mencatat `no bot has home=… -- nothing to record`, dan ia otomatis memenuhi
+§1: folder yang bukan bot tidak boleh kehilangan statusline-nya hanya karena
+bridge kebetulan terpasang di sana.
+
+**⚠️ Bridge hanya boleh mengimpor `node:`.** Ia dijalankan Claude Code sebagai
+proses tersendiri, sama seperti hook. Aturan ini sudah dibayar mahal di proyek
+ini: versi pertama `session-start.ts` mengimpor modul engine "supaya tidak
+duplikat" dan **tidak pernah menyala sama sekali** sambil tetap terlihat
+terpasang. Duplikasi kecil di sini lebih murah daripada komponen yang diam.
+
 ## 6. Yang belum diukur — dinyatakan, bukan disembunyikan
 
 1. **Apakah ada jalur non-`statusLine` yang membawa payload yang sama.**
