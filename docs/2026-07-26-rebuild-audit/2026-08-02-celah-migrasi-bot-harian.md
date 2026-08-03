@@ -55,7 +55,7 @@ lama. Barisnya di tabel ditandai `—`.
 | 1 | **Indikator "typing…"** | **36,7/hari** (tiap pesan masuk) | Kosmetik. Kamu tidak tahu bot sudah menerima sampai balasannya jadi | 1.101 pesan user; `sendChatAction` 0 hit di kode baru |
 | 2 | **Nama sesi sisi Telegram + `/rename`** | **4,9/hari** injeksi `/rename`; 15,1/hari tulis registry | Sesi kehilangan nama di Telegram. Hook `SessionStart` baru hanya menulis **id**, tidak nama — jadi konteks "Current Telegram session name" hilang, dan picker `/switch` tak punya label | `wrapper.log` 148× `/rename`; `session-start.ts:142` cuma tulis `${bot}.id` |
 | 3 | **Chunking balasan panjang** | **10,6/hari** (10,0% dari 3.183 panggilan `reply`) | **Blocking.** Telegram menolak >4096 char; konverter markdown butuh margin setengah-limit. Maksimum terukur: **7 potong dalam satu balasan** | Kode baru: `4096` hanya muncul di komentar `engine.ts:414` sebagai kasus gagal |
-| 4 | **system-outbox → Telegram** (push tanpa pesan masuk) | **7,2/hari** | Notifikasi "sesi berganti", pengumuman handoff, reminder terjadwal — semua hilang. Wrapper masih menulis berkasnya; **tidak ada lagi yang membacanya** | 215 event `wrote system-outbox`; 107 baris `source='system'` di db |
+| 4 | **system-outbox → Telegram** (push tanpa pesan masuk) ⚠️ **baris ini DIKOREKSI — baca §8** | **7,2/hari** | Notifikasi "sesi berganti", pengumuman handoff, reminder terjadwal — semua hilang. Wrapper masih menulis berkasnya; **tidak ada lagi yang membacanya** | 215 event `wrote system-outbox`; 107 baris `source='system'` di db |
 | 5 | **Pengantaran antar-bot lewat PTY** (agent-bus) | **5,0/hari** | **Blocking untuk handoff.** `agent_send` menulis ke folder `pending/` wrapper. Tanpa wrapper, pesan antar-bot tidak sampai | 150 event `inter-agent message` = 150 `injecting prompt` |
 | 6 | **Wrapper PTY: spawn + `--resume`** | 4,6/hari spawn · **1,8/hari resume** | **Naik jadi kritis sejak penyatuan engine:** umur sesi = umur bot. Sesi mati → bot bisu, dan tidak ada yang menyalakan ulang | `grep -E "pty\|wrapper\|resume"` di `mirza-bots`: **0 hit sejati** (12 hit semuanya kata "empty") |
 | 7 | **Kirim lampiran keluar** (`files`) | **2,7/hari** (48 dokumen, 32 foto) | Bot tidak bisa mengirim screenshot, PDF, atau laporan | `engine.ts:47` — `reply(text, buttons?, replyTo?)`, tidak ada parameter berkas |
@@ -162,3 +162,93 @@ wrapper — keputusan itu tetap terbuka dan tidak jadi lebih mahal karena ditund
 - **Semua angka bisa dihitung ulang.** Skripnya ada di scratchpad sesi ini;
   sumbernya (`messages.db`, `wrapper.log`, `session-names.json`) tidak diubah —
   db dibuka `readonly: true` sesuai aturan "jangan menyapa bot produksi".
+
+---
+
+## 8. KOREKSI baris #4 — diukur ulang 2026-08-03 oleh bot-02
+
+**Ditambahkan, bukan menimpa.** Teks asli baris #4 dibiarkan utuh di tabel
+supaya alasan koreksinya bisa ditelusuri; yang berubah cuma penanda ⚠️ yang
+menunjuk ke sini.
+
+Sesi ini ditugasi **mengukur apakah #4 menggantung pada #6 sebelum menulis
+kode**. Hasilnya: menggantung — tapi bukan seluruhnya, dan bukan dengan alasan
+yang tertulis di baris aslinya.
+
+### 8.1 Apa yang keliru
+
+Baris #4 menyandingkan dua angka di kolom bukti: *"215 event `wrote
+system-outbox`; 107 baris `source='system'` di db"*. Diletakkan berdampingan,
+keduanya terbaca seolah yang satu menghasilkan yang lain — wrapper menulis
+berkas, plugin membacanya, barisnya mendarat di db.
+
+**Terukur: keduanya sama sekali tidak berhubungan.**
+
+| Yang diukur | Angka | Sumber |
+|---|---|---|
+| Event `wrote system-outbox` bertipe `session-change` | **692 dari 692** (seumur hidup, keenam bot) | `wrapper.log` ×6 |
+| Idem, jendela 30 hari | **172** (audit menulis 215; jendela sesi ini bergeser sehari) | `wrapper.log` ×6 |
+| Baris `source='system'` di db yang berasal dari system-outbox | **0 dari 317** | `messages.db` ×6, readonly |
+| Baris di seluruh armada yang punya `metadata.kind` | **0 dari 10.822** | `messages.db` ×6, readonly |
+
+Tiga bukti yang saling menopang, bukan satu:
+
+1. **Penulisnya tunggal dan seragam.** Enam call site `writeSystemOutbox()` di
+   `wrapper.ts` (baris 945, 983, 1043, 1055, 1230, 1291), **semuanya**
+   `type: 'session-change'`. Pembacanya (`server.ts:2006`) hanya mengenal tipe
+   itu; apa pun yang lain jatuh ke `unknown system-outbox type`. **system-outbox
+   bukan kanal serbaguna — ia kabel satu-tujuan antara wrapper dan plugin.**
+2. **Query yang menyangkal.** `handleSessionChangeEvent` (`server.ts:2055`)
+   **selalu** menulis `metadata.kind = 'session-change'`. Tidak ada satu pun
+   baris ber-`metadata.kind` di seluruh 10.822 baris armada. Kalau kabel itu
+   pernah mendarat di db, jejaknya wajib ada.
+3. **Jebakan yang nyaris lolos.** Delapan baris memuat frasa `"switch to
+   session"`. Semuanya `source` **user/assistant**, tertanggal 2026-05-19 —
+   itu percakapan user dan bot **merancang** bentuk pesannya, bukan pesannya.
+   Mencocokkan teks saja akan menghasilkan kesimpulan terbalik.
+
+Jadi **7,2/hari di baris #4 adalah angka wrapper murni**, 100% `session-change`.
+Angka "107 baris `source='system'`" mengukur hal lain sama sekali.
+
+### 8.2 Siapa yang sebenarnya menulis baris `source='system'`
+
+**AI di dalam sesi Claude Code memanggil `reply` sendiri** dengan
+`source: 'system'` — skill `telegram:notify-user`, laporan handoff antar-bot,
+pengumuman batch selesai. **317 baris seumur hidup, 69 dalam 30 hari = 2,3/hari.**
+
+Jalur ini **tidak menyentuh wrapper sama sekali.** Perlu ditegaskan karena
+`wrapper.log` memuat 277 baris berbunyi `injecting /rename + /notify-user` yang
+mudah dibaca sebagai bukti sebaliknya: **teks log itu basi.** Kode di
+`wrapper.ts:902-952` hanya me-rename lalu menulis system-outbox — injeksi
+`/notify-user` sudah tidak ada. Log yang menyebut nama sebuah fitur bukan bukti
+fitur itu berjalan.
+
+### 8.3 Akibatnya: #4 pecah dua
+
+| | Isi | Frekuensi | Bergantung #6? |
+|---|---|---|---|
+| **4a** | `session-change` → Telegram (kabel wrapper→plugin) | 5,7/hari | **Ya, penuh.** Penulisnya wrapper; wrapper belum ada di sistem baru |
+| **4b** | Kiriman proaktif dari dalam sesi (`reply` tanpa pesan masuk) | 2,3/hari | **Tidak sama sekali** |
+
+**4b berdiri sendiri, dan celahnya nyata** — bukan sekadar soal penandaan
+`source`. `cc-plugin/src/engine/engine.ts:564` mengambil tujuan dari
+`lastChatByBot`, dan bila bot belum menerima pesan **dalam sesi itu** ia
+melempar `no_known_chat: this bot has not received a message yet, so there is
+nobody to reply to`. Itu persis definisi celah #4: *push tanpa pesan masuk.*
+Sistem lama menyelesaikannya dengan jatuh ke `access.allowFrom[0]`
+(`server.ts:2021`). Sisi kedua: `storeOutgoing` (`engine.ts:130`) menetapkan
+`source: "assistant"` mati — sistem baru belum punya konsep `source: 'system'`.
+
+**Yang BELUM diukur, dan dinyatakan begitu:** apa saja selain `reply` yang
+bergantung pada `lastChatByBot`. Tanpa angka itu, biaya 4b belum bisa disebut
+"kecil" — yang bisa dikatakan hanya *"dua titik perubahan sudah teridentifikasi,
+cakupan penuhnya belum dihitung."*
+
+### 8.4 Kenapa koreksi ini ditulis, bukan sekadar dipakai
+
+Audit ini sendiri (§1) menemukan bahwa meteran pertamanya *"berbohong dengan
+meyakinkan"* dan menyelamatkan `/switch` dari kolom "tidak dipakai". Baris #4
+adalah kejadian yang sama, satu lapis lebih dalam: **dua meteran yang
+masing-masing benar, disandingkan sehingga melahirkan sebab-akibat yang tidak
+ada.** Ketidakhadiran di satu meteran bukan bukti — dan kehadiran di dua meteran
+bukan bukti keduanya bicara soal yang sama.
