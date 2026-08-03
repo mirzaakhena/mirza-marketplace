@@ -44,6 +44,22 @@
 
 ### Task 0: Buktikan runtime dan `node-pty` — TANPA menulis kode produk
 
+> ✅ **SELESAI 2026-08-03** — commit `c96a633` di `mirza-bots`. Hasil lengkap di
+> `cc-wrapper/PROBE.md`. Ringkasnya:
+>
+> | Runtime | Spawn | `pty.write()` | `/clear` mendarat |
+> |---|---|---|---|
+> | Bun 1.3.11 | ✅ | ❌ `ERR_SOCKET_CLOSED` | — |
+> | Node v22.20.0 + `tsx` | ✅ | ✅ | ✅ |
+>
+> **Keputusan: runtime produksi = Node + `tsx`. Test tetap `bun test`.**
+>
+> **Temuan di luar rencana yang mengubah Task 6:** sesi CC anak mewarisi
+> `CLAUDE_CODE_CHILD_SESSION` lewat environment dan **tidak menyimpan
+> transcript**. Karena Lapis 3 bergantung pada file sesi `.jsonl` sebagai
+> sumber bukti, `spawnClaude` wajib membersihkan environment — sudah
+> dimasukkan ke Task 6 Step 3.
+
 Task ini sengaja tidak menghasilkan kode produk. Seluruh plan berdiri di atas asumsi bahwa `node-pty` bisa menjalankan Claude Code di mesin ini, dan **wrapper lama memakai `tsx` (Node), bukan Bun**, untuk `wrapper.ts` — sementara `cc-plugin` seluruhnya Bun. Perbedaan itu belum pernah diuji ulang, dan menebaknya akan menular ke setiap task berikutnya.
 
 Preseden: rencana `2026-08-02-tahap25-keluar.md` Task 1 juga tidak menulis kode produk — ia membuktikan dulu apakah `SessionStart` menyala pada `/clear`, karena seluruh rencana berdiri di atas asumsi itu.
@@ -923,7 +939,7 @@ Lapisan tipis yang menyentuh `node-pty`, plus perakitan. Ini satu-satunya task y
 
 **Interfaces:**
 - Consumes: `planCommand`, `planDurationMs`, `WriteStep` (Task 2); `InjectionQueue`, `QueueItem` (Task 3); `specFor` (Task 4); `parsePayload` (Task 5).
-- Produces: `function runPlan(write: (s: string) => void, steps: WriteStep[], sleep: (ms: number) => Promise<void>): Promise<void>`; berkas executable `main.ts`.
+- Produces: `function runPlan(write: (s: string) => void, steps: WriteStep[], sleep: (ms: number) => Promise<void>): Promise<void>`; `function childEnv(base?: NodeJS.ProcessEnv): Record<string, string>`; `function spawnClaude(opts?): IPty`; berkas executable `main.ts`.
 
 - [ ] **Step 1: Tulis test yang gagal**
 
@@ -957,7 +973,25 @@ describe("runPlan", () => {
     expect(written).toEqual(["/effort high", "\r", "\r"]);
   });
 });
+
+describe("childEnv", () => {
+  // Task 0: sesi anak yang mewarisi penanda ini TIDAK menyimpan transcript,
+  // dan transcript adalah sumber bukti untuk post-check di Lapis 3.
+  test("membuang CLAUDE_CODE_CHILD_SESSION", () => {
+    const env = childEnv({ PATH: "/bin", CLAUDE_CODE_CHILD_SESSION: "1" });
+    expect(env.CLAUDE_CODE_CHILD_SESSION).toBeUndefined();
+    expect(env.PATH).toBe("/bin");
+  });
+
+  test("membuang nilai undefined", () => {
+    const env = childEnv({ A: "1", B: undefined });
+    expect(env).toEqual({ A: "1" });
+  });
+});
 ```
+
+Tambahkan `childEnv` ke baris import di berkas test ini:
+`import { runPlan, childEnv } from "../src/pty";`
 
 - [ ] **Step 2: Jalankan, pastikan gagal**
 
@@ -992,6 +1026,24 @@ export async function runPlan(
 }
 
 /**
+ * Environment untuk sesi CC anak.
+ *
+ * `CLAUDE_CODE_CHILD_SESSION` HARUS dibuang. Task 0 menemukan bahwa sesi anak
+ * mewarisinya dan akibatnya MEMATIKAN penyimpanan transcript -- padahal file
+ * sesi .jsonl adalah salah satu sumber bukti yang dipakai post-check. Wrapper
+ * yang dijalankan dari dalam sesi CC lain akan diam-diam kehilangan seluruh
+ * mekanisme post-check-nya. Lihat cc-wrapper/PROBE.md.
+ */
+export function childEnv(base: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(base)) {
+    if (k === "CLAUDE_CODE_CHILD_SESSION") continue;
+    if (v !== undefined) env[k] = v;
+  }
+  return env;
+}
+
+/**
  * Hidupkan Claude Code di dalam PTY.
  *
  * Di Windows `claude` adalah shim .cmd yang butuh cmd.exe untuk diresolusi.
@@ -1008,7 +1060,7 @@ export function spawnClaude(opts?: { cwd?: string; cols?: number; rows?: number 
     cols: opts?.cols ?? process.stdout.columns ?? 100,
     rows: opts?.rows ?? process.stdout.rows ?? 30,
     cwd: opts?.cwd ?? process.cwd(),
-    env: process.env as Record<string, string>,
+    env: childEnv(),
   });
 }
 
@@ -1019,7 +1071,7 @@ export const sleep = (ms: number): Promise<void> =>
 - [ ] **Step 4: Jalankan, pastikan lulus**
 
 Run: `bun test test/pty.test.ts`
-Expected: PASS, 2 test.
+Expected: PASS, 4 test.
 
 - [ ] **Step 5: Implementasi `main.ts`**
 
@@ -1127,16 +1179,16 @@ pty.onExit(({ exitCode }) => {
 - [ ] **Step 6: Jalankan seluruh test**
 
 Run: `cd C:/Users/Mirza/workspace/mirza-bots/cc-wrapper && bun test`
-Expected: PASS, 30 test (6+6+6+9+2+1).
+Expected: PASS, 32 test (typer 6 + queue 6 + registry 6 + inbox 9 + pty 4 + asap 1).
 
 - [ ] **Step 7: Uji hidup — dan ini yang menentukan, bukan test hijau**
 
 Test unit membuktikan rencananya benar. Yang belum terbukti: apakah CC sungguhan menerima ketikannya. Jalankan wrapper di sebuah folder bot uji, lalu **dari terminal lain** jatuhkan berkas ke `pending/`:
 
 ```bash
-# Terminal 1
+# Terminal 1 — Node + tsx, BUKAN bun (keputusan Task 0)
 cd C:/Users/Mirza/workspace/bot-uji
-CLAUDE_PROJECT_DIR="C:/Users/Mirza/workspace/bot-uji" bun run C:/Users/Mirza/workspace/mirza-bots/cc-wrapper/src/main.ts
+CLAUDE_PROJECT_DIR="C:/Users/Mirza/workspace/bot-uji" npx tsx C:/Users/Mirza/workspace/mirza-bots/cc-wrapper/src/main.ts
 
 # Terminal 2 — perintah tunggal
 echo '{"command":"/compact"}' > "C:/Users/Mirza/workspace/bot-uji/.claude/channels/pty-controller/pending/uji1.json"
@@ -1151,6 +1203,7 @@ Empat kriteria, dan **catat hasil apa adanya, bukan kesimpulannya**:
 2. `/compact` tunggal mendarat di CC.
 3. Batch mendarat **berurutan**, dan tidak ada payload lain menyelip di antaranya.
 4. Berkas `pending/` terhapus sesudah diambil.
+5. **Peringatan `⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker` TIDAK muncul.** Task 0 menemukan peringatan itu pada sesi anak yang mewarisi environment; `childEnv()` seharusnya menutupnya. Jangan diasumsikan — dilihat sendiri. Kalau masih muncul, cari variabel `CLAUDE_CODE_*` lain yang ikut terwaris; PROBE.md mencatat bahwa yang lain **belum diukur**.
 
 **Kriteria 3 kemungkinan besar GAGAL untuk `/clear` diikuti `/rename`, dan itu hasil yang benar** — `/clear` melahirkan sesi baru, dan tanpa bukti bahwa sesi itu sudah ada, `/rename` bisa mendarat terlalu cepat (spec §4.2.2). Itu persis lubang yang ditutup Lapis 3. Catat gejalanya; jangan menambal dengan jeda tetap.
 
