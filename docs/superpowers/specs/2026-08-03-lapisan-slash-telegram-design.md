@@ -200,9 +200,19 @@ keystroke.** Itu milik wrapper.
    fiturnya belum ada (§5).
 3. **Berapa banyak slash CC yang interaktif** — yang membuka picker dan
    menggantung kalau disuntik tanpa jawaban. Yang diketahui pasti baru `/effort`.
-4. **`/context` butuh apa persisnya di sistem baru.** Sistem lama membacanya dari
-   `last-status.json` yang ditulis jembatan statusline; sistem baru punya
-   statusline sendiri, dan isinya belum dibandingkan.
+4. ~~**`/context` butuh apa persisnya di sistem baru.** Sistem lama membacanya
+   dari `last-status.json` yang ditulis jembatan statusline; sistem baru punya
+   statusline sendiri, dan isinya belum dibandingkan.~~
+   **⚠️ DIKOREKSI 2026-08-04 — teks asli disimpan supaya koreksinya bisa
+   ditelusuri.** Anak kalimat *"sistem baru punya statusline sendiri"* **keliru**:
+   `grep -rn -i "statusline|status_line|last-status"` atas seluruh `mirza-bots`
+   mengembalikan **nol kode** (hanya satu komentar dan satu baris README), dan
+   `bot-uji` **tidak punya `.claude/settings.json` sama sekali**. Sistem baru
+   tidak punya statusline apa pun, jadi "membandingkan isinya" bukan pekerjaan
+   yang tertunda — ia pekerjaan yang tidak punya objek. Yang sesungguhnya perlu
+   diputuskan: bagaimana sistem baru **menampung** payload yang sama tanpa
+   menggusur statusline milik user. Jawabannya di
+   `2026-08-04-context-telegram-design.md`.
 5. **Apakah `/switch` butuh daftar sesi bernama.** Sistem baru menyimpan id sesi
    (`sessions/<bot>.id`) tapi belum menyimpan namanya — celah #2 di audit.
 
