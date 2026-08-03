@@ -323,6 +323,101 @@ kanalnya yang gagal.
    lalu banjir pesan sekaligus begitu bot menyala. Bentuk peringkasannya belum
    diputuskan.
 
+### 4.5 Menghidupkan CC — ditambahkan 2026-08-03 sesudah pengukuran lanjutan
+
+Tiga keputusan user yang lahir sesudah fondasi berdiri. Ketiganya sudah
+diimplementasikan (`mirza-bots` commit `36a0515`).
+
+#### 4.5.1 Satu wrapper per folder
+
+Wrapper kedua di folder yang sama **ditolak dan keluar**, tidak mengambil alih.
+
+Kebijakan ini **kebalikan** dari `cc-plugin/src/engine/lock.ts`, dan itu
+disengaja. Aturannya sama — **lindungi yang paling mahal kalau hilang** — tapi
+yang mahal berbeda:
+
+| | Yang mahal | Karena itu |
+|---|---|---|
+| `cc-plugin` | pesan Telegram terbagi acak ke dua poller | pemegang lama **dibunuh** (poller murah dilahirkan ulang) |
+| `cc-wrapper` | sesi CC hidup yang sedang mengerjakan sesuatu | pendatang baru **ditolak** |
+
+**Stale lock** adalah kegagalan yang paling sering membuat mekanisme seperti ini
+dibenci: wrapper mati mendadak, berkas lock tertinggal, folder terkunci selamanya
+sampai dihapus dengan tangan. Karena itu yang dicatat adalah **PID**, dan
+pemegang yang prosesnya sudah tidak ada **diambil alih, bukan dihormati**.
+
+Efek samping yang menyenangkan: satu folder → satu wrapper → satu sesi → satu
+`cc-plugin` → **satu poller**. Aturan Telegram di §3.4 jadi dijaga oleh
+struktur, bukan oleh mekanisme terpisah.
+
+**Batas yang dinyatakan:** ini menjaga "dua wrapper", **bukan** "dua sesi" —
+user tetap bisa membuka `claude` manual di folder yang sama. Dan PID bisa
+didaur ulang oleh Windows; kemungkinannya kecil tapi **belum diukur**.
+
+#### 4.5.2 `--continue`, bukan `--resume <id>` dari mtime
+
+Wrapper lama mencari "sesi terakhir" dengan memindai
+`~/.claude/projects/<folder-ter-encode>/` dan memilih `.jsonl` ber-mtime
+tertinggi (`wrapper.ts:388-418`). Itu memaksa wrapper menyalin **dua aturan
+internal Claude Code**: di mana berkas sesi disimpan, dan bagaimana nama folder
+di-encode (`encodeProjectDir`, `wrapper.ts:120`).
+
+Kalau CC mengubah salah satunya, wrapper lama **pecah diam-diam**: nol berkas
+ditemukan → disimpulkan "belum ada sesi" → sesi baru setiap kali, tanpa satu pun
+galat. Yang terasa cuma *"bot-nya lupa terus"*.
+
+`--continue` menyerahkan pertanyaannya ke pihak yang paling berhak menjawab.
+
+**Tapi ia tidak boleh dipakai buta.** Diukur 2026-08-03: `claude --continue` di
+folder tanpa sesi menjawab `No conversation found to continue` lalu **keluar** —
+bukan memulai sesi baru. Folder tanpa sesi adalah keadaan **pertama setiap bot
+baru**.
+
+Jadi: coba `--continue`; kalau CC **keluar cepat DAN** mengatakan kalimat itu,
+spawn ulang tanpa flag tersebut. Syarat kedua itu load-bearing — kegagalan lain
+(binary tidak ketemu, folder tidak ada) tidak boleh memicu percobaan ulang,
+karena mengulang akan menyembunyikan sebabnya di balik kegagalan kedua yang
+berbeda bentuk.
+
+Bedanya dengan pendekatan lama: yang lama **menebak dari mtime**, yang ini
+**bertanya dan mendengarkan jawabannya**.
+
+**Belum diuji hidup:** jalur fallback-nya. Membuat keadaannya (folder sudah
+dipercaya tapi belum punya sesi) berarti memercayai folder atas nama user.
+Yang ada baru unit test.
+
+#### 4.5.3 Gerbang kepercayaan folder: deteksi dan lapor
+
+Folder yang belum pernah dipercaya menahan CC **sebelum siap**:
+
+```
+Quick safety check: Is this a project you created or one you trust?
+  ❯ 1. Yes, I trust this folder
+    2. No, exit
+```
+
+**`--dangerously-skip-permissions` TIDAK melewatinya** — diuji langsung.
+
+Sesi yang tertahan di gerbang **tidak pernah siap**, dan apa pun yang disuntik
+selama itu hilang atau terbaca sebagai pilihan menu. Gejalanya menyesatkan:
+wrapper tampak berjalan, bot diam saja.
+
+Gerbangnya **terbukti bisa dilewati** dengan menyuntik Enter (pilihan "Yes"
+sudah tersorot). **Dan itu sengaja tidak dilakukan.** Menyuntik Enter berarti
+**memercayai sebuah folder atas nama user tanpa ia melihat isinya** — keputusan
+keamanan, bukan keputusan teknis.
+
+**Keputusan user: deteksi dan lapor.** Wrapper mengenali gerbangnya, menyebut
+folder mana, dan meminta user menjawabnya sekali. **Jangan diam-diam diubah jadi
+melewati otomatis.**
+
+#### 4.5.4 Catatan bentuk: deteksi harus menormalkan whitespace
+
+Keluaran TUI datang **tanpa spasi** karena dirender per kolom —
+`Quicksafetycheck:Isthisaprojectyoucreated…`. Pencocokan yang mengandalkan spasi
+akan meleset. Deteksi membuang escape sequence **dan** seluruh whitespace
+sebelum mencocokkan.
+
 ## 5. Yang dibuang dari sistem lama
 
 | Yang dibuang | Alasan |
@@ -378,3 +473,8 @@ supaya tidak ada taksiran yang menyamar jadi fakta:
 | Session management sekarang? | **Ditunda** | Sampai wrapper menguasai TUI |
 | Nama paket | **`cc-wrapper`** | Konsisten dengan `cc-plugin` |
 | Buang kata "mirza"? | **Ya, tapi nanti** | Tiga tempat; folder state paling mahal |
+| Dua wrapper di satu folder? | **Tolak yang kedua** | Kebalikan `cc-plugin`; yang mahal di sini sesi hidup (§4.5.1) |
+| Cara resume saat start | **`--continue`, bukan `--resume` dari mtime** | Wrapper berhenti menyalin layout internal CC (§4.5.2) |
+| Gerbang kepercayaan folder | **Deteksi dan lapor, JANGAN lewati otomatis** | Menyuntik Enter = memercayai folder atas nama user (§4.5.3) |
+| Slash Telegram diteruskan mentah ke CC? | **Tidak — diolah dulu** | Lapisan olah ada di `cc-plugin`, yang menerima pesan dan menulis ke `pending/` |
+| Slash Telegram yang tidak dikenal | **Teruskan, tapi minta konfirmasi tombol dulu** | Daftar "dikenal" boleh pendek justru karena ada jaring pengamannya |
