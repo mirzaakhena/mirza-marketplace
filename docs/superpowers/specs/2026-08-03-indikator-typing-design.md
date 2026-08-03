@@ -55,6 +55,32 @@ diverifikasi.
 |---|---|---|
 | Satu tembakan, diulang, atau tidak dibangun? | **Diulang** | Indikator hidup sepanjang penantian, bukan lima detik pertama |
 | Kapan berhenti? | **Di `reply` pertama** | Tidak pernah berbohong "masih kerja" setelah bot diam |
+| Giliran mati di tengah (koneksi putus, AI error) — cukupkah batas 5 menit? | **Cukup, diterima** | Tidak ada penanda dari Stop hook. Kasus itu ditangani secara kasar: menunggu jam habis |
+
+### Apa yang terjadi kalau giliran terputus di tengah
+
+Diangkat user 2026-08-03, dan jawabannya berbeda per kasus:
+
+| Kejadian | Yang terjadi pada indikator |
+|---|---|
+| **Proses ikut mati** (sesi ditutup, crash) | Timer mati bersamanya, ping berhenti, indikator padam sendiri ≤5 detik. **Sembuh sendiri** |
+| **Koneksi putus, proses hidup** | Ping gagal, ditelan, dicoba lagi 4 detik kemudian. Selama jaringan mati user juga tidak melihat apa pun. **Aman** |
+| **Proses hidup, gilirannya yang mati** | Indikator terus menyala sampai `TYPING_MAX_MS`. **Berbohong hingga 5 menit** |
+
+Kasus ketiga bisa ditutup jauh lebih rapat: Stop hook `cc-plugin` menyala di
+tiap akhir giliran dan bisa menaruh penanda di disk yang dicek keepalive tiap
+tick — indikator berhenti dalam 4 detik, bukan 300. Itu **sekaligus akan
+menggugurkan alasan** memilih "berhenti di balasan pertama", karena mesin jadi
+tahu kapan giliran benar-benar selesai.
+
+**User memilih tidak membangunnya sekarang.** Dicatat berikut prasyaratnya:
+belum ada bukti Stop hook menyala saat giliran *crash*, bukan cuma saat selesai
+normal. Itu harus diukur lebih dulu, bukan diasumsikan.
+
+**Penting, dan sempat disalahpahami:** batas 5 menit **bukan timeout**. Tidak
+ada pekerjaan yang dibatalkan; yang berhenti hanya indikatornya. Giliran yang
+butuh lebih dari lima menit tetap berjalan dan tetap membalas — ia hanya
+kehilangan titik-titiknya di tengah jalan.
 
 ### Kenapa berhenti di balasan pertama, bukan menyala lagi sesudahnya
 
