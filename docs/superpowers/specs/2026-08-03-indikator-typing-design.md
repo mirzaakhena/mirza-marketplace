@@ -161,6 +161,31 @@ berpotongan, pesan-pesannya sudah mendarat satu per satu — indikator tidak
 menambah apa pun di sana, dan mematikannya lebih awal menghindari "typing…"
 yang menggantung di antara potongan.
 
+## 4b. Hanya untuk giliran yang dipicu user — dan itu prinsip, bukan kebetulan
+
+Diangkat user 2026-08-03: *"Typing indicator ini kan visual feedback. Idealnya
+hanya bekerja saat user masih memandang layar."*
+
+Perilaku yang sudah ada memang begitu, dan diverifikasi ke kode:
+`typing.start()` dipanggil di **satu tempat saja** (`engine.ts:236`), di dalam
+pembungkus `deliver`, dan hanya kalau pesan masuk diterima. Kiriman proaktif —
+laporan terjadwal, pengumuman handoff, hasil pekerjaan latar — tidak pernah
+lewat sana, jadi tidak pernah memunculkan indikator.
+
+**Tapi itu sebelumnya kebetulan, bukan keputusan.** Ia jatuh begitu saja dari
+tempat pemasangannya. Sekarang dinaikkan jadi aturan supaya tidak ada yang
+"melengkapi"-nya kemudian:
+
+> **Indikator typing hanya boleh menyala sebagai jawaban atas sesuatu yang baru
+> saja dikirim user.** Ia umpan balik visual; nilainya nol kalau tidak ada mata
+> yang sedang melihat, dan negatif kalau ia menarik perhatian ke layar untuk
+> sesuatu yang tidak diminta.
+
+Konkretnya: **jangan** memanggil `typing.start()` dari jalur kirim proaktif mana
+pun. Kalau suatu saat terpikir "biar user tahu laporan sedang disiapkan" —
+itu bukan pekerjaan indikator typing; pesan singkat yang benar-benar bisa dibaca
+jauh lebih berguna.
+
 ## 5. Yang sengaja TIDAK dibangun
 
 | Hal | Alasan |
