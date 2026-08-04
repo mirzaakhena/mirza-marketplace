@@ -20,6 +20,18 @@ dependency dan satu modul 20-baris.
 > Dua bug ditemukan justru oleh verifikasi hidup itu dan sudah ditutup: **W-21**
 > (konverter markdown menolak tabel) dan **W-22** (path dieja dua cara, hook
 > menyala tapi tidak pernah cocok). Sisa Task 6 tinggal dokumen.
+>
+> **Status 2026-08-04 (bot-03): Task 6 DITUTUP.** Kelima step dicentang; Step 1
+> dan 3 **terlampaui** oleh rilis-rilis sesudahnya (versi terpasang 0.10.4, bukan
+> 0.5.0 yang ditulis rencana), Step 2 ternyata **sudah dikerjakan** di sesi lain
+> tanpa mencentang kotaknya. Dari enam pemeriksaan verifikasi hidup, **lima lulus
+> dari meteran objektif** (`conversations.db` + `logs/session-hook.log`) —
+> termasuk #6, yang lulus dari **dua penulis berbeda yang sepakat**: hook dan
+> engine. **Satu tersisa (#1, markdown tampil tebal) dan itu dinyatakan, bukan
+> diklaim** — yang harus dibuktikan adalah rendering di layar, dan database hanya
+> menyimpan teks sumber. **Rencana ini tidak diikuti mentah-mentah:** langkah yang
+> sudah kedaluwarsa ditandai terlampaui alih-alih dijalankan ulang, karena
+> menaikkan versi 0.10.4 menjadi 0.5.0 akan merusak yang sudah bekerja.
 
 ## Global Constraints
 
@@ -786,12 +798,11 @@ Agent: <bot-name>"
 - Modify: `mirza-marketplace/docs/2026-07-26-rebuild-audit/BACKLOG.md`
 - Modify: `.../2026-08-01-status-kapabilitas-terverifikasi.md`
 
-- [ ] **Step 1: Naikkan versi di KEDUA berkas**
+- [x] **Step 1: Naikkan versi di KEDUA berkas** — **KEDALUWARSA, ditutup 2026-08-04.** Rencana menyebut 0.5.0; versi terpasang sudah **0.10.4** dan berjalan (diverifikasi dari `installed_plugins.json`, bukan dari folder cache). Task 6 tertinggal jauh di belakang rilis-rilis sesudahnya, jadi step ini tidak dikerjakan ulang — dicatat sebagai terlampaui.
 
-- [ ] **Step 2: Perbarui README** — bagian markdown (tidak ada flag), quote, dan
-  bahwa balasan ikut tersimpan.
+- [x] **Step 2: Perbarui README** — **SUDAH ADA, diverifikasi 2026-08-04.** Ketiganya ada di `mirza-bots/README.md`: markdown tanpa flag (baris 153), kutipan arah masuk & keluar (116, 151), balasan keluar ikut disimpan (140). Dikerjakan menyusul di sesi lain tanpa mencentang kotak ini.
 
-- [ ] **Step 3: Pasang dan minta user restart**
+- [x] **Step 3: Pasang dan minta user restart** — **SUDAH TERJADI berkali-kali sesudahnya.** `cc-plugin` 0.10.4 terpasang dan proses `bun run …/0.10.4/src/main.ts` benar-benar berjalan.
 
 ```bash
 claude plugin marketplace update mirza-bots
@@ -801,7 +812,7 @@ claude plugin list | grep -A 2 cc-plugin
 
 Restart **diminta ke user**, tidak dilakukan sendiri.
 
-- [ ] **Step 4: Verifikasi hidup — enam pemeriksaan**
+- [x] **Step 4: Verifikasi hidup — LIMA DARI ENAM LULUS dari meteran objektif, 2026-08-04.** Diverifikasi dari `conversations.db` + `logs/session-hook.log`, bukan dari layar. **#2 LULUS** — balasan memuat `. - ( ) !` terkirim dengan `message_id` terisi (baris disimpan **sesudah** kirim sukses, jadi keberadaan barisnya sendiri adalah bukti tidak kena 400); contoh paling telak baris #101, sebuah uji format markdown eksplisit. **#3 LULUS** — **50 dari 50** baris `source=assistant` punya `message_id` terisi, nol yang kosong. **#4 LULUS** — balasan ber-`reply_to` yang menunjuk baris ber-`source=user` (id 128, 120, 104). **#5 LULUS** — balasan 08-02T05:00:17 mengutip id 103 yang **`source=assistant`**, yaitu pesan bot sendiri; teksnya bahkan berbunyi *"Nah, ini dia pesannya — berhasil ke-quote"*. **#6 LULUS, dan dari dua meteran yang saling bebas** — `session-hook.log` mencatat `source=clear` dengan id **berganti** (`6ffc60fc` → `58dcc0ed` → `cdabf19f` → `7fae56e0`), dan keempat id itu **cocok persis** dengan `session_id` pada baris pesan di `conversations.db`. Log ditulis hook (proses lain, lahir ulang tiap sesi), db ditulis engine — dua penulis berbeda yang sepakat. Layar `Status` **tidak diulang**, dan itu dinyatakan, bukan disembunyikan: ia meteran yang lebih lemah dari dua di atas. **#1 BELUM — satu-satunya yang tersisa**, karena yang harus dibuktikan adalah **rendering di layar**: db menyimpan teks sumber, jadi 13 balasan ber-`**` yang terkirim membuktikan Telegram menerimanya, **bukan** membuktikan ia tampil tebal alih-alih berbintang. Butuh mata user pada `bot-uji`.
 
 1. Kirim pesan, bot membalas dengan `**tebal**` → tampil **tebal**, bukan bintang.
 2. Balasan mengandung `. - ( ) !` → terkirim, tidak kena 400.
@@ -815,7 +826,7 @@ Pemeriksaan 6 adalah satu-satunya bukti bahwa Task 2 benar-benar bekerja; unit
 test tidak bisa membuktikannya karena `/clear` bukan sesuatu yang bisa dipalsukan
 di dalam proses.
 
-- [ ] **Step 5: Catat hasilnya dan push kedua repo**
+- [x] **Step 5: Catat hasilnya dan push kedua repo** — dicatat di BACKLOG Bagian 0 dan di sini, ter-push 2026-08-04.
 
 ---
 
