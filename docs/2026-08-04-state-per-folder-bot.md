@@ -40,7 +40,8 @@ workspace/<nama-bot>/
 ├── session.id          id sesi CC terbaru      (dulu sessions/<bot>.id)
 ├── status.json         tangkapan statusline    (dulu status/<bot>.json)
 ├── bot.pid             pemegang token          (dulu locks/<bot>.pid)
-├── inbox/              berkas & gambar masuk
+├── data/               berkas & gambar dari user   (dulu bernama inbox/)
+├── inbox/              titipan pesan dari bot lain (BARU)
 └── logs/               session-hook.log
 ```
 
@@ -49,6 +50,45 @@ workspace/<nama-bot>/
 perlu dibedakan milik bot mana. Begitu tiap bot punya foldernya sendiri, nama
 bot sudah dijawab oleh nama folder — jadi ketiganya menyusut menjadi **tiga
 berkas datar** yang terlihat begitu folder dibuka. Empat subfolder menjadi dua.
+
+### Komunikasi antar-bot: konvensi folder, bukan daftar
+
+**Disepakati user 2026-08-04, di percakapan yang sama.**
+
+**Alamat bot lain = folder tetangga.** Semua bot adalah subfolder dari induk yang
+sama, jadi tujuan sebuah pesan cukup ditulis `../<nama-bot>/inbox/`. Tidak ada
+berkas daftar peer, dan **tidak ada `agent-registry.json`** — daftar botnya
+adalah isi folder induk, dibaca langsung (`readdir`), bukan disalin.
+
+**Kenapa bukan berkas daftar di tiap folder** (usul awal user, dicabut user
+sendiri setelah dibahas): N bot berarti N salinan daftar yang sama. Menambah bot
+ke-7 berarti menyunting enam berkas, dan yang terlewat membuat satu bot tuli
+sebelah **secara diam-diam**. Itu persis penyakit yang dulu membuat `config.json`
+disentralkan — jadi mengulanginya di bentuk lain akan membawa kembali masalah
+yang justru sedang dibuang.
+
+Validasi ikut gratis: sebuah folder adalah bot bila ia punya `config.json`. Salah
+ketik nama tujuan langsung ketahuan, bukan hilang tanpa jejak.
+
+**Dua nama, dua tugas.** `inbox/` yang sekarang menampung unduhan dari user
+**salah nama sejak awal** — tidak ada yang "masuk kotak surat" di sana. Ia jadi
+`data/`, dan `inbox/` dipakai sebagaimana namanya: tempat bot lain menitipkan
+pesan (tulis `<uuid>.json` lewat tmp+rename supaya tidak pernah terbaca separuh).
+Membacanya = engine memindai `inbox/` miliknya sendiri, pola yang sudah berjalan
+di `cc-wrapper` untuk `pending/`.
+
+**Antrean offline kembali, dan kali ini gratis.** `bot_inbox` dibuang hari yang
+sama karena tabelnya mati. Fungsinya — menampung pesan untuk bot yang sedang
+mati — lahir kembali dari struktur ini tanpa tabel, tanpa database, dan
+**kasat mata**: `ls inbox/` memperlihatkan berapa yang menunggu. Untuk kriteria
+"mudah dipelajari", itu lebih baik daripada baris di tabel yang harus di-query.
+
+⚠️ **Batas yang disadari saat memutuskan:** konvensi ini mengunci semua bot pada
+**satu folder induk**. Bot di drive lain — apalagi di mesin lain (MacBook,
+lihat baris portabilitas di BACKLOG) — tidak terjangkau olehnya. Diterima karena
+saat ini semua bot memang di `workspace/`, dan karena **menambahkan** berkas
+daftar nanti itu murah, sedangkan **membuang** berkas daftar yang terlanjur
+dipakai itu mahal.
 
 ---
 
@@ -125,10 +165,12 @@ tetangga. Itu keputusan baru pada saatnya, bukan alasan menahan yang sekarang.
 
 - Apakah kolom `bot` di tabel `messages` dibuang atau disimpan sebagai jejak.
 - Apakah `logs/` cukup satu berkas di folder bot, atau ikut naik ke permukaan.
-- Bagaimana `agent-registry.json` (siapa-bot-apa, milik `agent-bus`) hidup di
-  dunia tanpa state bersama — ini bersinggungan langsung dengan
-  `2026-08-04-jalur-antar-bot-dan-celah-lapisan-armada.md`, dan **dua keputusan
-  ini harus dibuat sadar-satu-sama-lain**.
+- ~~Bagaimana `agent-registry.json` hidup tanpa state bersama~~ — **terjawab di
+  percakapan yang sama:** ia tidak perlu ada. Folder induk adalah daftarnya.
+  Lihat "Komunikasi antar-bot" di Bagian 2.
+- Siapa yang membersihkan `inbox/` bila sebuah bot tidak pernah dinyalakan lagi.
+  User sudah menyatakan sikap umumnya (*"kalau bot mati ya sudah"*), tapi
+  penumpukan berkas belum dibahas sebagai kasusnya sendiri.
 
 ## 7. Catatan yang tidak masuk keputusan ini
 

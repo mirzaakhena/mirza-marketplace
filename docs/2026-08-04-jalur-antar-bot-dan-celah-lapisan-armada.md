@@ -167,6 +167,25 @@ sopan A↔B menjadi tidak mungkin, bukan sekadar dibatasi**. Dengan ini `hop_cou
 kembali ke perannya yang benar: jaring pengaman untuk kasus tak terbayang, bukan
 rem yang diinjak tiap hari.
 
+### Transport konkretnya — disepakati kemudian di percakapan yang sama
+
+Sesudah user memutuskan **state per-folder bot** (berkas terpisah:
+`2026-08-04-state-per-folder-bot.md`), bentuk transportnya ikut mengeras dan
+**tidak lagi butuh state bersama sama sekali**:
+
+- **Alamat** = folder tetangga. `../<nama-bot>/inbox/`. Tidak ada
+  `agent-registry.json`, tidak ada berkas daftar peer — daftar botnya adalah isi
+  folder induk, dibaca langsung.
+- **Kirim** = tulis `<uuid>.json` ke `inbox/` milik tujuan, lewat tmp+rename.
+- **Terima** = engine memindai `inbox/` miliknya sendiri — pola yang sudah
+  berjalan di `cc-wrapper` untuk `pending/`.
+- **Antrean offline** ikut gratis: bot yang mati tidak memindai, pesannya
+  menunggu di folder, dan `ls inbox/` memperlihatkannya tanpa query apa pun.
+
+Ini juga membalik sebagian T-1 di atas menjadi tidak relevan: masalahnya bukan
+lagi "agent-bus menulis ke `pending/` wrapper yang menolaknya", melainkan
+"agent-bus menulis ke `inbox/` engine" — pintu yang memang untuk itu.
+
 ### Prinsip yang lahir dari percakapan ini
 
 > **Urusan antar-bot diam di jalurnya sendiri. Naik ke Telegram hanya kalau
