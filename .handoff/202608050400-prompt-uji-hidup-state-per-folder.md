@@ -1,6 +1,8 @@
 # Uji Hidup State Per-Folder dan Jalur Antar-Bot
 
-**Date:** 2026-08-05 04:00 (WIB)
+**Date:** 2026-08-05 04:00 (WIB) · **DIPERBARUI 08:10 (WIB)** — seluruh uji hidup
+di section AKAN **SUDAH DIKERJAKAN bersama user dan LULUS 5/5**. Lihat
+"Hasil uji hidup" di bawah sebelum membaca section AKAN, yang kini historis.
 **Repo kerja:** `C:\Users\Mirza\workspace\mirza-marketplace` (dokumen/spec/rencana/BACKLOG/handoff) — **repo KODE ada di `C:\Users\Mirza\workspace\mirza-bots`**, dua-duanya punya remote dan wajib di-push
 **Branch:** `main` (HEAD dokumen: `2af0ea7` · HEAD kode: `8a9692a`)
 **Dari → Ke:** bot-02 → bot-03
@@ -95,6 +97,58 @@ seperti yang disepakati (`config.json`, `conversations.db`, `session.id`,
 
 — (berhenti di titik bersih. Kedua repo bersih dan ter-push, tidak ada branch
 lokal selain `main`, tidak ada worktree tersisa.)
+
+## 4b. Hasil uji hidup (DIPERBARUI 2026-08-05 08:10)
+
+**Ketiga langkah di section AKAN sudah dikerjakan bersama user. Section 5 dan 6
+di bawah kini HISTORIS — dibiarkan supaya alasan tiap langkah bisa ditelusuri,
+bukan karena masih perlu dikerjakan.**
+
+- **Rilis 0.12.0:** dipasang user, terverifikasi dari tiga meteran
+  (`installed_plugins.json`, `Win32_Process`, dan hook yang menulis ke lokasi
+  baru dengan kalimat yang baru lahir semalam).
+- **Migrasi: TIDAK dijalankan.** Keputusan user: *"Tidak usah pikirkan backward
+  compatibility. Kita start dari nol."* `mirza_01_bot` diberi `config.json` baru
+  dan database kosong; state lama ditinggalkan utuh. Skripnya tetap belum pernah
+  dijalankan atas state nyata.
+- **Bot kedua dibuat** (`@mirza_02_bot`), dan **kelima kriteria LULUS**.
+- **Statusline:** `statusLine` di `.claude/settings.json` milik `mirza_01_bot`
+  masih menunjuk bridge `0.10.3`. Dibuang (backup `.bak-*`) supaya installer
+  memasang dari awal, karena `stale-bridge` hanya memperbarui path dan TIDAK
+  menyentuh rantai — sementara rantai di lokasi baru masih kosong. Dibiarkan,
+  statusline user hilang dari sesi itu.
+
+### Dua bug yang ditemukan uji ini, dua-duanya lolos dari 450 test hijau
+
+1. **`conversations.db-wal` diabaikan skrip migrasi** (merge `1f3085d`).
+   Terukur: `.db` saja **135 baris**, `.db` + `-wal` **137**, pesan terakhir
+   mundur 74 menit. Bentuk kegagalannya yang paling mahal — database hasil
+   salinan **terbuka baik-baik saja**, cuma isinya lebih sedikit.
+2. **`listPeers` menghitung folder ber-`config.json` sebagai bot.** Di workspace
+   nyata, `wa-kajian-aggregator` punya `config.json` sendiri (`webPort`,
+   `ollamaUrl`) → `agent_send` ke situ akan **membuat `inbox/` di dalam project
+   orang lain**. Diperbaiki jadi validasi ISI config. Sengaja **beda** dari
+   `identifyBot`: untuk diri sendiri, config rusak adalah kerusakan yang harus
+   dilaporkan apa adanya, bukan disamarkan jadi "bukan folder bot".
+
+**454 test hijau, `tsc` bersih.**
+
+### Yang MASIH terbuka, dan sengaja tidak ditebak
+
+- **Pesan antar-bot tidak dicatat di mana pun.** `drainInbox` mendorong ke AI
+  tanpa `insertMessage`. Dokumen keputusan menandai penyimpanan "belum
+  diputuskan", jadi ini bukan kelalaian — tapi konsekuensinya persis pola yang
+  BACKLOG hukum berulang: *"berapa sering bot saling kirim"* tidak terukur,
+  seperti `/switch` yang terbaca 0× padahal 139×. **Butuh keputusan user.**
+- **`agent-bus` lama terpasang scope user**, jadi ikut termuat di SETIAP sesi.
+  Satu sesi kini memuat dua sistem armada dengan tool yang menjawab pertanyaan
+  sama, dan terlihat langsung: bot-2 menjawab *"ada 6 peer di registry"* memakai
+  tool lama. Bukan bug kode baru, tapi akan menggigit begitu sebuah bot disuruh
+  berkirim lewat AI-nya sendiri alih-alih lewat berkas.
+- **`chained-statusline` belum pernah lahir** di bentuk baru — ia baru dibuat
+  saat `/context` pertama dipanggil. Belum diuji.
+
+---
 
 ## 5. Blocker
 
