@@ -594,6 +594,9 @@ Tidak dipaksakan masuk tahap manapun — dokumen sumber sendiri menandainya `?` 
 | ID | Fitur | Verdict | Status | Sumber |
 |---|---|---|---|---|
 | K-9 | Konstrain: tanpa SDK/`claude -p`, semua via TUI interaktif | KEEP(konstrain) | BUTUH KEPUTUSAN | area-06§6.0 |
+| AB-1 | **Pesan antar-bot tidak dicatat ke mana pun.** `drainInbox` mendorong ke AI tanpa `insertMessage`, jadi "berapa sering bot saling kirim" tidak terukur — persis pola `/switch` yang terbaca 0× padahal 139×. Dokumen keputusan menandai penyimpanan "belum diputuskan", jadi ini **bukan kelalaian**; dibiarkan sadar sampai user memutuskan. **User memilih "bahas nanti" 2026-08-05** | Belum diputuskan | BUTUH KEPUTUSAN | uji hidup 2026-08-05 |
+| AB-2 | **`agent-bus` lama terpasang scope user, ikut termuat di SETIAP sesi.** Satu sesi memuat dua sistem armada dengan tool yang menjawab pertanyaan sama; terukur langsung — `mirza_02_bot` menjawab "ada 6 peer di registry" memakai tool lama, bukan `agent_list`. Bukan bug kode baru, tapi akan menggigit begitu sebuah bot disuruh berkirim lewat AI-nya sendiri alih-alih lewat berkas | Belum diputuskan | BUTUH KEPUTUSAN | uji hidup 2026-08-05 |
+| AB-3 | **`chained-statusline` belum pernah lahir di bentuk per-folder** — ia baru dibuat saat `/context` pertama dipanggil. `statusLine` project `mirza_01_bot` sudah dikosongkan (backup `.bak-*`) supaya installer memasang dari awal, tapi jalur itu **belum diuji hidup sekali pun** | Belum diuji | BUTUH UJI | uji hidup 2026-08-05 |
 | K-12 | Migrasi serentak "matikan semua ganti semua" | Syarat diterima | BUTUH KEPUTUSAN | area-06§6.4 |
 | SCAR-028 | PID reuse — celah terbuka, perlu keputusan sadar | Belum diputuskan | BUTUH KEPUTUSAN | area-06§6.9 |
 | PTY-002–004,007,008,010,016–027 | Aturan wajib: penolakan sebut alternatif benar | KEEP→aturan wajib | BUTUH KEPUTUSAN | area-06§6.10 |
