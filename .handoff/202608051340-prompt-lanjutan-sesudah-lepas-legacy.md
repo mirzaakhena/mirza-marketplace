@@ -140,6 +140,34 @@ sudah lulus di `mirza_02_bot`:** `mirza_01_bot` punya `statusLine` di
   `uji-batch-2`. Tangkapan statusline hanya diperbarui saat layar digambar
   ulang. Bukan bug batch; **belum diukur seberapa sering menggigit**.
 
+### Langkah 3b — **AB-4: pagar T-4/W-14 ternyata imbauan, bukan penegakan** ⚠️ BARU
+
+Ditemukan **sesudah handoff ini pertama ditulis**, oleh user yang mencoba jalur
+antar-bot sendiri (06:50–06:53Z). Baris #30 `mirza_02_bot/conversations.db`:
+
+> *"Sapaan ini **dipicu oleh mirza_01_bot** lewat jalur komunikasi antar-bot —
+> dia minta aku menyapa kamu langsung."*
+
+**Satu bot menyuruh bot lain menulis ke chat Telegram user, dan berhasil** —
+padahal `SERVER_INSTRUCTIONS` menyatakan tegas bahwa pesan ber-`[protocol:
+agent-turn]` **tidak boleh** dijawab dengan `reply`.
+
+**Kenapa uji 5/5 tidak menangkapnya, dan ini pelajarannya:** kriteria T-4 waktu
+itu menguji **kelalaian** (giliran berakhir tanpa `reply` → chat sunyi). Yang
+terjadi sekarang **kepatuhan** — bot yang *disuruh* bicara, lalu menurut. Satu
+pagar, dua bentuk pelanggaran; hanya satu yang terbayangkan.
+
+**Tidak ada yang rusak kali ini** (user sendiri yang memulai tes sapaan).
+**User memilih "catat dulu"** — jangan tawarkan ulang sebagai penemuan baru.
+Kalau nanti dikerjakan: pertanyaannya bukan "bagaimana melarang", melainkan
+**apakah larangan ini pantas ditegakkan mesin** — karena ada kasus sah di mana
+bot memang perlu memberi tahu user (mis. timeout `expects_reply` yang tidak
+pernah dijawab, yang justru **diperintahkan** `SERVER_INSTRUCTIONS`).
+
+**AB-1 juga tertangkap basah di uji yang sama:** `mirza_01_bot` menerima,
+membalas, dan mengirim — **nol baris** di database-nya. Satu-satunya jejaknya
+adalah `mirza_02_bot` yang bercerita ke user. Lihat BACKLOG.
+
 ### Langkah 4 — tawarkan lima pertanyaan terbuka, pada saat yang tepat
 
 **User meminta eksplisit agar kelimanya disimpan supaya bisa ditanyakan lagi.**
