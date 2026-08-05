@@ -140,7 +140,23 @@ sudah lulus di `mirza_02_bot`:** `mirza_01_bot` punya `statusLine` di
   `uji-batch-2`. Tangkapan statusline hanya diperbarui saat layar digambar
   ulang. Bukan bug batch; **belum diukur seberapa sering menggigit**.
 
-### Langkah 3b — **AB-4: pagar T-4/W-14 ternyata imbauan, bukan penegakan** ⚠️ BARU
+### ⚠️ CATATAN PENTING — banyak isi handoff ini SUDAH DIKERJAKAN sesudah ia ditulis
+
+Handoff ini ditulis 13:40, lalu sesi berlanjut sampai ~15:10 dan **tiga rilis
+menyusul**. Yang di bawah ini sudah SELESAI, jangan dikerjakan ulang:
+
+| | |
+|---|---|
+| **0.14.0** (`e1664d8`) | Kewajiban jadwal timeout `expects_reply` **dibuang** |
+| **0.15.0** (`3aeacd5`) | **W-27** — `reply` ingat chat-nya sesudah restart |
+| **0.16.0** (`1a20484`) | **AB-4 opsi B** — `reply` yang dipicu bot lain **ditandai** engine |
+
+**Ketiganya sudah terpasang, berjalan, dan W-27 + AB-4 terverifikasi hidup
+bersamaan pada 08:02Z** — lihat baris teratas BACKLOG Bagian 0.
+**496 test hijau / 0 fail**, tsc bersih. Yang tersisa dari daftar di bawah
+hanyalah **Langkah 1, 2, 3, dan 4**.
+
+### Langkah 3b — AB-4: pagar T-4/W-14 ternyata imbauan — **SUDAH DIKERJAKAN**
 
 Ditemukan **sesudah handoff ini pertama ditulis**, oleh user yang mencoba jalur
 antar-bot sendiri (06:50–06:53Z). Baris #30 `mirza_02_bot/conversations.db`:
