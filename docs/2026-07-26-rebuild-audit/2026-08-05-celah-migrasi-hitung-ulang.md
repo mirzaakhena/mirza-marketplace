@@ -51,7 +51,7 @@ Diperiksa langsung ke kode, bukan disalin dari dokumen lain.
 | # | Celah asli | Status hari ini | Bukti di kode |
 |---|---|---|---|
 | 1 | Indikator typing | ✅ **ADA** | `engine/typing.ts`; `engine.ts:496` `sendChatAction(chatId,"typing")` |
-| 2 | Nama sesi + `/rename` | ✅ **ADA** | `engine/slash/map.ts:24`; terverifikasi hidup 7/7 (0.13.0) |
+| 2 | Nama sesi + `/rename` | ⚠️ **SETENGAH — dikoreksi, lihat §8** | `engine/slash/map.ts:24` (terverifikasi hidup 7/7). **Tapi injeksi nama sesi sebagai konteks AI di SessionStart TIDAK ada** |
 | 3 | Chunking balasan panjang | ✅ **ADA** | `engine/chunk.ts` — `TELEGRAM_MAX_CHARS=4096`, `chunkRaw()`, penjahit ulang fence ``` |
 | 4b | Push proaktif tanpa pesan masuk | ✅ **ADA** | W-27, `cc-plugin` 0.15.0 — fallback `conversations.db`; terverifikasi hidup |
 | 5 | Antar-bot | ✅ **ADA** | tool `agent_send` + `agent_list` (`server.ts:213`, `:250`); terverifikasi hidup |
@@ -77,7 +77,7 @@ Ditambah #19 (`react`) yang memang sudah tidak relevan sejak 2026-08-02.
 user 2026-08-05. ⚠️ Dan sesuai Tingkat 14: alasan blokirnya **bukan** "tidak ada
 padanannya di Claude Code" — `/effort` ADA. Alasannya keputusan user, titik.
 
-## 4. Yang MASIH hilang — lima baris, dan tak satu pun memblokir
+## 4. Yang MASIH hilang — lima baris ⚠️ **(daftar ini BERTAMBAH, baca §8)**
 
 | # | Yang hilang | Frekuensi terukur | Catatan |
 |---|---|---|---|
@@ -146,7 +146,93 @@ seberapa ramai.
   membuat keduanya aman dicoret bukan angka nolnya, melainkan keputusan
   "mulai bersih dari nol": tanpa riwayat yang dibawa, arsip sesi tidak punya
   yang perlu diarsipkan.
-- **Yang belum dihitung sama sekali:** apakah keenam bot harian bergantung pada
+---
+
+## 8. BARANG TERLUPA — tiga yang ketemu di hari yang sama, dan TIDAK satu pun ada di daftar 20
+
+**Ini bagian terpenting dokumen ini, dan ia lahir bukan dari audit.** User
+bertanya, beberapa menit sesudah §1–§7 selesai:
+
+> *"ada barang-barang yang (mungkin) terlupa terbawa dari rumah lama dan
+> masalahnya saya enggak tahu barang apa itu."*
+
+Lalu ia menyebut satu contoh dari ingatannya sendiri — **handoff protocol** —
+dan dari satu kalimat itu **tiga barang** jatuh keluar. **Tidak satu pun dari
+ketiganya ada di daftar 20 baris audit 2026-08-02.**
+
+### 8.1 `agent_status` — hilang, dan tidak pernah tercatat hilang
+
+Daftar tool sistem baru: `reply` · `read_history` · `search_history` ·
+`agent_send` · `agent_list` · `send_slash`. **`agent_status` tidak ada.**
+
+Skill `handoff` memakainya di **tiga** tempat yang semuanya menentukan:
+kewajiban cek context tiap selesai task (§1 SKILL.md), penentuan READY sebuah
+peer (`lifecycle == "idle"`, §0), dan penyusunan daftar bot beserta markanya
+(§3). Tanpa `agent_status`, handoff tidak bisa memilih penerima — ia hanya tahu
+**siapa yang ada** (`agent_list`), bukan **siapa yang siap**.
+
+**Kenapa audit melewatkannya:** audit mengukur `messages.db` dan `wrapper.log` —
+keduanya merekam **apa yang user lakukan lewat Telegram**. `agent_status`
+dipanggil bot ke bot, tidak pernah diketik siapa pun, tidak muncul di kedua
+meteran itu. Meteran yang benar untuk pertanyaan lain, **buta** untuk yang ini.
+
+### 8.2 Nama sesi sebagai konteks AI — celah #2 ternyata cuma SETENGAH ketutup
+
+**Koreksi terhadap §2 dokumen ini sendiri, ditulis beberapa menit sesudahnya.**
+Saya menandai #2 ✅ ADA karena `/rename` terverifikasi hidup. Itu **terlalu
+kuat**. Celah #2 punya dua bagian, dan audit 2026-08-02 sudah menulis keduanya
+(*"hook `SessionStart` baru hanya menulis id, tidak nama"*):
+
+| Bagian | Status |
+|---|---|
+| Bot bisa me-`/rename` dirinya | ✅ ADA, terverifikasi hidup 7/7 |
+| Nama sesi disuntikkan sebagai **konteks AI** saat SessionStart | ❌ **TIDAK ADA** |
+
+### 8.3 Naming session reminder — mati bukan karena hilang, tapi karena kehilangan pemicunya
+
+Sistem lama punya skill `plugins/telegram/skills/name-session`: kalau sesi masih
+bernama `idle` saat pesan Telegram masuk, AI mengingatkan user sekali lalu
+menawarkan nama konkret. `grep` di seluruh `cc-plugin/src` + `cc-wrapper/src`
+untuk reminder semacam itu = **nol** (satu-satunya sebutan, `typer.ts:20`,
+adalah komentar historis).
+
+**Tapi bentuk kegagalannya bukan "skill-nya belum dipindah" — dan ini yang
+layak dibawa.** Skill itu bisa dipasang hari ini dan **tetap tidak akan
+menyala**, karena pemicunya adalah baris konteks *"Current Telegram session
+name: …"* yang disuntikkan SessionStart — persis §8.2 yang tidak ada. **Ini
+Tingkat 15 dalam bentuk paling murni: aturan yang benar, dengan pemicu yang
+tidak pernah menyala.** Memindahkan skill-nya tanpa §8.2 akan menghasilkan
+sesuatu yang **terlihat seperti sudah beres**.
+
+### 8.4 Apa yang ini buktikan tentang metodenya
+
+Tiga barang, satu kalimat user, nol audit. Bandingkan: audit 2026-08-02
+memakan satu sesi penuh, mengukur 4.633 baris pesan dan ±1.100 event log, dan
+**tidak menemukan satu pun dari ketiganya**.
+
+**Kesimpulan yang jujur: audit dan pemakaian nyata menangkap kelas barang yang
+berbeda, dan yang kedua tidak bisa digantikan yang pertama.** Audit menangkap
+apa yang **user lakukan**; pemakaian nyata menangkap apa yang **sistem lakukan
+untuk user tanpa diminta** — cek status peer, reminder, konteks yang
+disuntikkan diam-diam. Kelas kedua ini tidak punya jejak di meteran mana pun
+justru karena ia bekerja tanpa disuruh.
+
+Itu memperkuat usul user 2026-08-05: *"saya mulai saja pakai system baru sampai
+terasa ada yang kurang."*
+
+### 8.5 Konsekuensi untuk urutan
+
+**`bot-06` tetap rekomendasi bot pertama, TAPI dengan syarat yang berubah.**
+Sebelum bot harian mana pun pindah, `agent_status` + injeksi nama sesi harus
+ada — keduanya prasyarat handoff, dan handoff dipakai keenam bot (27× seumur
+hidup). Sebelumnya §4 menyebut "nol yang memblokir"; **dengan §8.1 dan §8.2,
+kalimat itu hanya benar untuk bot yang tidak ikut estafet.**
+
+---
+
+## 9. Yang belum dihitung sama sekali
+
+- Apakah keenam bot harian bergantung pada
   skill `mirza-marketplace` (`kajian-info`, `daily-report`, `handoff`,
   `bot-conduct`, `teach-me`) dengan cara yang berubah di sistem baru. Skill itu
   milik Claude Code, bukan lapisan Telegram, jadi **dugaannya** tidak berubah —
