@@ -165,8 +165,23 @@ bot memang perlu memberi tahu user (mis. timeout `expects_reply` yang tidak
 pernah dijawab, yang justru **diperintahkan** `SERVER_INSTRUCTIONS`).
 
 **AB-1 juga tertangkap basah di uji yang sama:** `mirza_01_bot` menerima,
-membalas, dan mengirim — **nol baris** di database-nya. Satu-satunya jejaknya
-adalah `mirza_02_bot` yang bercerita ke user. Lihat BACKLOG.
+membalas, dan mengirim — **nol baris** di `conversations.db`-nya.
+⚠️ **Koreksi yang dibongkar user pada hari yang sama:** bot-03 sempat menulis
+"nol jejak, tidak ada apa pun untuk ditelusuri" — **terlalu kuat**. Jejaknya
+**ADA** di transcript Claude Code. Yang benar: **bisa diaudit, tidak bisa
+DIUKUR**. Lihat BACKLOG untuk versi lengkapnya.
+
+### Langkah 3c — kewajiban jadwal timeout `expects_reply` SUDAH DIBUANG
+
+Dikerjakan sesudah handoff ini pertama ditulis. **`cc-plugin` 0.14.0, merge
+`e1664d8`, ter-push. 485 test hijau.** Pemicunya user yang merasakan jedanya
+sendiri. **Belum dipasang** — yang terpasang masih 0.13.0.
+
+⚠️ **Jangan "memperbaiki"-nya kembali.** Kalau kamu melihat `agent_send` tanpa
+mekanisme timeout dan merasa itu kelalaian: itu **keputusan**, alasannya di
+BACKLOG, dan ada test assert-negatif yang akan merah kalau kalimatnya kembali.
+Yang masih berlaku dan ditegakkan kode: balasan tidak boleh minta balasan, dan
+`hop_count` maksimum 5.
 
 ### Langkah 4 — tawarkan lima pertanyaan terbuka, pada saat yang tepat
 
