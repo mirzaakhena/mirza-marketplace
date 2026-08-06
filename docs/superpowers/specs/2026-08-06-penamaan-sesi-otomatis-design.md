@@ -39,7 +39,8 @@ sistem baru hanya menulis `session.id` ke berkas dan tidak mengeluarkan
 | Tombol usul-nama, atau auto-rename? | **Auto-rename (§10.C)** | Bentuk lama (`[Pakai] [Nama lain] [Nanti saja]`) **dibuang**. Alasan: satu tap per sesi baru adalah biaya yang justru menghidupkan kembali masalahnya — kalau user malas tap, sesi tetap tanpa nama |
 | Sekali ingatkan, atau pemicu menetap? | **Pemicu MENETAP selama sesi belum bernama** | Permintaan eksplisit user: *"Selama session 'belum bernama', akan terus ada pemicu yang akan mengingatkan bot."* |
 | Penamaan sesi penerima handoff | **Bukan lewat mekanisme ini** | Pengirim handoff sudah tahu slug-nya; nama dipasang di detik pertama, pemicu tidak pernah menyala |
-| Nilai N (giliran minimum) | **BELUM DITETAPKAN** | §10.C mengusulkan 3. Lihat §9 |
+| Pembagian peran mesin vs AI | **Mesin HANYA mengingatkan; AI yang memutuskan dan memanggil `/rename`** | Ditegaskan user 2026-08-06: *"Mesin disini hanya (secara cerewet akan terus) mengingatkan bahwasanya session belum dinamai. AI yang akan memutuskan membuat nama dan memanggil /rename."* Lihat §4.5 |
+| Nilai N (giliran minimum) | **N = 2** | User 2026-08-06, menggeser usul §10.C (3). Lihat §4.4 |
 
 ## 3. Prinsip yang menentukan bentuknya
 
@@ -122,29 +123,49 @@ Mengembalikan `true` **hanya bila ketiganya benar**:
 
 1. `statusFresh === true`
 2. `sessionName` falsy (absent / string kosong)
-3. `turnCount >= minTurns`
+3. `turnCount >= minTurns` — **`minTurns = 2`** (keputusan user 2026-08-06)
 
 Murni: tanpa I/O, tanpa jam, tanpa filesystem — seluruh matriks keputusannya bisa
 diuji tanpa satu pun berkas.
 
 ### 4.5 Bagaimana pemicu sampai ke AI
 
-Saat `shouldNudgeNaming` bernilai `true`, satu baris instruksi ikut menempel pada
-konten push — mekanisme yang sama dengan marker `[protocol: terse-turn]` yang
-sudah ada (`server.ts:59` `markerFor`).
+Saat `shouldNudgeNaming` bernilai `true`, satu baris **pengingat** ikut menempel
+pada konten push — mekanisme yang sama dengan marker `[protocol: terse-turn]`
+yang sudah ada (`server.ts:59` `markerFor`).
 
-Bunyi barisnya (final wording saat implementasi):
+**Pembagian perannya ditegaskan user 2026-08-06, dan batasnya tajam:**
 
-> `[sesi ini belum bernama — begitu arah percakapan jelas, panggil send_slash
-> "/rename <nama-hyphenated>" lalu beri tahu user satu baris: "sesi ini saya
-> namai X — mau ganti?"]`
+> *"Mesin disini hanya (secara cerewet akan terus) mengingatkan bahwasanya
+> session belum dinamai. AI yang akan memutuskan membuat nama dan memanggil
+> `/rename`."*
 
-**AI yang memanggil `send_slash`, bukan mesin.** §10.C menulis *"mesin meminta
-nama ke AI dan menerapkannya"*; dijalankan begini karena arsitektur push bersifat
-satu arah — mesin tidak punya kanal untuk meminta nama ke AI lalu menunggu
-jawabannya tanpa membangun kanal baru. **Semangat §10.C tetap utuh: mesin
-menjamin STRUKTUR (pemicunya mekanis, berulang, tak bisa dilupakan), AI mengisi
-ISI (namanya).** Yang berubah hanya siapa yang mengetik perintahnya.
+| Mesin | AI |
+|---|---|
+| Menyatakan **fakta**: sesi ini belum bernama | Memutuskan **apakah** arah percakapan sudah cukup jelas |
+| Mengulanginya di **tiap** pesan selama fakta itu bertahan | Mengarang **namanya** |
+| — | Memanggil `send_slash "/rename <nama>"` |
+| — | Memberi tahu user satu baris sesudahnya |
+
+Mesin **tidak** menyarankan nama, **tidak** menentukan waktunya, dan **tidak**
+menerapkan apa pun. Bunyi pengingatnya karena itu tetap satu pernyataan keadaan,
+bukan perintah berparameter:
+
+> `[sesi ini belum bernama]`
+
+⚠️ **Ini menggeser satu kalimat §10.C, dan digeser dengan sadar.** §10.C menulis
+*"mesin meminta nama ke AI dan menerapkannya"*. Dua alasan: (a) arsitektur push
+satu arah — mesin tidak punya kanal untuk meminta nama lalu menunggu jawabannya
+tanpa membangun kanal baru; (b) **keputusan user hari ini**, yang menaruh seluruh
+penilaian di AI. **Semangat §10.C tetap utuh — mesin menjamin STRUKTUR (pemicunya
+mekanis, berulang, tak bisa dilupakan), AI mengisi ISI.** Yang bergeser hanya
+siapa yang mengetik perintahnya.
+
+**Kenapa pembagian ini justru yang membuat N boleh kecil:** karena AI memegang
+penilaian "sudah jelas belum", N tidak perlu menjadi tebakan yang tepat. N cuma
+gerbang bawah — kalau di giliran ke-2 arahnya belum jelas, AI boleh menunggu, dan
+pengingatnya masih ada di giliran ke-3, ke-4, seterusnya. **Mesin yang cerewet
+membuat AI boleh sabar.**
 
 **Alternatif yang ditolak:** mesin memanggil model terpisah untuk mengarang nama.
 Butuh kanal baru, biaya token sendiri, dan menambah satu tempat yang bisa gagal —
@@ -218,10 +239,13 @@ Tidak ada. Seluruh bahannya sudah ada di sistem baru: `status.json`, `session.id
 kolom `session_id` di `conversations.db`, `send_slash`, `validateSessionName`,
 dan tempat penyusunan `meta`.
 
-## 9. Pertanyaan terbuka — satu, dan ia milik user
+## 9. Pertanyaan terbuka
 
-**Nilai N (giliran minimum sebelum penamaan dimulai).** §10.C mengusulkan **3**.
+**Tidak ada.** Nilai N ditetapkan user 2026-08-06: **N = 2**, menggeser usul
+§10.C (3).
 
-Taruhannya kecil justru karena §3: N berarti *"jangan mulai sebelum"*, bukan
-*"kesempatan sekali seumur sesi"*. N yang terlalu kecil menghasilkan nama yang
-menebak; N yang terlalu besar hanya menunda, tidak menggagalkan.
+Angka itu aman justru karena §4.5 menaruh penilaian di AI: N adalah **gerbang
+bawah**, bukan tebakan yang harus tepat. Di giliran ke-2 AI boleh memutuskan
+arahnya belum jelas dan menunggu — pengingatnya masih ada di giliran berikutnya,
+dan berikutnya lagi. Yang dipertaruhkan oleh N cuma kecepatan, tidak pernah
+hasilnya.
