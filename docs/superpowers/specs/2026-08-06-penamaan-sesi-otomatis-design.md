@@ -41,6 +41,7 @@ sistem baru hanya menulis `session.id` ke berkas dan tidak mengeluarkan
 | Penamaan sesi penerima handoff | **Bukan lewat mekanisme ini** | Pengirim handoff sudah tahu slug-nya; nama dipasang di detik pertama, pemicu tidak pernah menyala |
 | Pembagian peran mesin vs AI | **Mesin HANYA mengingatkan; AI yang memutuskan dan memanggil `/rename`** | Ditegaskan user 2026-08-06: *"Mesin disini hanya (secara cerewet akan terus) mengingatkan bahwasanya session belum dinamai. AI yang akan memutuskan membuat nama dan memanggil /rename."* Lihat §4.5 |
 | Nilai N (giliran minimum) | **N = 2** | User 2026-08-06, menggeser usul §10.C (3). Lihat §4.4 |
+| Bunyi pengingat | **Kalimat PERINTAH, bukan pernyataan keadaan** | `segera beri nama session ini jika context yang dibicarakan sudah jelas` — kata per kata dari user. Alasan lengkap + bukti di §4.5 |
 
 ## 3. Prinsip yang menentukan bentuknya
 
@@ -148,10 +149,38 @@ yang sudah ada (`server.ts:59` `markerFor`).
 | — | Memberi tahu user satu baris sesudahnya |
 
 Mesin **tidak** menyarankan nama, **tidak** menentukan waktunya, dan **tidak**
-menerapkan apa pun. Bunyi pengingatnya karena itu tetap satu pernyataan keadaan,
-bukan perintah berparameter:
+menerapkan apa pun.
 
-> `[sesi ini belum bernama]`
+**Bunyi pengingatnya — ditetapkan user 2026-08-06, kata per kata:**
+
+> `segera beri nama session ini jika context yang dibicarakan sudah jelas`
+
+**Kenapa PERINTAH, bukan pernyataan keadaan.** Rancangan pertama spec ini
+memakai `[sesi ini belum bernama]`; **user menolaknya dan memilih kalimat
+perintah**, dan proyek ini punya buktinya sendiri bahwa user benar:
+
+- **Kalimat yang menyatakan keadaan akan dikarang maksudnya oleh pembacanya, dan
+  pembacanya di sini AI.** Kasus terukur 2026-08-05: pesan error `no_known_chat`
+  berbunyi *"has not received a message yet"* — sebuah keadaan. AI mengarang
+  penjelasannya sendiri (*"bot Telegram tidak bisa memulai percakapan duluan,
+  ini aturan Telegram"*), yang **keliru**, lalu menyampaikannya ke user sebagai
+  fakta.
+- **Arah sebaliknya juga terukur:** ketika `SERVER_INSTRUCTIONS` diubah agar
+  menyebut **akibat** alih-alih hanya melarang, bot justru memberi tahu user di
+  depan tentang konsekuensinya. Aturan yang menyebut tindakan membuat AI jujur;
+  yang hanya menyatakan keadaan membuatnya menebak.
+- Kegagalan bentuk pernyataan **tidak terlihat**: AI yang membacanya sebagai
+  info pasif tidak melakukan apa-apa, dan tidak ada yang gagal.
+
+**Batas peran tetap terjaga di dalam kalimat perintah itu**, lewat anak kalimat
+*"jika context yang dibicarakan sudah jelas"*: syarat penilaiannya tetap milik
+AI. Mesin memerintahkan **tindakan**; **kapan**-nya tetap keputusan AI.
+
+**Risiko yang diterima sadar:** kalimat ini **tidak menyebut nama tool**.
+Diusulkan menyebut `send_slash "/rename <nama>"` dengan alasan bot uji sekarang
+telanjang (tidak ada skill yang mengajarkan caranya); **user memilih kalimatnya
+apa adanya**. Dicatat di sini supaya kalau uji hidup nanti menunjukkan AI menyala
+tapi tidak tahu caranya, penyebabnya sudah tertulis dan tidak perlu dicari.
 
 ⚠️ **Ini menggeser satu kalimat §10.C, dan digeser dengan sadar.** §10.C menulis
 *"mesin meminta nama ke AI dan menerapkannya"*. Dua alasan: (a) arsitektur push
