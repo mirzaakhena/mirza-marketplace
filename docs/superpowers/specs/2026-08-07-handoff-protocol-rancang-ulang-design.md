@@ -27,6 +27,91 @@ Dokumen ini mulai dari lapis yang belum pernah disentuh: **apa yang sebenarnya
 dijaga oleh handoff.** Seluruh isi `area-08` tetap dipakai — sebagai **bahan**,
 bukan sebagai kerangka.
 
+## 0.1 Peta bahasan — apa saja yang harus dibahas, dan status masing-masing
+
+Diminta user 2026-08-07 supaya tidak ada topik yang tercecer. **Membuatnya
+langsung membayar diri sendiri: delapan topik ternyata belum pernah disinggung
+sama sekali**, dan salah satunya (E1) menentukan bentuk seluruh sisanya.
+
+Status: ✅ diketok user · 🟡 prinsip disepakati, angka/detail belum · ⬜ belum
+pernah dibahas.
+
+### A. Kapan
+
+| # | Topik | Status | Di mana / sisa |
+|---|---|---|---|
+| A1 | Kapan **mulai mencatat** | 🟡 | Prinsip §1.3 + §6.3. Angkanya = T2 |
+| A2 | Kapan **tawarkan penyerahan** | 🟡 | Angkanya = T3. Ini yang selama ini TIDAK ADA |
+| A3 | Kapan **garis merah** (wajib serahkan) | ✅ | sisa <100k, sudah terpasang 0.25.0 |
+| A4 | Siapa yang memutuskan handoff | ✅ | §6.4 — mesin nyalakan, AI tawarkan, user ketok |
+| A5 | Ambang diperiksa **di batas selesai-task**, bukan di tengah pekerjaan | ⬜ | Aturan lama (SKILL-007) yang belum dikonfirmasi ulang. Tanpa ini pengingat bisa menginterupsi pekerjaan |
+
+### B. Dokumen
+
+| # | Topik | Status | Di mana / sisa |
+|---|---|---|---|
+| B1 | Kerangka & isi | ✅ | §3.2. **Perlu konfirmasi user: sudah lengkap atau masih kurang?** |
+| B2 | Lokasi & nama berkas | ✅ | §3.1 |
+| B3 | Siapa mengisi apa (🤖/🕐/🏁) | ✅ | §3.2 |
+| B4 | Aturan menulis (sunting bukan menumpuk, zona waktu, jangan duplikasi) | ✅ | §3.6 |
+| B5 | Penyimpanan/arsip — folder bot tidak punya git | ⬜ | T1 |
+| B6 | Berkas handoff **lama** di `<repo-kerja>/.handoff/` — dipindah, dibiarkan, atau dibaca sebagai warisan? | ⬜ | Belum pernah disinggung |
+
+### C. Prosesi
+
+| # | Topik | Status | Di mana / sisa |
+|---|---|---|---|
+| C1 | Isi prompt ke penerima | ✅ | §4.4 — empat butir, itu saja |
+| C2 | ACK dua arah | ✅ | §4.2 |
+| C3 | Rename oleh penerima | ✅ | §4.2 — sekaligus melahirkan berkas berikutnya |
+| C4 | Self-reset pengirim | ✅ | §4.3 — `/clear` saja |
+| C5 | **Cara memilih bot penerima** | ⬜ | Skill lama punya alur sendiri (`agent_list` → narasi status → tombol). Belum dibahas sama sekali |
+| C6 | **Penerima MENOLAK** (sedang bekerja) | ⬜ | Cron timeout dibuang, tapi penolakan tetap mungkin. Siapa yang menangani, dan apa yang terjadi pada pengirim? |
+| C7 | **Penerima offline** | ⬜ | Pesan mengantre di inbox — lalu pengirim menunggu berapa lama? Boleh `/clear`? |
+| C8 | **Tidak ada bot yang siap** | ⬜ | `area-08` §8.2b punya jawaban lama (tombol darurat). Belum dikonfirmasi |
+| C9 | Dua laporan wajib ke user | ✅ | §5 |
+
+⚠️ **C6 dan C7 adalah lubang yang lahir dari membuang cron timeout.** Timeout
+itu dulu yang menjawab *"berapa lama pengirim menunggu sebelum menyerah"*.
+Membuangnya benar — tapi pertanyaannya tidak ikut hilang, cuma kehilangan
+penjawabnya.
+
+### D. Syarat & penjagaan
+
+| # | Topik | Status | Di mana / sisa |
+|---|---|---|---|
+| D1 | **Syarat kesiapan penerima** | ⬜ | `area-08` §8.2b menetapkan: context <100k **dan** tidak sedang bekerja. Belum dikonfirmasi ulang untuk rancangan baru |
+| D2 | Clarity check pra-berkas (3 syarat) | ✅ | §5 — dipertahankan |
+| D3 | Mandat README sebelum menulis | ✅ | §5 — dipertahankan |
+| D4 | Larangan penerima | ✅ | §5 |
+| D5 | Penegakan mekanis di titik kirim | ⬜ | T4 |
+| D6 | Pengingat `handoff-note-stale` | 🟡 | §6.3 — kondisinya jelas, belum diimplementasikan |
+
+### E. Cakupan & peralihan
+
+| # | Topik | Status | Di mana / sisa |
+|---|---|---|---|
+| E1 | ⭐ **Ini dibangun DI MANA — mengganti skill lama, atau lahir di `cc-plugin`?** | ⬜ | **Belum dibahas, dan ini menentukan bentuk seluruh sisanya** |
+| E2 | Nasib enam bot harian | ⬜ | Mereka memakai skill lama. Kalau rancangan ini lahir di `cc-plugin`, mereka tidak kebagian |
+| E3 | Peralihan — dua protokol hidup bersamaan? | ⬜ | Sudah terjadi untuk ambang: bot harian pakai 35%, bot uji pakai <100k |
+| E4 | Apakah `SKILL.md` + `template.md` lama dihapus | ⬜ | |
+
+⭐ **E1 adalah keputusan terbesar yang belum diambil.** Kalau lahir di
+`cc-plugin`, ia dapat mesin (pengingat, hook, pengisian jangkar otomatis) tapi
+tidak menyentuh enam bot harian. Kalau mengganti skill lama, ia langsung dipakai
+semua bot tapi tetap murni teks — dan **seluruh bagian "mesin mengisi jangkar"
+(§2 P2) gugur**, karena skill tidak bisa menjalankan apa pun.
+
+### F. Sudah dibuang — dicatat supaya tidak dihidupkan lagi
+
+| Dibuang | Sifat |
+|---|---|
+| Mode Now / After this task / Ping pong | Keputusan user 2026-08-07 |
+| **Delegasi** | Dibatalkan **sadar**, padahal sudah didesain 4/4 (`area-08` §8.C) |
+| Cron timeout ACK | Keputusan user — konsekuensinya C6/C7 |
+| Konvensi nama sesi sebagai status | Keputusan user |
+| Mode File only | Sudah DROP sejak `area-08` §8.A |
+
 ## 1. Filosofi — apa yang sebenarnya dijaga
 
 Ditanyakan ke user secara eksplisit. Jawabannya **dua**, dan urutannya penting:
