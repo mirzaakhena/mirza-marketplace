@@ -281,10 +281,17 @@ identik (semua bot 1M); bedanya baru terasa kalau ada bot ber-window lain.
 Bentuk kodenya jadi lebih sederhana: satu konstanta, tanpa perlu tahu ukuran
 window.
 
-⚠️ **Utang yang lahir:** komentar panjang di `reminders.ts` (`context-low`)
-membela ambang ABSOLUT dengan ukuran 30 sesi nyata. Ia menjawab pertanyaan lama.
-**Jangan dihapus — tulis ulang supaya jelas ia menjawab pertanyaan yang sudah
-diganti** (Tingkat 18: pembalikan wajib dibuktikan, bukan disembunyikan).
+✅ **SUDAH DIIMPLEMENTASIKAN — `cc-plugin` 0.33.0, commit `9206831` di repo
+`mirza-bots`.** `MIN_CONTEXT_REMAINING` (100k) → `MAX_CONTEXT_USED` (400k);
+`ReminderContext.contextRemaining` → `contextUsed`, dibaca langsung dari
+`total_input_tokens` sehingga `context_window_size` tidak lagi dibutuhkan; teks
+pengingat diganti. **Test 609 → 614 hijau, `tsc` bersih.** Komentar lama yang
+membela ambang absolut **tidak dihapus** — ditulis ulang supaya jelas ia
+menjawab pertanyaan yang sudah diganti (Tingkat 18).
+
+⚠️ **Belum dipasang.** `cc-plugin` dimuat dari plugin cache, jadi 0.33.0 baru
+aktif sesudah `claude plugin update` + bot dibuka ulang. Urutannya **plugin
+dulu, baru restart bot** (README `mirza-bots` §"Urutan rilis").
 
 ⚠️ **Konsekuensi yang harus diterima sadar:** alarm ini menyala **6x lebih
 lama** dari sebelumnya (dari 40% sampai 100%, bukan 90% sampai 100%). Syarat
@@ -297,10 +304,14 @@ baru: **AI mengingat penolakan user di dalam sesi itu** (§6.4).
 **Menjawab N2.** Sesi tanpa repo tidak melahirkan handoff. Sesi dengan dua repo:
 **tanya user**, jangan pilih sendiri.
 
-⚠️ Untuk sesi ini user memilih **`mirza-bots`**. Dicatat apa adanya beserta
-catatan bot-03: seluruh pekerjaan sesi ini ada di `mirza-marketplace` (spec +
-BACKLOG), `mirza-bots` nol baris sejak bot-02 — jadi berkas handoffnya terpisah
-dari spec yang ia tunjuk. Disampaikan ke user sebelum diputuskan.
+Untuk sesi ini user mula-mula memilih `mirza-bots`, lalu **mengubahnya ke
+`mirza-marketplace`** setelah bot-03 menyampaikan bahwa seluruh pekerjaan sesi
+ini ada di sana (spec + BACKLOG) sementara `mirza-bots` nol baris sejak bot-02.
+✅ **Berkas handoff sesi ini: `mirza-marketplace/.handoff/`.**
+
+**Aturan turunannya, dan inilah yang layak dibawa ke skill:** *repo yang dipilih
+adalah repo tempat pekerjaannya berada — bukan repo yang topiknya dibicarakan.*
+Sesi ini membicarakan bot, tapi mengerjakan dokumen.
 
 ### K3 — Nama & format berkas TETAP
 
