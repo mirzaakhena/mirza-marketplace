@@ -229,7 +229,7 @@ Satu baris = satu entri keputusan di dokumen sumber (satu baris tabel, atau satu
 | 1 — Fondasi | 30 | 4 | 0 | 24 | 2 TIDAK RELEVAN | Sebagian besar fondasi state/config sudah SELESAI; `doctor`, liveness terpadu, dan retensi/permission file masih kosong total. |
 | 2 — Jalur pesan | 32 | 5 | 4 | 22 | 1 TIDAK RELEVAN | Pipa dasar (allowlist, auto-download foto) jalan, tapi gap terbesar sistem baru ada di sini: `message_id` tak tersimpan, chunking tak ada, quoting tak ada. |
 | 3 — Penegakan | 21 | 1 | 0 | 20 | — | Hampir seluruhnya belum dibangun — hanya ack-tap-tombol yang sudah SELESAI; validasi tombol, prefiks `ai:`, dan penegakan mesin (ack/Stop-guard) masih nol. |
-| 4 — Sesi | 89 | **49** | **10** | 20 | 8 TIDAK RELEVAN/DITUNDA-sadar/DIGANTI · 4 PERLU DICEK | **DIREKONSILIASI 2026-08-07.** Angka lama ("0 SELESAI / 90 BELUM / belum mulai dibangun sama sekali") **SALAH TOTAL** — wrapper PTY, antrean injeksi, hook `SessionStart`, statusline bridge, dan `/context` semuanya sudah hidup. Sisa terbesarnya terblokir **satu akar: `/switch`**. |
+| 4 — Sesi | 90 (+1 temuan baru) | **50** | **11** | 22 | 8 TIDAK RELEVAN/DITUNDA-sadar/DIGANTI · **0 PERLU DICEK** | **DIREKONSILIASI 2026-08-07.** Angka lama ("0 SELESAI / 90 BELUM / belum mulai dibangun sama sekali") **SALAH TOTAL** — wrapper PTY, antrean injeksi, hook `SessionStart`, statusline bridge, dan `/context` semuanya sudah hidup. Sisa terbesarnya terblokir **satu akar: `/switch`**. |
 | 5 — Antar-bot | 82 | **14** | **5** | 59 | 4 DIGANTI/DITUNDA-sadar | **DIREKONSILIASI 2026-08-07.** Tahap ini ternyata **dua proyek berbeda ukuran**: **§7 (jalur antar-bot) hampir selesai** — sisanya cuma broadcast/fan-out + beberapa field `agent_status`; **§8 (mesin handoff) belum sama sekali** (~50 baris), masih dilayani skill `handoff` sistem lama. |
 | 6 — Sisanya | 17 | 0 | 0 | 16 | 1 BUTUH KEPUTUSAN | Belum mulai; satu item (B-6, penyembunyian sesi remeh) terkunci kontradiksi kriteria antar-dokumen. |
 | **Tanpa tahap** | 41 | 0 | 0 | 0 | 41 BUTUH KEPUTUSAN | Perlu keputusan manusia sebelum bisa masuk tahap manapun — lihat Bagian 4 & 6. |
@@ -423,7 +423,7 @@ Dikelompokkan per rumpun supaya tidak 41 baris terpisah tanpa konteks:
 |---|---|---|---|---|
 | PTY-068/069/070/076;SCAR-039/079/081 | Lifecycle bot jadi kolom data (K-7) | MERGE | **DITUNDA (sadar)** — §5.4 mencabut derivasi status dari nama sesi; `agent_status` (0.21.0) SENGAJA tidak mengembalikan `lifecycle` supaya tidak menghidupkannya lewat pintu belakang | area-05§5.4 |
 | TG-027 | Sesi aktif dikecualikan dari daftar `/switch` | KEEP | BELUM (terblokir `/switch`) | area-05§5.6 |
-| TG-029(sisa) | Satu tombol/baris, label ≤60 char, ❌Cancel terakhir | KEEP | ❓ PERLU DICEK — `buildInlineKeyboard` ada di `engine.ts`, aturan ≤60 char belum ditelusuri | area-05§5.6 |
+| TG-029(sisa) | Satu tombol/baris, label ≤60 char, ❌Cancel terakhir | KEEP | **BELUM** (dicek 2026-08-07) — `buildInlineKeyboard` (`engine/messages.ts`) merender baris apa adanya: **tidak** ada batas 60 char, **tidak** ada aturan satu-tombol-per-baris, **tidak** ada aturan ❌Cancel terakhir. Yang ADA justru pagar lain: label bernomor wajib punya baris bernomor yang cocok (`numbered_buttons_without_list`) | area-05§5.6 |
 | TG-032;SCAR-052 | `shortId` 8 hex di `callback_data` | KEEP | BELUM (`grep shortId` = 0) | area-05§5.6 |
 | TG-033 | Tap valid tak pre-announce; banner saat sesi ganti | KEEP | **SEBAGIAN** — banner sesi ganti SELESAI (0.28.0 Event-2, terbukti hidup); sisi `/switch` belum ada | area-05§5.6 |
 | TG-178,TG-183 | Enumerasi `*.jsonl` regex UUID + `encodeProjectDir` | KEEP | **TIDAK RELEVAN (sadar)** — `cc-wrapper` memakai `--continue`, menyerahkan pertanyaannya ke CC; `startup.ts` mencatat kenapa menebak encoding folder berbahaya | area-05§5.6 |
@@ -459,7 +459,8 @@ Dikelompokkan per rumpun supaya tidak 41 baris terpisah tanpa konteks:
 | SCAR-031 | Snapshot eager daftar sesi saat keystroke `/clear` | KEEP | BELUM (terblokir `/switch`) | area-06§6.2 |
 | SCAR-020 | Chunking aman code-point (`Array.from`, no split surrogate) | KEEP | **SELESAI** — `cc-wrapper/src/typer.ts` | area-06§6.2 |
 | SCAR-029 | Enter TUI = `\r`, bukan `\n` | KEEP | **SELESAI** — `typer.ts` (`SUBMIT_DELAY_MS` memisahkan teks dari `\r`) | area-06§6.2 |
-| PTY-063 | Kegagalan dispatch 1 item tak hentikan antrean | KEEP | ❓ PERLU DICEK — `queue.ts` ada, perilaku kegagalan per-item belum ditelusuri | area-06§6.2 |
+| PTY-063 | Kegagalan dispatch 1 item tak hentikan antrean | KEEP | **SELESAI** (dicek 2026-08-07) — dua sisi terjaga di `cc-wrapper/src/main.ts`: pemindai `continue` per berkas (baca gagal / payload ditolak tidak menghentikan sisanya), dan penguras memakai `runPlan(...).finally(() => dispatching = false)` sehingga dispatch yang gagal **tidak bisa mengunci antrean permanen**. ⚠️ **Tapi lihat baris temuan baru di bawah: kegagalannya tidak tercatat di mana pun** | area-06§6.2 |
+| — | `runPlan` yang gagal tidak dicatat — injeksi bisa gagal DIAM-DIAM | **TEMUAN BARU (2026-08-07)** | BELUM — `void runPlan(...).finally(...)` tanpa `.catch`: antreannya selamat (PTY-063 terpenuhi), tapi kalau penulisan ke PTY melempar, **tidak ada satu baris log pun**. Ini pola yang BACKLOG hukum berulang: yang tidak meninggalkan jejak tidak bisa diukur. Perbaikannya satu `.catch(err => console.error(...))` | area-06§6.2 |
 | — | Aturan: konstanta pacing wajib test + verifikasi live | KEEP aturan proses | **SELESAI** — `cc-wrapper` 57 test hijau, dan tiap rilis diuji hidup | area-06§6.2 |
 | PTY-067/071/072;SCAR-032/033 | Deteksi sesi baru GANTI ke hook `SessionStart` | GANTI(MERGE) | **SELESAI** — `cc-plugin/hooks/session-start.ts`, terbukti di `logs/session-hook.log` (`source=clear/resume/startup`) | area-06§6.3 |
 | — | Timeout fallback deteksi sesi → alarm di `doctor` | FITUR BARU | BELUM | area-06§6.3 |
@@ -478,7 +479,7 @@ Dikelompokkan per rumpun supaya tidak 41 baris terpisah tanpa konteks:
 | PTY-037 | JSON malformed → karantina `.rejected-<ts>` | KEEP+perbaikan | BELUM — payload ditolak dicatat ke stderr, tidak dikarantina (`grep rejected-` = 0) | area-06§6.7 |
 | PTY-109–114;SCAR-045 | Batch = satu unit atomik (maks 8 item) | KEEP kapabilitas | **SELESAI** — `MAX_SLASH_BATCH`; batch cacat ditolak UTUH, bukan itemnya dibuang | area-06§6.7 |
 | — | Turunkan ulang jaminan atomisitas batch secara eksplisit | Tugas wajib | **SELESAI** — alasannya ditulis di header `slash/send-tool.ts` | area-06§6.7 |
-| SCAR-071 | Ack dua tingkat injeksi (`injected` ≠ selesai semantik) | KEEP+utang dibayar | ❓ PERLU DICEK — ack `queued … injects it on its next tick` ada; tingkat keduanya belum ditelusuri | area-06§6.7 |
+| SCAR-071 | Ack dua tingkat injeksi (`injected` ≠ selesai semantik) | KEEP+utang dibayar | **SEBAGIAN** (dicek 2026-08-07) — tingkat PERTAMA ada dan justru **lebih jujur dari yang diminta**: bunyinya `queued "<cmd>" -- the wrapper injects it on its next tick`, mengaku *queued*, bukan *injected*, jadi bahaya "dikira sudah selesai" sudah berkurang di tingkat kata. **Tingkat KEDUA (konfirmasi injeksinya benar-benar mendarat) TIDAK ADA** — dan baris temuan baru di atas menjelaskan kenapa itu terasa: kegagalan `runPlan` juga tidak dicatat, jadi injeksi yang gagal tidak punya SATU pun jejak | area-06§6.7 |
 | PTY-064,065 | First-run mulai segar; resume via mtime jsonl | KEEP | **SELESAI (bentuk berbeda, sadar)** — `--continue` + retry tanpa flag; menebak mtime jsonl DIBUANG, alasannya di `startup.ts` | area-06§6.8 |
 | PTY-066;SCAR-041/080 | Resume identitas seed sinkron, guard `session_id` | KEEP wajib | **SELESAI** — hook `SessionStart` menulis `session.id` saat `source=resume`, terbukti di log | area-06§6.8 |
 | PTY-073;SCAR-081 | Pasca-`/clear` nama diterapkan, wajib verifikasi ulang | KEEP | **SELESAI** — tabel `session_first_name` + perbandingan nama-lahir (0.26.0), disempurnakan 0.29.0 | area-06§6.8 |
@@ -488,7 +489,7 @@ Dikelompokkan per rumpun supaya tidak 41 baris terpisah tanpa konteks:
 | TG-165–168 | Statusline bridge merantai (settings.json, snapshot, teruskan stdin) | KEEP | **SELESAI** — `bin/statusline-bridge.ts` + `context/install.ts` + `context/invoke.ts`; terbukti hidup (dijalankan manual: exit 0, 318 ms, berkas tertulis) | area-11§11.1 |
 | SCAR-084 | Guard `isOurOwnBridge` (cegah loop simpan diri) | KEEP wajib | **SELESAI (nama berbeda)** — `chain.kind === "already-bridge"` di `context/install.ts` | area-11§11.1 |
 | — | Alarm bila capture tidak berbunyi dalam N menit | FITUR BARU | BELUM — **dan sekarang ada alasan baru untuk merancangnya ulang**: `status.json` beku itu NORMAL selama sesi tidak punya giliran, jadi alarm berbasis umur berkas akan berbunyi palsu. Pemicu yang benar harus membandingkan dengan aktivitas sesi, bukan dengan jam dinding | area-11§11.1 |
-| — | Backup `settings.json` tidak menumpuk tanpa batas | Perbaikan | ❓ PERLU DICEK — tidak ditemukan mekanisme backup sama sekali di `install.ts`; kalau memang tidak ada backup, barisnya TIDAK RELEVAN | area-11§11.1 |
+| — | Backup `settings.json` tidak menumpuk tanpa batas | Perbaikan | **TIDAK RELEVAN** (dicek 2026-08-07) — tidak ada berkas backup yang pernah ditulis. `install.ts` menyimpan isi sebelumnya **di memori** (`before`) dan menulisnya kembali hanya saat rollback. Tidak ada yang bisa menumpuk karena tidak ada yang pernah dibuat | area-11§11.1 |
 | SCAR-017 | `/context` menunggu data, bukan tidur 5 detik flat | Perbaikan | **SELESAI** — `context/wait.ts` (`waitForCapture`); yang ditunggu KEJADIANNYA, bukan durasi yang ditebak | area-11§11.1,§11.2 |
 | — | Bila tak ada statusLine sebelumnya, bridge render sendiri | FITUR BARU | **DITUNDA (sadar)** — bridge SENGAJA tidak pernah mencetak ke stdout; statusline user menang, `/context` yang mengalah | area-11§11.1 |
 | — | Perilaku tetap: non-JSON→null, tanpa `CLAUDE_PROJECT_DIR`→skip, tulis atomik | KEEP | **SELESAI** — `readCapturedStatus` menelan JSON rusak jadi `null`; `resolveBotHome` jatuh ke `cwd`; tulis `.tmp.<pid>`+rename | area-11§11.1 |
@@ -514,11 +515,20 @@ Dikelompokkan per rumpun supaya tidak 41 baris terpisah tanpa konteks:
 
 **Tahap 4: 90 item.** Direkonsiliasi ke kode nyata **2026-08-07** oleh bot-03
 (sebelumnya "90 BELUM", tidak pernah dicek). Hasil, **dihitung dari tabel di atas,
-bukan ditaksir**: **49 SELESAI · 10 SEBAGIAN · 8 TIDAK RELEVAN/DITUNDA-sadar/DIGANTI
-· 4 PERLU DICEK · 20 BELUM**. Dan **sebagian besar yang BELUM terblokir satu akar
+bukan ditaksir**: **50 SELESAI · 11 SEBAGIAN · 8 TIDAK RELEVAN/DITUNDA-sadar/DIGANTI
+· 22 BELUM · 0 PERLU DICEK**. Dan **sebagian besar yang BELUM terblokir satu akar
 yang sama: `/switch` belum dibawa ke sistem baru** (keputusan sadar,
 `slash/send-tool.ts` menyebutkannya apa adanya) — **delapan baris berbeda ternyata
 satu pekerjaan.**
+
+✅ **Empat baris `PERLU DICEK` dari pass pertama SUDAH DITUTUP** pada hari yang
+sama, dengan membaca kodenya, bukan `grep`: TG-029 (**BELUM** — tidak ada batas
+60 char maupun aturan satu-tombol-per-baris), PTY-063 (**SELESAI** — dua sisi
+terjaga), SCAR-071 (**SEBAGIAN** — tingkat pertama ada dan lebih jujur dari yang
+diminta, tingkat kedua tidak), backup `settings.json` (**TIDAK RELEVAN** — tidak
+ada backup yang pernah ditulis). **Menutupnya melahirkan SATU temuan baru** —
+`runPlan` yang gagal tidak dicatat di mana pun — yang langsung didaftarkan
+sebagai barisnya sendiri sesuai Aturan keempat.
 
 ⚠️ **Metode dan batasnya, supaya angka ini tidak dipercaya lebih dari haknya:**
 verdict di atas ditegakkan dengan **`grep` penanda konkret** (nama konstanta,
