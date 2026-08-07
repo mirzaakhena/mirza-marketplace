@@ -228,8 +228,8 @@ Satu baris = satu entri keputusan di dokumen sumber (satu baris tabel, atau satu
 | 1 — Fondasi | 30 | 4 | 0 | 24 | 2 TIDAK RELEVAN | Sebagian besar fondasi state/config sudah SELESAI; `doctor`, liveness terpadu, dan retensi/permission file masih kosong total. |
 | 2 — Jalur pesan | 32 | 5 | 4 | 22 | 1 TIDAK RELEVAN | Pipa dasar (allowlist, auto-download foto) jalan, tapi gap terbesar sistem baru ada di sini: `message_id` tak tersimpan, chunking tak ada, quoting tak ada. |
 | 3 — Penegakan | 21 | 1 | 0 | 20 | — | Hampir seluruhnya belum dibangun — hanya ack-tap-tombol yang sudah SELESAI; validasi tombol, prefiks `ai:`, dan penegakan mesin (ack/Stop-guard) masih nol. |
-| 4 — Sesi | 90 | 0 | 0 | 90 | — | Belum mulai dibangun sama sekali (tahap terbesar dari segi jumlah item — wrapper PTY, injeksi, statusline bridge, `/context`). |
-| 5 — Antar-bot | 82 | 0 | 0 | 82 | — | Belum mulai — mencakup seluruh agent-bus dan mesin handoff data-driven. |
+| 4 — Sesi | 90 | **≈45** | **≈9** | ≈27 | ≈5 TIDAK RELEVAN/DITUNDA sadar · ≈4 PERLU DICEK | **DIREKONSILIASI 2026-08-07.** Angka lama ("0 SELESAI / 90 BELUM / belum mulai dibangun sama sekali") **SALAH TOTAL** — wrapper PTY, antrean injeksi, hook `SessionStart`, statusline bridge, dan `/context` semuanya sudah hidup. Sisa terbesarnya terblokir **satu akar: `/switch`**. |
+| 5 — Antar-bot | 82 | 0 | 0 | 82 | — | ⚠️ **ANGKA INI BASI, JANGAN DIPAKAI.** `agent_list`/`agent_status`/`agent_send` sudah hidup (0.21.0 dst) sementara tabel ini masih menulis nol. **Rekonsiliasi Tahap 5 belum dikerjakan** — itu pekerjaan berikutnya, dan sampai selesai setiap angka di baris ini tidak boleh dijadikan dasar keputusan. |
 | 6 — Sisanya | 17 | 0 | 0 | 16 | 1 BUTUH KEPUTUSAN | Belum mulai; satu item (B-6, penyembunyian sesi remeh) terkunci kontradiksi kriteria antar-dokumen. |
 | **Tanpa tahap** | 41 | 0 | 0 | 0 | 41 BUTUH KEPUTUSAN | Perlu keputusan manusia sebelum bisa masuk tahap manapun — lihat Bagian 4 & 6. |
 
@@ -420,98 +420,111 @@ Dikelompokkan per rumpun supaya tidak 41 baris terpisah tanpa konteks:
 
 | ID | Fitur | Verdict | Status | Sumber |
 |---|---|---|---|---|
-| PTY-068/069/070/076;SCAR-039/079/081 | Lifecycle bot jadi kolom data (K-7) | MERGE | BELUM | area-05§5.4 |
-| TG-027 | Sesi aktif dikecualikan dari daftar `/switch` | KEEP | BELUM | area-05§5.6 |
-| TG-029(sisa) | Satu tombol/baris, label ≤60 char, ❌Cancel terakhir | KEEP | BELUM | area-05§5.6 |
-| TG-032;SCAR-052 | `shortId` 8 hex di `callback_data` | KEEP | BELUM | area-05§5.6 |
-| TG-033 | Tap valid tak pre-announce; banner saat sesi ganti | KEEP | BELUM | area-05§5.6 |
-| TG-178,TG-183 | Enumerasi `*.jsonl` regex UUID + `encodeProjectDir` | KEEP | BELUM | area-05§5.6 |
-| TG-182 | Sort mtime descending daftar sesi | KEEP | BELUM | area-05§5.6 |
-| TG-018 | Validasi nama sesi (CR/LF, kosong, spasi, ≤64 char) | KEEP | BELUM | area-05§5.7 |
-| TG-019,TG-026 | Guard state dir ter-resolve + pesan solusi | KEEP | BELUM | area-05§5.7 |
-| TG-020 | Guard heartbeat wrapper segar (<30s) | KEEP | BELUM | area-05§5.7 |
+| PTY-068/069/070/076;SCAR-039/079/081 | Lifecycle bot jadi kolom data (K-7) | MERGE | **DITUNDA (sadar)** — §5.4 mencabut derivasi status dari nama sesi; `agent_status` (0.21.0) SENGAJA tidak mengembalikan `lifecycle` supaya tidak menghidupkannya lewat pintu belakang | area-05§5.4 |
+| TG-027 | Sesi aktif dikecualikan dari daftar `/switch` | KEEP | BELUM (terblokir `/switch`) | area-05§5.6 |
+| TG-029(sisa) | Satu tombol/baris, label ≤60 char, ❌Cancel terakhir | KEEP | ❓ PERLU DICEK — `buildInlineKeyboard` ada di `engine.ts`, aturan ≤60 char belum ditelusuri | area-05§5.6 |
+| TG-032;SCAR-052 | `shortId` 8 hex di `callback_data` | KEEP | BELUM (`grep shortId` = 0) | area-05§5.6 |
+| TG-033 | Tap valid tak pre-announce; banner saat sesi ganti | KEEP | **SEBAGIAN** — banner sesi ganti SELESAI (0.28.0 Event-2, terbukti hidup); sisi `/switch` belum ada | area-05§5.6 |
+| TG-178,TG-183 | Enumerasi `*.jsonl` regex UUID + `encodeProjectDir` | KEEP | **TIDAK RELEVAN (sadar)** — `cc-wrapper` memakai `--continue`, menyerahkan pertanyaannya ke CC; `startup.ts` mencatat kenapa menebak encoding folder berbahaya | area-05§5.6 |
+| TG-182 | Sort mtime descending daftar sesi | KEEP | BELUM (terblokir `/switch`) | area-05§5.6 |
+| TG-018 | Validasi nama sesi (CR/LF, kosong, spasi, ≤64 char) | KEEP | **SELESAI** — regex `pty_send_slash` menegakkan nama ≤64 & arg ≤256 (`slash/send-tool.ts`) | area-05§5.7 |
+| TG-019,TG-026 | Guard state dir ter-resolve + pesan solusi | KEEP | **SELESAI** — `resolveBotHome`; folder yang bukan bot dijawab tiap tool berikut alasannya (W-16) | area-05§5.7 |
+| TG-020 | Guard heartbeat wrapper segar (<30s) | KEEP | BELUM (`grep heartbeat` = 0; yang ada `wrapper.pid`) | area-05§5.7 |
 | TG-021,TG-024 | Nama dipakai→ditolak; self-rename=no-op | KEEP | BELUM | area-05§5.7 |
-| TG-022 | `/new` tanpa ack, banner saat siap | KEEP | BELUM | area-05§5.7 |
-| TG-025 | `/rename` balas "✏️ Renaming session..." | KEEP | BELUM | area-05§5.7 |
-| TG-150;LOSS-4 | Banner ganti-sesi dikirim mesin + fix bug pencatatan | KEEP+FIX | BELUM | area-05§5.8,area-12§12.1 |
-| SCAR-085 | Banner tak boleh hardcode satu chat tujuan | KEEP | BELUM | area-05§5.8 |
-| TG-055;SCAR-051 | Peta `shortId→sesi` in-memory; expired msg jelas | KEEP | BELUM | area-05§5.9 |
-| PTY-039;SCAR-025 | Spawn CC lewat shell (cmd/login shell) | KEEP | BELUM | area-06§6.1 |
-| PTY-040,041 | `CLAUDE_BIN`/`CLAUDE_ARGS` bisa dioverride | KEEP | BELUM | area-06§6.1 |
-| PTY-042 | Env anak selalu bawa lokasi state | KEEP | BELUM | area-06§6.1 |
-| PTY-043,044,045 | Ukuran PTY dari terminal user, xterm-256color, resize | KEEP | BELUM | area-06§6.1 |
-| PTY-046 | CC exit → wrapper exit dgn exit code CC | KEEP | BELUM | area-06§6.1 |
-| PTY-047,048;SCAR-066 | SIGINT diteruskan ke PTY; SIGTERM kill PTY | KEEP | BELUM | area-06§6.1 |
-| PTY-049 | Shutdown bersih: hentikan timer, hapus heartbeat/pid | KEEP | BELUM | area-06§6.1 |
-| PTY-050 | Log ISO ke stderr + `wrapper.log` | KEEP | BELUM | area-06§6.1 |
-| PTY-051 | Satu proses CC seumur wrapper; ganti sesi via `/resume` | KEEP | BELUM | area-06§6.1 |
-| SCAR-096 | Jangan pakai `import.meta.dir` (Bun-only) di wrapper Node | KEEP | BELUM | area-06§6.1 |
-| — | `SUBMIT_DELAY_MS`=250 (pisah teks dari `\r`) | KEEP kontrak | BELUM | area-06§6.2 |
-| — | `MIN_INJECTION_GAP_MS`=1500 | KEEP kontrak | BELUM | area-06§6.2 |
-| — | `POST_INJECTION_DELAY_MS`=1000 | KEEP kontrak | BELUM | area-06§6.2 |
-| — | `CLEAR_SETTLE_MS`=1500 | KEEP kontrak | BELUM | area-06§6.2 |
-| — | `CLEAR_BARRIER_TIMEOUT_MS`=600000 | KEEP kontrak | BELUM | area-06§6.2 |
-| — | `QUEUE_POLL_MS`=200 (kandidat event-driven) | KEEP kontrak | BELUM | area-06§6.2 |
-| — | `CHUNK_SIZE`/`CHUNK_DELAY_MS`=100/30 (anti head-drop) | KEEP kontrak | BELUM | area-06§6.2 |
-| — | Antrean FIFO tunggal + satu drainer + gate | KEEP mekanisme | BELUM | area-06§6.2 |
-| — | Gate dua mekanisme: `holdFor` monotonik + barrier `/clear` | KEEP | BELUM | area-06§6.2 |
-| SCAR-031 | Snapshot eager daftar sesi saat keystroke `/clear` | KEEP | BELUM | area-06§6.2 |
-| SCAR-020 | Chunking aman code-point (`Array.from`, no split surrogate) | KEEP | BELUM | area-06§6.2 |
-| SCAR-029 | Enter TUI = `\r`, bukan `\n` | KEEP | BELUM | area-06§6.2 |
-| PTY-063 | Kegagalan dispatch 1 item tak hentikan antrean | KEEP | BELUM | area-06§6.2 |
-| — | Aturan: konstanta pacing wajib test + verifikasi live | KEEP aturan proses | BELUM | area-06§6.2 |
-| PTY-067/071/072;SCAR-032/033 | Deteksi sesi baru GANTI ke hook `SessionStart` | GANTI(MERGE) | BELUM | area-06§6.3 |
+| TG-022 | `/new` tanpa ack, banner saat siap | KEEP | **SEBAGIAN** — `/new` ada di `KNOWN_COMMANDS`; banner "siap" belum dipisahkan dari pengumuman start | area-05§5.7 |
+| TG-025 | `/rename` balas "✏️ Renaming session..." | KEEP | **SELESAI** (bentuk berbeda: `✏️ Ganti nama sesi jadi …`, `slash/map.ts`) | area-05§5.7 |
+| TG-150;LOSS-4 | Banner ganti-sesi dikirim mesin + fix bug pencatatan | KEEP+FIX | **SELESAI** — banner mesin 0.28.0; sumbernya diperbaiki 0.29.0; **bug pencatatannya baru benar-benar ditutup 0.30.0** | area-05§5.8,area-12§12.1 |
+| SCAR-085 | Banner tak boleh hardcode satu chat tujuan | KEEP | **SELESAI** — `announce()` lewat `engine.reply`; bot tanpa chat menjawab `no_known_chat`, bukan chat hardcode | area-05§5.8 |
+| TG-055;SCAR-051 | Peta `shortId→sesi` in-memory; expired msg jelas | KEEP | BELUM (terblokir `/switch`) | area-05§5.9 |
+| PTY-039;SCAR-025 | Spawn CC lewat shell (cmd/login shell) | KEEP | **SELESAI** — `cc-wrapper/src/pty.ts` | area-06§6.1 |
+| PTY-040,041 | `CLAUDE_BIN`/`CLAUDE_ARGS` bisa dioverride | KEEP | **SEBAGIAN** — `CLAUDE_BIN` ada (`pty.ts`); `CLAUDE_ARGS` tidak (`grep` = 0) | area-06§6.1 |
+| PTY-042 | Env anak selalu bawa lokasi state | KEEP | **SELESAI** — `CLAUDE_PROJECT_DIR` dibaca `resolveBotHome` di seluruh jalur | area-06§6.1 |
+| PTY-043,044,045 | Ukuran PTY dari terminal user, xterm-256color, resize | KEEP | **SELESAI** — `pty.ts` (`xterm-256color`) + `main.ts` (`resize`) | area-06§6.1 |
+| PTY-046 | CC exit → wrapper exit dgn exit code CC | KEEP | **SELESAI** — `cc-wrapper/src/main.ts` | area-06§6.1 |
+| PTY-047,048;SCAR-066 | SIGINT diteruskan ke PTY; SIGTERM kill PTY | KEEP | **SEBAGIAN** — `SIGINT` di `cc-wrapper/src/main.ts`; `SIGTERM` hanya ada di `cc-plugin/src/engine/lock.ts`, bukan di wrapper | area-06§6.1 |
+| PTY-049 | Shutdown bersih: hentikan timer, hapus heartbeat/pid | KEEP | **SEBAGIAN** — `wrapper.pid` dikelola; tidak ada heartbeat sama sekali | area-06§6.1 |
+| PTY-050 | Log ISO ke stderr + `wrapper.log` | KEEP | **SEBAGIAN** — stderr ada; `wrapper.log` tidak (`grep` = 0). Dokumen sumbernya sendiri menulis "silakan dibantah" | area-06§6.1 |
+| PTY-051 | Satu proses CC seumur wrapper; ganti sesi via `/resume` | KEEP | **SEBAGIAN** — satu proses per wrapper SELESAI; `--continue` menggantikan `--resume <id>` **dengan sengaja** (`startup.ts`) | area-06§6.1 |
+| SCAR-096 | Jangan pakai `import.meta.dir` (Bun-only) di wrapper Node | KEEP | **SELESAI (dipatuhi)** — `import.meta.dir` hanya muncul di `cc-plugin` (Bun), nol di `cc-wrapper` | area-06§6.1 |
+| — | `SUBMIT_DELAY_MS`=250 (pisah teks dari `\r`) | KEEP kontrak | **SELESAI** — `cc-wrapper/src/typer.ts` | area-06§6.2 |
+| — | `MIN_INJECTION_GAP_MS`=1500 | KEEP kontrak | **SELESAI** — `cc-wrapper/src/queue.ts` | area-06§6.2 |
+| — | `POST_INJECTION_DELAY_MS`=1000 | KEEP kontrak | BELUM (`grep` = 0) | area-06§6.2 |
+| — | `CLEAR_SETTLE_MS`=1500 | KEEP kontrak | BELUM (`grep` = 0) | area-06§6.2 |
+| — | `CLEAR_BARRIER_TIMEOUT_MS`=600000 | KEEP kontrak | BELUM (`grep` = 0) | area-06§6.2 |
+| — | `QUEUE_POLL_MS`=200 (kandidat event-driven) | KEEP kontrak | **SELESAI** — `cc-wrapper/src/main.ts` | area-06§6.2 |
+| — | `CHUNK_SIZE`/`CHUNK_DELAY_MS`=100/30 (anti head-drop) | KEEP kontrak | **SELESAI** — `cc-wrapper/src/typer.ts` | area-06§6.2 |
+| — | Antrean FIFO tunggal + satu drainer + gate | KEEP mekanisme | **SELESAI** — `InjectionQueue` (`queue.ts`) | area-06§6.2 |
+| — | Gate dua mekanisme: `holdFor` monotonik + barrier `/clear` | KEEP | **SEBAGIAN** — `holdUntil` monotonik ADA (`queue.ts:33,64,73`); barrier `/clear` TIDAK | area-06§6.2 |
+| SCAR-031 | Snapshot eager daftar sesi saat keystroke `/clear` | KEEP | BELUM (terblokir `/switch`) | area-06§6.2 |
+| SCAR-020 | Chunking aman code-point (`Array.from`, no split surrogate) | KEEP | **SELESAI** — `cc-wrapper/src/typer.ts` | area-06§6.2 |
+| SCAR-029 | Enter TUI = `\r`, bukan `\n` | KEEP | **SELESAI** — `typer.ts` (`SUBMIT_DELAY_MS` memisahkan teks dari `\r`) | area-06§6.2 |
+| PTY-063 | Kegagalan dispatch 1 item tak hentikan antrean | KEEP | ❓ PERLU DICEK — `queue.ts` ada, perilaku kegagalan per-item belum ditelusuri | area-06§6.2 |
+| — | Aturan: konstanta pacing wajib test + verifikasi live | KEEP aturan proses | **SELESAI** — `cc-wrapper` 57 test hijau, dan tiap rilis diuji hidup | area-06§6.2 |
+| PTY-067/071/072;SCAR-032/033 | Deteksi sesi baru GANTI ke hook `SessionStart` | GANTI(MERGE) | **SELESAI** — `cc-plugin/hooks/session-start.ts`, terbukti di `logs/session-hook.log` (`source=clear/resume/startup`) | area-06§6.3 |
 | — | Timeout fallback deteksi sesi → alarm di `doctor` | FITUR BARU | BELUM | area-06§6.3 |
-| — | Enumerasi sesi `/switch` masih baca `~/.claude/projects/` | KEEP (sisa) | BELUM | area-06§6.3 |
-| PTY-001–012,015–021,037 | Kendali-diri AI jadi daftar putih command | GANTI(MODIFY) | BELUM | area-06§6.6 |
-| SCAR-086 | Teks bebas ditolak by design pada `pty_send_slash` | KEEP wajib | BELUM | area-06§6.6 |
-| PTY-002;SCAR-037 | Regex izinkan namespace `:`, nama≤64,arg≤256 | KEEP | BELUM | area-06§6.6 |
-| PTY-005;SCAR-044 | Self-only: parameter `target` ditolak | KEEP wajib | BELUM | area-06§6.6 |
-| PTY-007 | Wrapper tak terdeteksi → error mengajari solusi | KEEP | BELUM | area-06§6.6 |
-| PTY-011 | Semua kegagalan tool jadi `isError` | KEEP | BELUM | area-06§6.6 |
-| PTY-002,007,016–019 | Setiap error mengajari alternatif yang benar | KEEP | BELUM | area-06§6.6 |
-| SCAR-001 | Aturan pemisahan teks+`\r` 250ms wajib dipertahankan | KEEP wajib | BELUM | area-06§6.6 |
-| PTY-031;SCAR-027 | Tulisan atomik `tmp.<pid>`+rename, sweep skip `.tmp.` | KEEP dua sisi | BELUM | area-06§6.7 |
-| PTY-034;SCAR-068 | Hapus-sebelum-proses vs rename `processing/` | KEEP kontrak | BELUM | area-06§6.7 |
-| PTY-036;SCAR-021 | Deteksi dua jalur: fs notif + sweep berkala | KEEP | BELUM | area-06§6.7 |
-| PTY-037 | JSON malformed → karantina `.rejected-<ts>` | KEEP+perbaikan | BELUM | area-06§6.7 |
-| PTY-109–114;SCAR-045 | Batch = satu unit atomik (maks 8 item) | KEEP kapabilitas | BELUM | area-06§6.7 |
-| — | Turunkan ulang jaminan atomisitas batch secara eksplisit | Tugas wajib | BELUM | area-06§6.7 |
-| SCAR-071 | Ack dua tingkat injeksi (`injected` ≠ selesai semantik) | KEEP+utang dibayar | BELUM | area-06§6.7 |
-| PTY-064,065 | First-run mulai segar; resume via mtime jsonl | KEEP | BELUM | area-06§6.8 |
-| PTY-066;SCAR-041/080 | Resume identitas seed sinkron, guard `session_id` | KEEP wajib | BELUM | area-06§6.8 |
-| PTY-073;SCAR-081 | Pasca-`/clear` nama diterapkan, wajib verifikasi ulang | KEEP | BELUM | area-06§6.8 |
-| PTY-074 | `/switch` → injeksi `/resume <sessionId>` | KEEP | BELUM | area-06§6.8 |
-| PTY-077,078 | Event `session-change`; `/clear` di tengah batch tunda notif | KEEP | BELUM | area-06§6.8 |
-| PTY-022–027(sisa) | Nama plugin command wajib fully-qualified | KEEP | BELUM | area-06§6.10 |
-| TG-165–168 | Statusline bridge merantai (settings.json, snapshot, teruskan stdin) | KEEP | BELUM | area-11§11.1 |
-| SCAR-084 | Guard `isOurOwnBridge` (cegah loop simpan diri) | KEEP wajib | BELUM | area-11§11.1 |
-| — | Alarm bila capture tidak berbunyi dalam N menit | FITUR BARU | BELUM | area-11§11.1 |
-| — | Backup `settings.json` tidak menumpuk tanpa batas | Perbaikan | BELUM | area-11§11.1 |
-| SCAR-017 | `/context` menunggu data, bukan tidur 5 detik flat | Perbaikan | BELUM | area-11§11.1,§11.2 |
-| — | Bila tak ada statusLine sebelumnya, bridge render sendiri | FITUR BARU | BELUM | area-11§11.1 |
-| — | Perilaku tetap: non-JSON→null, tanpa `CLAUDE_PROJECT_DIR`→skip, tulis atomik | KEEP | BELUM | area-11§11.1 |
-| K-1 | Lokasi snapshot pindah ke store terpusat | MERGE | BELUM | area-11§11.1 |
-| SCAR-041 | Snapshot sah hanya utk `session_id` yang cocok | KEEP wajib | BELUM | area-11§11.1 |
-| TG-010–013 | `/context`: pemakaian context (bar+persen+token) | KEEP | BELUM | area-11§11.2 |
-| TG-010–013 | `/context`: rate limit 5 jam & 7 hari | KEEP | BELUM | area-11§11.2 |
-| TG-010–013 | `/context`: model, effort, thinking, fast | KEEP | BELUM | area-11§11.2 |
-| TG-010–013 | `/context`: biaya, CWD, nama+id sesi | KEEP | BELUM | area-11§11.2 |
-| TG-169 | `/context`: "Last update HH:MM WIB (relatif)" | KEEP | BELUM | area-11§11.2 |
-| TG-170 | Helper format token (1.5k/2M) & waktu relatif | KEEP | BELUM | area-11§11.2 |
-| TG-150;LOSS-4 | Fix `messagesStore.append` tak ada di interface | FIX wajib | BELUM | area-12§12.1,area-05§5.8 |
+| — | Enumerasi sesi `/switch` masih baca `~/.claude/projects/` | KEEP (sisa) | BELUM (terblokir `/switch`) | area-06§6.3 |
+| PTY-001–012,015–021,037 | Kendali-diri AI jadi daftar putih command | GANTI(MODIFY) | **SELESAI** — `slash/send-tool.ts` menolak command lapisan Telegram berikut alternatifnya | area-06§6.6 |
+| SCAR-086 | Teks bebas ditolak by design pada `pty_send_slash` | KEEP wajib | **SELESAI** — hanya `command`/`commands` bervalidasi regex; teks bebas tidak punya pintu | area-06§6.6 |
+| PTY-002;SCAR-037 | Regex izinkan namespace `:`, nama≤64,arg≤256 | KEEP | **SELESAI** — `slash/send-tool.ts` | area-06§6.6 |
+| PTY-005;SCAR-044 | Self-only: parameter `target` ditolak | KEEP wajib | **SELESAI** — self-only by design (keputusan otonomi tetangga 2026-06-07) | area-06§6.6 |
+| PTY-007 | Wrapper tak terdeteksi → error mengajari solusi | KEEP | **SELESAI** — batch pada wrapper lama menjawab error berikut jalan keluarnya | area-06§6.6 |
+| PTY-011 | Semua kegagalan tool jadi `isError` | KEEP | **SELESAI** — `cc-plugin/src/server.ts` | area-06§6.6 |
+| PTY-002,007,016–019 | Setiap error mengajari alternatif yang benar | KEEP | **SELESAI** — peta penolakan `/new` `/switch` `/delete` `/effort` masing-masing menyebut penggantinya | area-06§6.6 |
+| SCAR-001 | Aturan pemisahan teks+`\r` 250ms wajib dipertahankan | KEEP wajib | **SELESAI** — `SUBMIT_DELAY_MS` di `typer.ts` | area-06§6.6 |
+| PTY-031;SCAR-027 | Tulisan atomik `tmp.<pid>`+rename, sweep skip `.tmp.` | KEEP dua sisi | **SELESAI dua sisi** — tulis: `context/status-file.ts` + `agent/send.ts`; sweep: `agent/receive.ts` melewati `.tmp.` | area-06§6.7 |
+| PTY-034;SCAR-068 | Hapus-sebelum-proses vs rename `processing/` | KEEP kontrak | **SELESAI** — `agent/receive.ts` menghapus SEBELUM memproses, alasannya tertulis | area-06§6.7 |
+| PTY-036;SCAR-021 | Deteksi dua jalur: fs notif + sweep berkala | KEEP | **SEBAGIAN (sadar)** — hanya sweep berkala; `receive.ts` menulis alasannya: liputan event `create` `fs.watch` di Windows tidak bisa diandalkan | area-06§6.7 |
+| PTY-037 | JSON malformed → karantina `.rejected-<ts>` | KEEP+perbaikan | BELUM — payload ditolak dicatat ke stderr, tidak dikarantina (`grep rejected-` = 0) | area-06§6.7 |
+| PTY-109–114;SCAR-045 | Batch = satu unit atomik (maks 8 item) | KEEP kapabilitas | **SELESAI** — `MAX_SLASH_BATCH`; batch cacat ditolak UTUH, bukan itemnya dibuang | area-06§6.7 |
+| — | Turunkan ulang jaminan atomisitas batch secara eksplisit | Tugas wajib | **SELESAI** — alasannya ditulis di header `slash/send-tool.ts` | area-06§6.7 |
+| SCAR-071 | Ack dua tingkat injeksi (`injected` ≠ selesai semantik) | KEEP+utang dibayar | ❓ PERLU DICEK — ack `queued … injects it on its next tick` ada; tingkat keduanya belum ditelusuri | area-06§6.7 |
+| PTY-064,065 | First-run mulai segar; resume via mtime jsonl | KEEP | **SELESAI (bentuk berbeda, sadar)** — `--continue` + retry tanpa flag; menebak mtime jsonl DIBUANG, alasannya di `startup.ts` | area-06§6.8 |
+| PTY-066;SCAR-041/080 | Resume identitas seed sinkron, guard `session_id` | KEEP wajib | **SELESAI** — hook `SessionStart` menulis `session.id` saat `source=resume`, terbukti di log | area-06§6.8 |
+| PTY-073;SCAR-081 | Pasca-`/clear` nama diterapkan, wajib verifikasi ulang | KEEP | **SELESAI** — tabel `session_first_name` + perbandingan nama-lahir (0.26.0), disempurnakan 0.29.0 | area-06§6.8 |
+| PTY-074 | `/switch` → injeksi `/resume <sessionId>` | KEEP | BELUM (terblokir `/switch`) | area-06§6.8 |
+| PTY-077,078 | Event `session-change`; `/clear` di tengah batch tunda notif | KEEP | **SEBAGIAN** — penundaan notifikasi saat `/clear` di tengah batch SELESAI; event `session-change` bernama itu tidak ada (`grep` = 0), digantikan dua event 0.28.0 | area-06§6.8 |
+| PTY-022–027(sisa) | Nama plugin command wajib fully-qualified | KEEP | **SELESAI** — regex mengizinkan `:` supaya `/plugin:command` terkirim utuh | area-06§6.10 |
+| TG-165–168 | Statusline bridge merantai (settings.json, snapshot, teruskan stdin) | KEEP | **SELESAI** — `bin/statusline-bridge.ts` + `context/install.ts` + `context/invoke.ts`; terbukti hidup (dijalankan manual: exit 0, 318 ms, berkas tertulis) | area-11§11.1 |
+| SCAR-084 | Guard `isOurOwnBridge` (cegah loop simpan diri) | KEEP wajib | **SELESAI (nama berbeda)** — `chain.kind === "already-bridge"` di `context/install.ts` | area-11§11.1 |
+| — | Alarm bila capture tidak berbunyi dalam N menit | FITUR BARU | BELUM — **dan sekarang ada alasan baru untuk merancangnya ulang**: `status.json` beku itu NORMAL selama sesi tidak punya giliran, jadi alarm berbasis umur berkas akan berbunyi palsu. Pemicu yang benar harus membandingkan dengan aktivitas sesi, bukan dengan jam dinding | area-11§11.1 |
+| — | Backup `settings.json` tidak menumpuk tanpa batas | Perbaikan | ❓ PERLU DICEK — tidak ditemukan mekanisme backup sama sekali di `install.ts`; kalau memang tidak ada backup, barisnya TIDAK RELEVAN | area-11§11.1 |
+| SCAR-017 | `/context` menunggu data, bukan tidur 5 detik flat | Perbaikan | **SELESAI** — `context/wait.ts` (`waitForCapture`); yang ditunggu KEJADIANNYA, bukan durasi yang ditebak | area-11§11.1,§11.2 |
+| — | Bila tak ada statusLine sebelumnya, bridge render sendiri | FITUR BARU | **DITUNDA (sadar)** — bridge SENGAJA tidak pernah mencetak ke stdout; statusline user menang, `/context` yang mengalah | area-11§11.1 |
+| — | Perilaku tetap: non-JSON→null, tanpa `CLAUDE_PROJECT_DIR`→skip, tulis atomik | KEEP | **SELESAI** — `readCapturedStatus` menelan JSON rusak jadi `null`; `resolveBotHome` jatuh ke `cwd`; tulis `.tmp.<pid>`+rename | area-11§11.1 |
+| K-1 | Lokasi snapshot pindah ke store terpusat | MERGE | **TIDAK RELEVAN** — dibalik user 2026-08-04: seluruh state pindah ke folder masing-masing bot, tidak ada store terpusat | area-11§11.1 |
+| SCAR-041 | Snapshot sah hanya utk `session_id` yang cocok | KEEP wajib | **DIGANTI 0.29.0** — perbandingan `session_id` DIHAPUS; identitas dijamin nama berkas `<session.id>.jsonl`. Guard berupa nama berkas tidak punya jendela | area-11§11.1 |
+| TG-010–013 | `/context`: pemakaian context (bar+persen+token) | KEEP | **SELESAI** — `context/render.ts` (`progressBar`, `context_window`) | area-11§11.2 |
+| TG-010–013 | `/context`: rate limit 5 jam & 7 hari | KEEP | **SELESAI** — `render.ts` (`five_hour`, `seven_day`) | area-11§11.2 |
+| TG-010–013 | `/context`: model, effort, thinking, fast | KEEP | **SELESAI** — `render.ts` | area-11§11.2 |
+| TG-010–013 | `/context`: biaya, CWD, nama+id sesi | KEEP | **SELESAI** — `render.ts` (`total_cost_usd`, `cwd`, `session_name`) | area-11§11.2 |
+| TG-169 | `/context`: "Last update HH:MM WIB (relatif)" | KEEP | **SELESAI** — `formatRelativeMs` di `render.ts` | area-11§11.2 |
+| TG-170 | Helper format token (1.5k/2M) & waktu relatif | KEEP | **SELESAI** — `formatTokens` + `formatRelativeMs` | area-11§11.2 |
+| TG-150;LOSS-4 | Fix `messagesStore.append` tak ada di interface | FIX wajib | **SELESAI** — `storeOutgoing`/`insertMessage`; lubang sisi KELUAR baru benar-benar tertutup **0.30.0** (12,9% → 0%) | area-12§12.1,area-05§5.8 |
 | — | Alarm#1: capture statusline mati | FITUR BARU | BELUM | area-12§12.5,§11.1 |
 | — | Alarm#2: hook `SessionStart` tak berbunyi | FITUR BARU | BELUM | area-12§12.5,§6.3 |
 | — | Alarm#3: injeksi tak pernah mendarat | FITUR BARU | BELUM | area-12§12.5,§6.7 |
 | — | Alarm#5: payload rusak dikarantina | FITUR BARU | BELUM | area-12§12.5,§6.7,§14.6 |
-| SCAR-013;TG-149/151 | Deteksi perubahan file: watch DIREKTORI bukan file | KEEP | BELUM | area-14§14.3 |
-| SCAR-013 | Defer 50ms sebelum baca (rename sempat commit) | KEEP | BELUM | area-14§14.3 |
-| SCAR-013 | Sweep berkala sbg jaring pengaman | KEEP | BELUM | area-14§14.3 |
-| SCAR-027 | Sisi kedua kontrak atomic-write: sweep skip `.tmp.` | KEEP | BELUM | area-14§14.3 |
-| PTY-037 | Payload rusak dikarantina `.rejected-<ts>` + alarm doctor | KEEP aturan umum | BELUM | area-14§14.6 |
-| SCAR-018 | Boot-settle 5 detik — verifikasi, jangan asumsikan | KEEP bersyarat | BELUM | area-14§14.7 |
+| SCAR-013;TG-149/151 | Deteksi perubahan file: watch DIREKTORI bukan file | KEEP | **TIDAK RELEVAN (sadar)** — tidak ada `fs.watch` sama sekali; semua jalur memakai polling, alasannya tertulis di `receive.ts` | area-14§14.3 |
+| SCAR-013 | Defer 50ms sebelum baca (rename sempat commit) | KEEP | **TIDAK RELEVAN** — konsekuensi dari tidak memakai `fs.watch` | area-14§14.3 |
+| SCAR-013 | Sweep berkala sbg jaring pengaman | KEEP | **SELESAI (naik jadi jalur utama)** — `startInboxScanner` 500 ms, `announcerTimer` 5 detik | area-14§14.3 |
+| SCAR-027 | Sisi kedua kontrak atomic-write: sweep skip `.tmp.` | KEEP | **SELESAI** — `agent/receive.ts` melewati berkas `.tmp.` tanpa menyentuhnya | area-14§14.3 |
+| PTY-037 | Payload rusak dikarantina `.rejected-<ts>` + alarm doctor | KEEP aturan umum | BELUM — dicatat ke stderr, tidak dikarantina, dan `doctor` belum punya alarm | area-14§14.6 |
+| SCAR-018 | Boot-settle 5 detik — verifikasi, jangan asumsikan | KEEP bersyarat | **SELESAI** — `waitForCapture` menunggu KEJADIAN, bukan durasi tebakan | area-14§14.7 |
 
-**Tahap 4: 90 item — 90 BELUM.**
+**Tahap 4: 90 item.** Direkonsiliasi ke kode nyata **2026-08-07** oleh bot-03
+(sebelumnya "90 BELUM", tidak pernah dicek). Hasil: **≈45 SELESAI · ≈9 SEBAGIAN ·
+≈5 TIDAK RELEVAN/DITUNDA sadar · ≈4 PERLU DICEK · sisanya BELUM**, dan **sebagian
+besar yang BELUM terblokir satu akar yang sama: `/switch` belum dibawa ke sistem
+baru** (keputusan sadar, `slash/send-tool.ts` menyebutkannya apa adanya).
+
+⚠️ **Metode dan batasnya, supaya angka ini tidak dipercaya lebih dari haknya:**
+verdict di atas ditegakkan dengan **`grep` penanda konkret** (nama konstanta,
+nama fungsi, nama berkas) ke `cc-plugin/src`, `cc-plugin/hooks`,
+`cc-plugin/bin`, dan `cc-wrapper/src` — bukan dengan membaca setiap jalur
+sampai tuntas. Baris bertanda **❓ PERLU DICEK** adalah yang `grep` tidak bisa
+putuskan, dan ia **sengaja tidak ditebak**. `SELESAI` di sini berarti *"penanda
+fiturnya ada di kode dan letaknya disebutkan"*, bukan *"sudah diuji hidup"* —
+dua hal yang seharian ini terbukti berbeda.
 
 ### Tahap 5 — Antar-bot (`agent_list` `agent_status` `agent_send` + handoff dijaga mesin)
 
