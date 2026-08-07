@@ -427,7 +427,7 @@ Dikelompokkan per rumpun supaya tidak 41 baris terpisah tanpa konteks:
 | TG-033 | Tap valid tak pre-announce; banner saat sesi ganti | KEEP | **SEBAGIAN** — banner sesi ganti SELESAI (0.28.0 Event-2, terbukti hidup); sisi `/switch` belum ada | area-05§5.6 |
 | TG-178,TG-183 | Enumerasi `*.jsonl` regex UUID + `encodeProjectDir` | KEEP | **TIDAK RELEVAN (sadar)** — `cc-wrapper` memakai `--continue`, menyerahkan pertanyaannya ke CC; `startup.ts` mencatat kenapa menebak encoding folder berbahaya | area-05§5.6 |
 | TG-182 | Sort mtime descending daftar sesi | KEEP | BELUM (terblokir `/switch`) | area-05§5.6 |
-| TG-018 | Validasi nama sesi (CR/LF, kosong, spasi, ≤64 char) | KEEP | **SELESAI** — regex `pty_send_slash` menegakkan nama ≤64 & arg ≤256 (`slash/send-tool.ts`) | area-05§5.7 |
+| TG-018 | Validasi nama sesi (CR/LF, kosong, spasi, ≤64 char) | KEEP | **SELESAI (batas berbeda)** — `slash/session-name.ts` (`validateSessionName`): newline ditolak karena akan terbaca sebagai Enter dan memotong perintah di tengah. ⚠️ **Batasnya `MAX_SESSION_NAME_LENGTH = 120`, bukan 64** — perbedaan ini tidak punya catatan pembenaran di kode; entah disengaja tanpa dicatat, entah tidak sadar | area-05§5.7 |
 | TG-019,TG-026 | Guard state dir ter-resolve + pesan solusi | KEEP | **SELESAI** — `resolveBotHome`; folder yang bukan bot dijawab tiap tool berikut alasannya (W-16) | area-05§5.7 |
 | TG-020 | Guard heartbeat wrapper segar (<30s) | KEEP | BELUM (`grep heartbeat` = 0; yang ada `wrapper.pid`) | area-05§5.7 |
 | TG-021,TG-024 | Nama dipakai→ditolak; self-rename=no-op | KEEP | BELUM | area-05§5.7 |
