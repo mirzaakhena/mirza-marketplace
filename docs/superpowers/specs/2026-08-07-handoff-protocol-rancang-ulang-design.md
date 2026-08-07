@@ -42,10 +42,10 @@ pernah dibahas.
 | # | Topik | Status | Di mana / sisa |
 |---|---|---|---|
 | ~~A1~~ | ~~Kapan **mulai mencatat**~~ | **GUGUR** | Dicabut R2 (§0.3) — tidak ada momen "mulai mencatat" terpisah lagi. T2 ikut gugur |
-| A2 | Kapan **tawarkan penyerahan** | ⬜ | Tergantung **N1** (§0.3). Kalau semua pengingat bungkam, A2 gugur bersama T3 |
-| A3 | Kapan **garis merah** (wajib serahkan) | ⬜ | Sudah terpasang 0.25.0 (sisa <100k) — **tapi R2 mempertanyakan apakah ia tetap nyala.** = N1 |
+| A2 | Kapan **tawarkan penyerahan** | ✅ | **K1 (§0.4): 40% terpakai.** Inilah ambang ② yang selama ini tidak ada. T3 ikut tertutup |
+| A3 | ~~Kapan **garis merah** (wajib serahkan)~~ | **GUGUR** | K1 **memindahkan** alarm lama (<100k) ke 40%, bukan menambahnya. Tidak ada lagi "garis merah wajib" — **semua keputusan handoff di user** |
 | A4 | Siapa yang memutuskan handoff | ✅ | **DIREVISI R2:** 👤 user memulai → 🧠 AI mengeksekusi. Mesin tidak lagi menyalakan |
-| A5 | Ambang diperiksa **di batas selesai-task**, bukan di tengah pekerjaan | ⬜ | Hanya relevan kalau N1 dijawab "tetap nyala". Kalau bungkam, A5 gugur |
+| ~~A5~~ | ~~Ambang diperiksa **di batas selesai-task**~~ | **GUGUR** | K1 (§0.4) menjadikan alarm **murni imbauan tanpa handoff otomatis** — ia tidak bisa menginterupsi apa pun, jadi tidak ada yang perlu dijadwalkan ke batas task |
 
 ### B. Dokumen
 
@@ -234,6 +234,102 @@ berlaku untuk berkas handoff.**
 | **N1** | **Garis merah 0.25.0 (sisa <100k) — tetap nyala atau ikut bungkam?** Kalau handoff murni kesadaran user, apakah pengingat otomatis itu ikut diam, atau tetap boleh mengetuk sebagai satu-satunya rem terakhir? Menentukan nasib A2, A3, A5 |
 | **N2** | **Sesi tanpa repo, atau dengan DUA repo.** R3 menaruh file di repo project — tapi sesi bisa menyentuh dua repo (sesi ini: `mirza-marketplace` + `mirza-bots`) atau tidak menyentuh repo sama sekali (diskusi murni). Ke mana filenya? |
 
+## 0.4 EMPAT KEPUTUSAN — N1, N2, dan penutup soal MOMEN menulis
+
+**Keputusan user 2026-08-07 ~21:07 WIB.**
+
+### Yang paling penting: keempatnya menjawab §1.3 lewat jalan yang lain
+
+Rancangan bot-02 menjawab *"dokumen handoff selalu ditulis oleh model yang
+paling pelupa"* dengan **memecah tulisannya** — dicicil sepanjang sesi. User
+menjawabnya dengan **memindahkan momennya**: alarm berbunyi di 40%, user
+memutuskan, dokumen ditulis **di akhir** — tapi akhir dari sesi yang sengaja
+diakhiri **selagi modelnya masih prima.**
+
+Dua-duanya menghindari model 90%. Yang kedua **tidak butuh** mekanisme mencicil,
+tidak butuh aturan "menyunting bukan menumpuk", dan tidak butuh kerangka lahir
+kosong sebagai pengingat. **Satu keputusan menggantikan tiga mekanisme.**
+
+### K1 — Alarm pindah ke 40% TERPAKAI, dan ia murni imbauan
+
+> *"Tolong ubah ke '>400k' token. Jadi kalau total token adalah 1M token, maka
+> kalau sudah diatas 40% 'alarm' pengingat akan berbunyi. Dan ini murni hanya
+> mengingatkan saja, tidak ada otomatis handoff. keputusan handoff tetap di
+> user."*
+
+**Menjawab N1** — dan sekaligus **A2/T3** (ambang ② "tawarkan penyerahan", yang
+selama ini tidak pernah ada). Alarm lama `context-low` **tidak ditambah, tapi
+DIPINDAH**.
+
+| | Lama (0.25.0) | Baru |
+|---|---|---|
+| Menyala saat | sisa <100k (= 90% terpakai pada 1M) | **40% terpakai** |
+| Pertanyaan yang dijawab | "masih sanggup menyerahkan?" | **"kualitas berpikir sudah mulai turun?"** |
+| Sifat | imbauan | **imbauan, dan HANYA imbauan** — tidak ada handoff otomatis |
+
+⚠️ **Teks alarmnya WAJIB ikut diubah.** Bunyinya sekarang *"ruang context
+tinggal sedikit — rapikan pekerjaan lalu serahkan sebelum ruangnya habis di
+tengah jalan"*. Pada 40% terpakai sisanya masih **600k**; kalimat itu menjadi
+**tidak benar**, dan yang membacanya adalah AI, setiap giliran. Alarm yang salah
+bicara mengajarkan hal yang salah (bandingkan `server.ts:340`, §4.3).
+
+✅ **DIKETOK USER: ABSOLUT — 400k terpakai.** Rekomendasi bot-03 adalah persen
+(alasan: Tingkat 23 — pertanyaan barunya *"kualitas berpikir turun"* skalanya
+ikut ukuran window, sementara pertanyaan lama *"biaya menyerahkan"* memang
+tidak). **User memilih absolut, dan itu keputusannya.** Hari ini hasilnya
+identik (semua bot 1M); bedanya baru terasa kalau ada bot ber-window lain.
+Bentuk kodenya jadi lebih sederhana: satu konstanta, tanpa perlu tahu ukuran
+window.
+
+⚠️ **Utang yang lahir:** komentar panjang di `reminders.ts` (`context-low`)
+membela ambang ABSOLUT dengan ukuran 30 sesi nyata. Ia menjawab pertanyaan lama.
+**Jangan dihapus — tulis ulang supaya jelas ia menjawab pertanyaan yang sudah
+diganti** (Tingkat 18: pembalikan wajib dibuktikan, bukan disembunyikan).
+
+⚠️ **Konsekuensi yang harus diterima sadar:** alarm ini menyala **6x lebih
+lama** dari sebelumnya (dari 40% sampai 100%, bukan 90% sampai 100%). Syarat
+masuk `reminders.ts` — *"kapan ia TIDAK menyala?"* — masih terjawab (di bawah
+40%), tapi marginnya jauh menipis. Penangkalnya sudah ada dan bukan mekanisme
+baru: **AI mengingat penolakan user di dalam sesi itu** (§6.4).
+
+### K2 — Handoff WAJIB punya repo; dua repo → tanya user
+
+**Menjawab N2.** Sesi tanpa repo tidak melahirkan handoff. Sesi dengan dua repo:
+**tanya user**, jangan pilih sendiri.
+
+⚠️ Untuk sesi ini user memilih **`mirza-bots`**. Dicatat apa adanya beserta
+catatan bot-03: seluruh pekerjaan sesi ini ada di `mirza-marketplace` (spec +
+BACKLOG), `mirza-bots` nol baris sejak bot-02 — jadi berkas handoffnya terpisah
+dari spec yang ia tunjuk. Disampaikan ke user sebelum diputuskan.
+
+### K3 — Nama & format berkas TETAP
+
+**Mencabut kandidat pangkas §0.3.** `<timestamp>_<8-char-session-id>_<nama-sesi>.md`
+tetap, dan **nama PERTAMA sesi** tetap dipakai. `firstNameOfSession` sudah
+tersedia di `reminders.ts`, jadi mempertahankannya nol biaya.
+
+Kandidat pangkas yang **tetap dipangkas**: aturan §3.6 *"menyunting, bukan
+menumpuk"* — K4 menghapus musuhnya.
+
+### K4 — Berkas ditulis DI AKHIR, dan ia bukan log
+
+> *"file handoff bukan log atau journaling. Saya terpikir begini. file handoff
+> memang sebaiknya tetap dibuat diakhir."*
+
+**Mengunci R1 dan menutup sisa mekanisme "mencicil":**
+
+| Yang gugur | Kenapa |
+|---|---|
+| §1.3 "dicicil sepanjang sesi" | Diganti: momen handoffnya yang dipindahkan lebih awal (K1), bukan tulisannya yang dipecah |
+| **P5** ("yang butuh INGATAN dicicil") | Tidak ada lagi yang dicicil. Seluruh berkas ditulis dalam satu duduk |
+| **P4** sebagai *pengingat* | Kerangka lengkap tetap berguna sebagai **daftar periksa saat menulis**, tapi ia bukan lagi mekanisme pengingat sepanjang sesi |
+| §3.6 "menyunting, bukan menumpuk" | Berkas sekali duduk tidak bisa jadi log kronologis |
+
+**Aturan baru yang lahir dari kalimat user, dan layak ditulis eksplisit di
+skill:** *berkas handoff **bukan** log, bukan jurnal, bukan riwayat.* Ia
+merekam **posisi**, bukan **perjalanan**. Ini bahaya terbesar dari ide mencicil,
+dan dipotong sebelum sempat tumbuh.
+
 ## 1. Filosofi — apa yang sebenarnya dijaga
 
 Ditanyakan ke user secara eksplisit. Jawabannya **dua**, dan urutannya penting:
@@ -279,11 +375,15 @@ sebelum bisa bekerja.
 
 ~~**Karena itu: dokumen handoff dicicil sepanjang sesi.**~~
 
-⚠️ **MEKANISMENYA DIREVISI R2 (§0.3) — masalahnya TIDAK.** Yang berubah bukan
-temuan ini, melainkan **siapa yang memegangnya**: dari *bot mencicil otomatis*
-menjadi *user memanggil handoff lebih awal*. User menetapkan model prima **di
-bawah 50%**; selama panggilannya di situ, §1.3 tetap terjaga. Kalau ia lupa
-memanggil, **tidak ada apa pun yang mengetuk** — risiko yang diterima sadar.
+⚠️ **MEKANISMENYA DIGANTI (R2 §0.3 + K1/K4 §0.4) — masalahnya TIDAK.**
+
+Jawaban finalnya bukan *memecah tulisannya*, melainkan **memindahkan momennya**:
+alarm berbunyi di **400k terpakai**, user memutuskan, berkas ditulis **di akhir
+sesi** — tapi sesi yang sengaja diakhiri **selagi modelnya masih prima.**
+Dokumen tetap satu duduk, dan tetap tidak dikarang oleh model 90%.
+
+Risiko yang tersisa dan diterima sadar: **alarm hanya mengimbau.** Kalau user
+memilih terus bekerja, tidak ada apa pun yang memaksa.
 
 ## 2. Prinsip rancangan
 
@@ -292,8 +392,8 @@ memanggil, **tidak ada apa pun yang mengetuk** — risiko yang diterima sadar.
 | P1 | **Urutkan isi berdasarkan seberapa TIDAK TERGANTIKAN informasinya** | Yang bisa direkonstruksi dari git/README → tunjuk saja. Yang cuma hidup di kepala bot yang akan di-clear → wajib, detail |
 | P2 | ~~**Mesin mengisi jangkar**~~ → **Jangkar DISALIN dari perintah, bukan diingat** | ⚠️ **Direvisi oleh E1 (§0.2).** Skill tidak bisa menjalankan apa pun, jadi bukan mesin yang mengisi — tapi bebannya tetap bukan ingatan: repo/branch/SHA/jam **disalin dari keluaran `git log -1` / `git status -sb`**, tidak pernah diketik dari kepala |
 | P3 | **Dokumen menunjuk, tidak mengulang** | Ada commit SHA / file spec → sebut ID-nya, jangan salin isinya (permintaan user) |
-| P4 | **Kerangka lengkap sejak file lahir** | Kotak kosong **adalah** pengingatnya. Tanpa hook, tanpa token tambahan |
-| P5 | **Yang butuh INGATAN dicicil; yang butuh KEADAAN SEKARANG ditulis di akhir** | Menaruh tiap bagian di momen di mana model paling bisa dipercaya |
+| P4 | **Kerangka lengkap sejak file lahir** | ⚠️ **DIREVISI K4 (§0.4):** tetap berguna sebagai **daftar periksa saat menulis**, tapi bukan lagi mekanisme pengingat sepanjang sesi |
+| ~~P5~~ | ~~**Yang butuh INGATAN dicicil; yang butuh KEADAAN SEKARANG ditulis di akhir**~~ | **GUGUR — K4 (§0.4).** Tidak ada yang dicicil; seluruh berkas ditulis sekali duduk. Yang menjaga kualitasnya bukan pembagian momen, melainkan **momen handoffnya sendiri yang dipindah lebih awal** (K1) |
 | P6 | **`—` adalah jawaban yang sah** | Penangkal pengisian formalitas yang diundang oleh P4 |
 | P7 | **Status tidak pernah diturunkan dari string** | Konsekuensi keputusan user membuang seluruh konvensi nama sesi (§4.3) |
 
@@ -313,10 +413,8 @@ lupakan adalah kenapa tiga jam lalu ia membuang pendekatan A.
   ada di §0.3 R3.
   ~~`<folder-bot>/.handoff/` — dicoret, jangan dihidupkan lagi.~~
 - **Nama:** `<timestamp>_<8-char-session-id>_<nama-sesi>.md`
-- ⚠️ **Aturan "nama PERTAMA sesi" (`firstNameOfSession`) kehilangan sebabnya.**
-  Ia ada karena file lahir saat rename; R1 mencabut itu. File sekarang lahir
-  saat handoff, jadi cukup pakai nama sesi yang **sedang berlaku**. Belum
-  diketok — lihat §0.3 "yang ikut bisa dipangkas".
+- ✅ **Nama PERTAMA sesi (`firstNameOfSession`) TETAP DIPAKAI** — K3 (§0.4)
+  mencabut usulan pangkas bot-03. Format berkas tidak berubah sama sekali.
 - Nama sesi disanitasi sebelum jadi nama berkas (spasi/titik/slash).
 - Kata `prompt` di skema lama (`<ts>-prompt-<slug>.md`) **dibuang** — sudah
   tidak punya makna.
@@ -437,10 +535,10 @@ Empat, semuanya punya satu kesamaan: **tidak bisa direkonstruksi dari mana pun.*
 
 ### 3.6 Aturan menulis
 
-- ✂️ ~~**Menyunting, bukan menumpuk.**~~ ⚠️ **Kehilangan musuhnya setelah R1
-  (§0.3).** Aturan ini ada karena file tumbuh sepanjang sesi dan berisiko jadi
-  log kronologis. File yang ditulis sekali duduk tidak punya risiko itu. Belum
-  diketok — kandidat pangkas.
+- ✂️ ~~**Menyunting, bukan menumpuk.**~~ **DIPANGKAS** (K3/K4, §0.4) — berkas
+  ditulis sekali duduk, jadi ia tidak bisa berubah jadi log kronologis.
+- ➕ **Berkas handoff BUKAN log, bukan jurnal, bukan riwayat** (K4, §0.4). Ia
+  merekam **posisi**, bukan **perjalanan**. Aturan ini menggantikan yang di atas.
 - **Append-only chain antar-berkas.** Jangan pernah mengedit file handoff sesi
   LAIN. `Lanjutan dari` hanya diisi kalau benar-benar kontinuasi.
 - **Jangan menduplikasi checklist plan.** Plan = source of truth; handoff hanya
@@ -615,7 +713,7 @@ sekali di ujung (tidak bisa ditawar). Skill lama tidak punya dua-duanya.
 |---|---|---|---|
 | ~~T1~~ | ~~**Penyimpanan.** Folder bot tidak punya `.git`~~ | **TERTUTUP** | R3 (§0.3) mengembalikan file ke `<repo-kerja>/.handoff/` — repo punya git **dan** remote. Masalahnya bubar sendiri, tanpa repo arsip |
 | ~~T2~~ | ~~**Ambang ① "mulai mencatat"**~~ | **GUGUR** | R2 (§0.3) — tidak ada momen "mulai mencatat" terpisah lagi |
-| T3 | **Ambang ② "tawarkan penyerahan"** | **menunggu N1** | Kalau semua pengingat bungkam (R2), T3 gugur bersama A2. Kalau tidak, angkanya ~35% |
+| ~~T3~~ | ~~**Ambang ② "tawarkan penyerahan"**~~ | **TERTUTUP** | K1 (§0.4): **400k terpakai (absolut)**, murni imbauan. Ambang ② akhirnya ada |
 | ~~T4~~ | ~~**Penegakan di titik kirim** (§6.5)~~ | **GUGUR** | Tertutup oleh E1 (§0.2): skill tidak punya titik penegakan |
 | ~~T5~~ | ~~**Sesi bertopik yang tidak pernah handoff** meninggalkan berkas setengah jadi~~ | **TERTUTUP** | R1 (§0.3) — file cuma lahir saat handoff akan terjadi, jadi berkas setengah jadi tidak pernah ada |
 
