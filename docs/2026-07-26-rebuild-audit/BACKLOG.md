@@ -228,7 +228,7 @@ Satu baris = satu entri keputusan di dokumen sumber (satu baris tabel, atau satu
 | 1 — Fondasi | 30 | 4 | 0 | 24 | 2 TIDAK RELEVAN | Sebagian besar fondasi state/config sudah SELESAI; `doctor`, liveness terpadu, dan retensi/permission file masih kosong total. |
 | 2 — Jalur pesan | 32 | 5 | 4 | 22 | 1 TIDAK RELEVAN | Pipa dasar (allowlist, auto-download foto) jalan, tapi gap terbesar sistem baru ada di sini: `message_id` tak tersimpan, chunking tak ada, quoting tak ada. |
 | 3 — Penegakan | 21 | 1 | 0 | 20 | — | Hampir seluruhnya belum dibangun — hanya ack-tap-tombol yang sudah SELESAI; validasi tombol, prefiks `ai:`, dan penegakan mesin (ack/Stop-guard) masih nol. |
-| 4 — Sesi | 90 | **≈45** | **≈9** | ≈27 | ≈5 TIDAK RELEVAN/DITUNDA sadar · ≈4 PERLU DICEK | **DIREKONSILIASI 2026-08-07.** Angka lama ("0 SELESAI / 90 BELUM / belum mulai dibangun sama sekali") **SALAH TOTAL** — wrapper PTY, antrean injeksi, hook `SessionStart`, statusline bridge, dan `/context` semuanya sudah hidup. Sisa terbesarnya terblokir **satu akar: `/switch`**. |
+| 4 — Sesi | 89 | **49** | **10** | 20 | 8 TIDAK RELEVAN/DITUNDA-sadar/DIGANTI · 4 PERLU DICEK | **DIREKONSILIASI 2026-08-07.** Angka lama ("0 SELESAI / 90 BELUM / belum mulai dibangun sama sekali") **SALAH TOTAL** — wrapper PTY, antrean injeksi, hook `SessionStart`, statusline bridge, dan `/context` semuanya sudah hidup. Sisa terbesarnya terblokir **satu akar: `/switch`**. |
 | 5 — Antar-bot | 82 | 0 | 0 | 82 | — | ⚠️ **ANGKA INI BASI, JANGAN DIPAKAI.** `agent_list`/`agent_status`/`agent_send` sudah hidup (0.21.0 dst) sementara tabel ini masih menulis nol. **Rekonsiliasi Tahap 5 belum dikerjakan** — itu pekerjaan berikutnya, dan sampai selesai setiap angka di baris ini tidak boleh dijadikan dasar keputusan. |
 | 6 — Sisanya | 17 | 0 | 0 | 16 | 1 BUTUH KEPUTUSAN | Belum mulai; satu item (B-6, penyembunyian sesi remeh) terkunci kontradiksi kriteria antar-dokumen. |
 | **Tanpa tahap** | 41 | 0 | 0 | 0 | 41 BUTUH KEPUTUSAN | Perlu keputusan manusia sebelum bisa masuk tahap manapun — lihat Bagian 4 & 6. |
@@ -512,10 +512,12 @@ Dikelompokkan per rumpun supaya tidak 41 baris terpisah tanpa konteks:
 | SCAR-018 | Boot-settle 5 detik — verifikasi, jangan asumsikan | KEEP bersyarat | **SELESAI** — `waitForCapture` menunggu KEJADIAN, bukan durasi tebakan | area-14§14.7 |
 
 **Tahap 4: 90 item.** Direkonsiliasi ke kode nyata **2026-08-07** oleh bot-03
-(sebelumnya "90 BELUM", tidak pernah dicek). Hasil: **≈45 SELESAI · ≈9 SEBAGIAN ·
-≈5 TIDAK RELEVAN/DITUNDA sadar · ≈4 PERLU DICEK · sisanya BELUM**, dan **sebagian
-besar yang BELUM terblokir satu akar yang sama: `/switch` belum dibawa ke sistem
-baru** (keputusan sadar, `slash/send-tool.ts` menyebutkannya apa adanya).
+(sebelumnya "90 BELUM", tidak pernah dicek). Hasil, **dihitung dari tabel di atas,
+bukan ditaksir**: **49 SELESAI · 10 SEBAGIAN · 8 TIDAK RELEVAN/DITUNDA-sadar/DIGANTI
+· 4 PERLU DICEK · 20 BELUM**. Dan **sebagian besar yang BELUM terblokir satu akar
+yang sama: `/switch` belum dibawa ke sistem baru** (keputusan sadar,
+`slash/send-tool.ts` menyebutkannya apa adanya) — **delapan baris berbeda ternyata
+satu pekerjaan.**
 
 ⚠️ **Metode dan batasnya, supaya angka ini tidak dipercaya lebih dari haknya:**
 verdict di atas ditegakkan dengan **`grep` penanda konkret** (nama konstanta,
