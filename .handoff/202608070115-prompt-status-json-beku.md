@@ -1,6 +1,33 @@
 # `status.json` Beku di Tengah Uji Hidup — Diagnosis Berhenti di Fase 1
 
-**Date:** 2026-08-07 01:15 (WIB)
+> ## ⛔ KOREKSI bot-03 (2026-08-07 09:05 WIB) — BACA SEBELUM ISI DOKUMEN INI
+>
+> **1. Seluruh jam di dokumen ini meleset +7 jam.** `logs/session-hook.log`
+> berstempel **UTC** (`2026-08-07T00:37:12.163Z`) dan terbaca di sini sebagai
+> WIB. Kejadian "00:37" sebenarnya **07:37 WIB**, dan dokumen ini ditulis jam
+> **08:15 pagi**, bukan 01:15 malam. Selisih 35 menitnya **tetap benar** (dua
+> angka yang dibandingkan sama-sama UTC); yang salah cuma titik jamnya. Jadi
+> "user sedang bangun jam 1 pagi" di prompt estafet juga keliru — ia bangun pagi.
+>
+> **2. Akar masalahnya sudah DITEMUKAN, dan bukan salah satu dari tiga hipotesis
+> di §4.** `status.json` hanya ditulis saat Claude Code **menggambar ulang
+> statusline**, dan itu terjadi pada **giliran model**. `/rename` bukan giliran
+> model. Berkasnya tidak rusak; ia beku persis selama tidak ada giliran.
+>
+> **3. Premis yang menyesatkan seluruh penyelidikan ada di §4:** kesimpulan
+> *"statusline TERGAMBAR dengan nama BARU, jadi CC memang memanggil sesuatu"*
+> keliru — **`statusline-progress.sh` tidak pernah mencetak nama sesi sama
+> sekali**, ia cuma mencetak `Context …% │ Usage …%`. Nama di layar datang dari
+> **UI Claude Code sendiri**. Satu layar, dua produsen, umur berbeda.
+>
+> **4. Kerusakannya lebih sempit dari dugaan §6:** `/context` **tidak**
+> melaporkan angka basi — tanpa giliran, pemakaian context memang tidak berubah.
+> Yang benar-benar bisa basi hanya `session_name`.
+>
+> **Perbaikan sudah mendarat: `0.29.0`, merge `89103f0`.** Rinciannya di
+> `docs/2026-07-26-rebuild-audit/BACKLOG.md` Bagian 0, empat baris teratas.
+
+**Date:** 2026-08-07 01:15 (WIB) — ⚠️ **sebenarnya 08:15 WIB**, lihat koreksi di atas
 **Repo kerja:** `C:\Users\Mirza\workspace\mirza-marketplace` (dokumen/spec/BACKLOG/handoff) — **repo KODE `C:\Users\Mirza\workspace\mirza-bots`**, dua-duanya punya remote dan wajib di-push
 **Branch:** `main` (HEAD dokumen `69c8504` · HEAD kode `14d885e`)
 **Dari → Ke:** bot-02 → bot-03
