@@ -41,22 +41,22 @@ pernah dibahas.
 
 | # | Topik | Status | Di mana / sisa |
 |---|---|---|---|
-| A1 | Kapan **mulai mencatat** | 🟡 | Prinsip §1.3 + §6.3. Angkanya = T2 |
-| A2 | Kapan **tawarkan penyerahan** | 🟡 | Angkanya = T3. Ini yang selama ini TIDAK ADA |
-| A3 | Kapan **garis merah** (wajib serahkan) | ✅ | sisa <100k, sudah terpasang 0.25.0 |
-| A4 | Siapa yang memutuskan handoff | ✅ | §6.4 — mesin nyalakan, AI tawarkan, user ketok |
-| A5 | Ambang diperiksa **di batas selesai-task**, bukan di tengah pekerjaan | ⬜ | Aturan lama (SKILL-007) yang belum dikonfirmasi ulang. Tanpa ini pengingat bisa menginterupsi pekerjaan |
+| ~~A1~~ | ~~Kapan **mulai mencatat**~~ | **GUGUR** | Dicabut R2 (§0.3) — tidak ada momen "mulai mencatat" terpisah lagi. T2 ikut gugur |
+| A2 | Kapan **tawarkan penyerahan** | ⬜ | Tergantung **N1** (§0.3). Kalau semua pengingat bungkam, A2 gugur bersama T3 |
+| A3 | Kapan **garis merah** (wajib serahkan) | ⬜ | Sudah terpasang 0.25.0 (sisa <100k) — **tapi R2 mempertanyakan apakah ia tetap nyala.** = N1 |
+| A4 | Siapa yang memutuskan handoff | ✅ | **DIREVISI R2:** 👤 user memulai → 🧠 AI mengeksekusi. Mesin tidak lagi menyalakan |
+| A5 | Ambang diperiksa **di batas selesai-task**, bukan di tengah pekerjaan | ⬜ | Hanya relevan kalau N1 dijawab "tetap nyala". Kalau bungkam, A5 gugur |
 
 ### B. Dokumen
 
 | # | Topik | Status | Di mana / sisa |
 |---|---|---|---|
 | B1 | Kerangka & isi | ✅ | §3.2. **Perlu konfirmasi user: sudah lengkap atau masih kurang?** |
-| B2 | Lokasi & nama berkas | ✅ | §3.1 |
+| B2 | Lokasi & nama berkas | ✅ | §3.1, **DIREVISI R3 (§0.3): kembali ke `<repo-kerja>/.handoff/`** |
 | B3 | Siapa mengisi apa (🤖/🕐/🏁) | ✅ | §3.2 |
 | B4 | Aturan menulis (sunting bukan menumpuk, zona waktu, jangan duplikasi) | ✅ | §3.6 |
-| B5 | Penyimpanan/arsip — folder bot tidak punya git | ⬜ | T1 |
-| B6 | Berkas handoff **lama** di `<repo-kerja>/.handoff/` — dipindah, dibiarkan, atau dibaca sebagai warisan? | ⬜ | Belum pernah disinggung |
+| B5 | Penyimpanan/arsip — folder bot tidak punya git | ✅ | **Tertutup R3 (§0.3):** file di repo project → otomatis masuk git + remote. T1 ikut tertutup |
+| B6 | Berkas handoff **lama** di `<repo-kerja>/.handoff/` — dipindah, dibiarkan, atau dibaca sebagai warisan? | ✅ | **Tertutup R3:** dibiarkan di tempatnya. **Nol migrasi** |
 
 ### C. Prosesi
 
@@ -165,6 +165,75 @@ dari catatan kaki menjadi penyeimbang wajib**:
 
 Handoff sesi kecil boleh 15 baris.
 
+## 0.3 TIGA PEMBALIKAN — keputusan user 2026-08-07 ~20:56 WIB
+
+Ketiganya **membalik** keputusan yang sudah tertulis di dokumen ini. Dicatat
+sebagai pembalikan beserta buktinya (Tingkat 18), supaya tidak ada sesi
+berikutnya yang "memperbaiki"-nya kembali ke bentuk lama.
+
+> *"Batalkan soal file handoff yang lahir sejak rename pertama. · handoff ini
+> dilakukan berdasarkan kesadaran user saja. Mulai dari preparation, penulisan
+> hingga prosesi serah terima antar bot · File handoff tetap di masing-masing
+> repo project, bukan di folder bot."*
+
+### R1 — File TIDAK lahir saat rename
+
+**Membalik:** §3.1 (nama pakai `firstNameOfSession`) + §4.2 (*"rename oleh
+penerima sekaligus yang melahirkan file berikutnya"*) + §4.3
+(`renamedInThisSession`).
+
+File handoff lahir **saat handoff akan terjadi**, bukan saat sesi diberi nama.
+
+**Menutup T5** — kekhawatiran soal berkas setengah jadi dari sesi bertopik yang
+tidak pernah handoff. Berkas seperti itu sekarang tidak pernah ada.
+
+### R2 — Handoff berjalan atas KESADARAN USER, bukan pemicu mesin
+
+**Membalik:** §6.4 (*"🤖 mesin menyalakan → 🧠 AI menawarkan → 👤 user ketok"*)
+menjadi **👤 user memulai, 🧠 AI mengeksekusi**. Berlaku untuk **seluruh tiga
+tahap** yang user sebut: **preparation → penulisan → prosesi serah terima.**
+
+⚠️ **Ini mencabut mekanisme yang menjawab §1.3 — dan §1.3 adalah temuan paling
+tajam di seluruh dokumen ini.** Didaftarkan sadar (Tingkat 24):
+
+| Pertanyaan yang jadi yatim | Penjawab barunya |
+|---|---|
+| "siapa memastikan dokumen tidak dikarang di kondisi terburuk?" | **User, dengan memanggil handoff lebih awal.** Bukan mekanisme baru — pemindahan pemegang. User sendiri menetapkan model prima **di bawah 50%**; selama panggilannya di situ, §1.3 tetap terjaga |
+| T2 — ambang ① "mulai mencatat" | **GUGUR.** Tidak ada momen "mulai mencatat" yang terpisah lagi |
+| T3 — ambang ② "tawarkan penyerahan" | **Menunggu keputusan** — lihat pertanyaan terbuka di bawah |
+| A1 (kapan mulai mencatat) | **GUGUR**, ikut T2 |
+
+⚠️ **Risiko yang diterima sadar:** kalau user lupa memanggil, **tidak ada apa
+pun yang mengetuk.** Ini bukan kelemahan tersembunyi — ini konsekuensi yang
+dipilih, dan ditulis di sini supaya tetap terlihat.
+
+### R3 — File tetap di `<repo-kerja>/.handoff/`, BUKAN di folder bot
+
+**Membalik:** §3.1 (*"lokasi: `<folder-bot>/.handoff/`"*). Kembali ke bentuk
+SKILL-016; keputusan 2026-08-04 (*"seluruh state pindah ke folder bot"*) **tidak
+berlaku untuk berkas handoff.**
+
+**Buktinya justru menguatkan, bukan sekadar selera:**
+
+| Yang tertutup | Kenapa |
+|---|---|
+| **B5 / T1** — penyimpanan & arsip | Folder bot **tidak punya `.git`** (diverifikasi bot-02 di `bot-02`, `bot-03`). Repo project punya git **dan** remote → berkas handoff otomatis bersejarah, ter-backup, terlihat dari MacBook. **Tidak perlu repo arsip khusus** |
+| **B6** — nasib berkas handoff lama | **Nol migrasi.** Berkas lama sudah ada di `<repo-kerja>/.handoff/`; tidak ada yang perlu dipindah — sejalan dengan *"saya prefer tidak ada migrasi data"* |
+
+### Yang ikut jadi bisa dipangkas (belum diketok)
+
+| ✂️ | Kenapa alasannya hilang |
+|---|---|
+| Aturan nama pakai `firstNameOfSession` (§3.1) | Ada karena file lahir saat rename. R1 mencabut sebabnya — cukup pakai nama sesi yang berlaku saat handoff |
+| Aturan **"menyunting, bukan menumpuk"** (§3.6) | Ada karena file tumbuh sepanjang sesi dan berisiko jadi log kronologis. R1 membuat file ditulis sekali duduk — aturannya kehilangan musuhnya |
+
+### Pertanyaan terbuka yang dilahirkan tiga keputusan ini
+
+| # | Pertanyaan |
+|---|---|
+| **N1** | **Garis merah 0.25.0 (sisa <100k) — tetap nyala atau ikut bungkam?** Kalau handoff murni kesadaran user, apakah pengingat otomatis itu ikut diam, atau tetap boleh mengetuk sebagai satu-satunya rem terakhir? Menentukan nasib A2, A3, A5 |
+| **N2** | **Sesi tanpa repo, atau dengan DUA repo.** R3 menaruh file di repo project — tapi sesi bisa menyentuh dua repo (sesi ini: `mirza-marketplace` + `mirza-bots`) atau tidak menyentuh repo sama sekali (diskusi murni). Ke mana filenya? |
+
 ## 1. Filosofi — apa yang sebenarnya dijaga
 
 Ditanyakan ke user secara eksplisit. Jawabannya **dua**, dan urutannya penting:
@@ -208,8 +277,13 @@ sesi dan membawa **tiga hipotesis yang ditulis seolah fakta**, plus seluruh jam
 meleset +7 jam (UTC dibaca sebagai WIB). Penerimanya harus membongkar itu
 sebelum bisa bekerja.
 
-**Karena itu: dokumen handoff dicicil sepanjang sesi, bukan dikarang di akhir.**
-Disetujui user eksplisit.
+~~**Karena itu: dokumen handoff dicicil sepanjang sesi.**~~
+
+⚠️ **MEKANISMENYA DIREVISI R2 (§0.3) — masalahnya TIDAK.** Yang berubah bukan
+temuan ini, melainkan **siapa yang memegangnya**: dari *bot mencicil otomatis*
+menjadi *user memanggil handoff lebih awal*. User menetapkan model prima **di
+bawah 50%**; selama panggilannya di situ, §1.3 tetap terjaga. Kalau ia lupa
+memanggil, **tidak ada apa pun yang mengetuk** — risiko yang diterima sadar.
 
 ## 2. Prinsip rancangan
 
@@ -232,17 +306,17 @@ lupakan adalah kenapa tiga jam lalu ia membuang pendekatan A.
 
 ### 3.1 Lokasi & nama — DIKETOK USER
 
-- **Lokasi:** `<folder-bot>/.handoff/` (mis.
-  `C:\Users\Mirza\workspace\bot-02\.handoff\`), **bukan**
-  `<repo-kerja>/.handoff/`. Nama subfoldernya tetap `.handoff` — yang berubah
-  induknya, bukan namanya.
-  Membalik SKILL-016, menyelaraskan dengan keputusan user 2026-08-04 (*"seluruh
-  state pindah ke folder masing-masing bot"*) — file handoff selama ini
-  satu-satunya sisa state bersama yang belum ikut pindah.
+- **Lokasi:** ⚠️ **DIREVISI R3 (§0.3) — `<repo-kerja>/.handoff/`**, kembali ke
+  bentuk SKILL-016. Keputusan 2026-08-04 (*"seluruh state pindah ke folder
+  bot"*) **tidak berlaku** untuk berkas handoff: folder bot tidak punya `.git`,
+  repo project punya git **dan** remote. Alasan lengkap + apa yang ikut tertutup
+  ada di §0.3 R3.
+  ~~`<folder-bot>/.handoff/` — dicoret, jangan dihidupkan lagi.~~
 - **Nama:** `<timestamp>_<8-char-session-id>_<nama-sesi>.md`
-- Nama sesi yang dipakai = **nama PERTAMA** sesi itu; tidak ikut berubah kalau
-  sesi di-rename lagi. File adalah catatan sebuah *rentang kerja*, bukan cermin
-  nama sesi hari ini. Datanya sudah ada: `firstNameOfSession` di `reminders.ts`.
+- ⚠️ **Aturan "nama PERTAMA sesi" (`firstNameOfSession`) kehilangan sebabnya.**
+  Ia ada karena file lahir saat rename; R1 mencabut itu. File sekarang lahir
+  saat handoff, jadi cukup pakai nama sesi yang **sedang berlaku**. Belum
+  diketok — lihat §0.3 "yang ikut bisa dipangkas".
 - Nama sesi disanitasi sebelum jadi nama berkas (spasi/titik/slash).
 - Kata `prompt` di skema lama (`<ts>-prompt-<slug>.md`) **dibuang** — sudah
   tidak punya makna.
@@ -363,9 +437,10 @@ Empat, semuanya punya satu kesamaan: **tidak bisa direkonstruksi dari mana pun.*
 
 ### 3.6 Aturan menulis
 
-- **Menyunting, bukan menumpuk.** Temuan yang membatalkan temuan sebelumnya
-  **menggantikannya**, bukan berbaris di sampingnya. Tanpa aturan ini, file yang
-  tumbuh sepanjang sesi berubah jadi log kronologis — persis yang user larang.
+- ✂️ ~~**Menyunting, bukan menumpuk.**~~ ⚠️ **Kehilangan musuhnya setelah R1
+  (§0.3).** Aturan ini ada karena file tumbuh sepanjang sesi dan berisiko jadi
+  log kronologis. File yang ditulis sekali duduk tidak punya risiko itu. Belum
+  diketok — kandidat pangkas.
 - **Append-only chain antar-berkas.** Jangan pernah mengedit file handoff sesi
   LAIN. `Lanjutan dari` hanya diisi kalau benar-benar kontinuasi.
 - **Jangan menduplikasi checklist plan.** Plan = source of truth; handoff hanya
@@ -390,8 +465,9 @@ Empat, semuanya punya satu kesamaan: **tidak bisa direkonstruksi dari mana pun.*
 ### 4.2 TETAP ADA (keputusan user)
 
 - **ACK dua arah** — ke pengirim via agent-bus, dan ke user via Telegram.
-- **Rename sesi oleh penerima** — sekaligus yang melahirkan file handoff
-  berikutnya (§3.1).
+- **Rename sesi oleh penerima** — tetap ada, **tapi murni label untuk manusia.**
+  ⚠️ **DIREVISI R1 (§0.3):** rename **tidak lagi** melahirkan file handoff
+  berikutnya. File lahir saat handoff akan terjadi.
 - **Self-reset pengirim** — tapi disederhanakan jadi **`/clear` saja** (§4.3).
 
 ### 4.3 Self-reset = `/clear`, titik
@@ -418,8 +494,9 @@ nama lama (bug 0.26.0), jadi bot yang baru direset tetap menyandang nama
 pekerjaan yang baru saja ia serahkan sampai topik berikutnya datang. Yang
 menjawab "bot ini siap atau tidak" adalah context-nya, bukan namanya.
 
-**Tidak melahirkan file handoff palsu:** mesin memakai *"nama BERUBAH sejak sesi
-lahir"* (`renamedInThisSession`), bukan *"punya nama"*.
+~~**Tidak melahirkan file handoff palsu:** mesin memakai `renamedInThisSession`.~~
+⚠️ **MOOT setelah R1 (§0.3)** — rename tidak melahirkan file apa pun, jadi tidak
+ada file palsu yang perlu dicegah. Seluruh mekanisme ini gugur.
 
 **Utang yang ikut lahir:** `cc-plugin/src/server.ts:340` masih **mengajarkan**
 pola lama ke AI — deskripsi tool `send_slash` memakai contoh literal
@@ -516,8 +593,11 @@ diketok.
 
 ### 6.4 Pembagian peran
 
-🤖 **Mesin** menyalakan keadaan → 🧠 **AI** menilai & menawarkan ke user → 👤
-**user** yang ketok. Kalau user menolak, AI mengingatnya **di dalam sesi itu** —
+⚠️ **DIREVISI R2 (§0.3): 👤 user memulai → 🧠 AI mengeksekusi.** Mesin tidak
+lagi menyalakan apa pun. Urutan lama di bawah dipertahankan sebagai catatan.
+
+~~🤖 **Mesin** menyalakan keadaan → 🧠 **AI** menilai & menawarkan ke user → 👤
+**user** yang ketok.~~ Kalau user menolak, AI mengingatnya **di dalam sesi itu** —
 tempat yang benar, karena keputusannya memang hanya berlaku untuk sesi itu.
 Konsisten dengan `reminders.ts`: *"AI yang menyusun prioritasnya, dan AI boleh
 mengembalikan keputusannya ke user."*
@@ -533,11 +613,11 @@ sekali di ujung (tidak bisa ditawar). Skill lama tidak punya dua-duanya.
 
 | # | Pertanyaan | Kandidat | Kenapa penting |
 |---|---|---|---|
-| T1 | **Penyimpanan.** Folder bot **tidak punya `.git`** (diverifikasi: `bot-02`, `bot-03`). File handoff jadi keluar dari git: tanpa backup, tanpa sejarah, tidak terlihat dari MacBook | (1) terima apa adanya — rekomendasi bot-02 · (2) git lokal tanpa remote (pola vault) · (3) repo arsip khusus | Isinya pengetahuan paling mahal di seluruh protokol |
-| T2 | **Ambang ① "mulai mencatat"** | ~15–20% terpakai (150–200k pada 1M) | Menentukan berapa banyak sesi yang melahirkan file |
-| T3 | **Ambang ② "tawarkan penyerahan"** | ~35% (kebiasaan user), boleh diabaikan sampai 80% | Yang selama ini tidak ada sama sekali |
+| ~~T1~~ | ~~**Penyimpanan.** Folder bot tidak punya `.git`~~ | **TERTUTUP** | R3 (§0.3) mengembalikan file ke `<repo-kerja>/.handoff/` — repo punya git **dan** remote. Masalahnya bubar sendiri, tanpa repo arsip |
+| ~~T2~~ | ~~**Ambang ① "mulai mencatat"**~~ | **GUGUR** | R2 (§0.3) — tidak ada momen "mulai mencatat" terpisah lagi |
+| T3 | **Ambang ② "tawarkan penyerahan"** | **menunggu N1** | Kalau semua pengingat bungkam (R2), T3 gugur bersama A2. Kalau tidak, angkanya ~35% |
 | ~~T4~~ | ~~**Penegakan di titik kirim** (§6.5)~~ | **GUGUR** | Tertutup oleh E1 (§0.2): skill tidak punya titik penegakan |
-| T5 | **Sesi bertopik yang tidak pernah handoff** meninggalkan berkas setengah jadi | Biarkan — penerima **selalu** diberi path eksplisit, jadi berkas lain tidak mengganggu siapa pun. Folder pelan-pelan jadi jurnal kerja | Nyaris bubar sendiri, tinggal dikonfirmasi |
+| ~~T5~~ | ~~**Sesi bertopik yang tidak pernah handoff** meninggalkan berkas setengah jadi~~ | **TERTUTUP** | R1 (§0.3) — file cuma lahir saat handoff akan terjadi, jadi berkas setengah jadi tidak pernah ada |
 
 ### Tiga ambang, tiga pertanyaan berbeda
 
