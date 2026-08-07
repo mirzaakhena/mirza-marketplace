@@ -229,7 +229,7 @@ Satu baris = satu entri keputusan di dokumen sumber (satu baris tabel, atau satu
 | 2 — Jalur pesan | 32 | 5 | 4 | 22 | 1 TIDAK RELEVAN | Pipa dasar (allowlist, auto-download foto) jalan, tapi gap terbesar sistem baru ada di sini: `message_id` tak tersimpan, chunking tak ada, quoting tak ada. |
 | 3 — Penegakan | 21 | 1 | 0 | 20 | — | Hampir seluruhnya belum dibangun — hanya ack-tap-tombol yang sudah SELESAI; validasi tombol, prefiks `ai:`, dan penegakan mesin (ack/Stop-guard) masih nol. |
 | 4 — Sesi | 89 | **49** | **10** | 20 | 8 TIDAK RELEVAN/DITUNDA-sadar/DIGANTI · 4 PERLU DICEK | **DIREKONSILIASI 2026-08-07.** Angka lama ("0 SELESAI / 90 BELUM / belum mulai dibangun sama sekali") **SALAH TOTAL** — wrapper PTY, antrean injeksi, hook `SessionStart`, statusline bridge, dan `/context` semuanya sudah hidup. Sisa terbesarnya terblokir **satu akar: `/switch`**. |
-| 5 — Antar-bot | 82 | 0 | 0 | 82 | — | ⚠️ **ANGKA INI BASI, JANGAN DIPAKAI.** `agent_list`/`agent_status`/`agent_send` sudah hidup (0.21.0 dst) sementara tabel ini masih menulis nol. **Rekonsiliasi Tahap 5 belum dikerjakan** — itu pekerjaan berikutnya, dan sampai selesai setiap angka di baris ini tidak boleh dijadikan dasar keputusan. |
+| 5 — Antar-bot | 82 | **14** | **5** | 59 | 4 DIGANTI/DITUNDA-sadar | **DIREKONSILIASI 2026-08-07.** Tahap ini ternyata **dua proyek berbeda ukuran**: **§7 (jalur antar-bot) hampir selesai** — sisanya cuma broadcast/fan-out + beberapa field `agent_status`; **§8 (mesin handoff) belum sama sekali** (~50 baris), masih dilayani skill `handoff` sistem lama. |
 | 6 — Sisanya | 17 | 0 | 0 | 16 | 1 BUTUH KEPUTUSAN | Belum mulai; satu item (B-6, penyembunyian sesi remeh) terkunci kontradiksi kriteria antar-dokumen. |
 | **Tanpa tahap** | 41 | 0 | 0 | 0 | 41 BUTUH KEPUTUSAN | Perlu keputusan manusia sebelum bisa masuk tahap manapun — lihat Bagian 4 & 6. |
 
@@ -532,34 +532,34 @@ dua hal yang seharian ini terbukti berbeda.
 
 | ID | Fitur | Verdict | Status | Sumber |
 |---|---|---|---|---|
-| PTY-038 | `hop_count > 5` pada payload ber-`from` → DROP | KEEP | BELUM | area-06§6.7 |
-| BUS-017,037;SCAR-044;PTY-005 | Prinsip neighbor autonomy: prompt berhakim, slash tidak | KEEP prinsip | BELUM | area-07§7.0 |
-| BUS-037 | Bot macet diselamatkan user, bukan bot tetangga | KEEP | BELUM | area-07§7.0 |
-| BUS-027,022;SCAR-038 | Transport prompt antar-bot GANTI ke channel notif | GANTI(MERGE) | BELUM | area-07§7.1 |
-| BUS-025,038;SCAR-043 | Marker atribusi GANTI jadi metadata terstruktur | GANTI | BELUM | area-07§7.2 |
-| BUS-038 | Aturan anti-bounce ditulis ulang ke metadata | MODIFY | BELUM | area-07§7.2 |
-| BUS-023,024,031,042;PTY-038 | Guard anti-loop dua sisi (`hop_count`) | KEEP | BELUM | area-07§7.3 |
-| BUS-030,040,043;SKILL-030 | `agent_send` boleh otonom dlm alur yg diizinkan | MODIFY | BELUM | area-07§7.4 |
-| BUS-039 | Tetap terlarang: second opinion/delegasi otonom | KEEP | BELUM | area-07§7.4 |
+| PTY-038 | `hop_count > 5` pada payload ber-`from` → DROP | KEEP | **SELESAI** — `MAX_HOP = 5` di `agent/payload.ts` | area-06§6.7 |
+| BUS-017,037;SCAR-044;PTY-005 | Prinsip neighbor autonomy: prompt berhakim, slash tidak | KEEP prinsip | **SELESAI** — `kind:"slash"` tidak pernah dibawa; `send_slash` self-only tanpa parameter `target` | area-07§7.0 |
+| BUS-037 | Bot macet diselamatkan user, bukan bot tetangga | KEEP | BELUM (aturan skill, belum punya rumah di sistem baru) | area-07§7.0 |
+| BUS-027,022;SCAR-038 | Transport prompt antar-bot GANTI ke channel notif | GANTI(MERGE) | **SELESAI** — `inbox/` → `sink.push` sebagai notifikasi channel (`agent/receive.ts`) | area-07§7.1 |
+| BUS-025,038;SCAR-043 | Marker atribusi GANTI jadi metadata terstruktur | GANTI | **SELESAI** — `meta.origin`/`from_bot`/`agent_message_id`; penanda `[from: agent]` menyusul 0.22.0 | area-07§7.2 |
+| BUS-038 | Aturan anti-bounce ditulis ulang ke metadata | MODIFY | **SELESAI** — "balasan tidak boleh menuntut balasan" (`expects_reply` sah hanya bila `in_reply_to` kosong): loop A↔B jadi MUSTAHIL, bukan sekadar dibatasi | area-07§7.2 |
+| BUS-023,024,031,042;PTY-038 | Guard anti-loop dua sisi (`hop_count`) | KEEP | **SELESAI** — divalidasi di KEDUA sisi; alasannya tertulis: pengirimnya bisa versi lama atau ditulis tangan saat menguji | area-07§7.3 |
+| BUS-030,040,043;SKILL-030 | `agent_send` boleh otonom dlm alur yg diizinkan | MODIFY | **SEBAGIAN** — kontraknya ada di deskripsi tool ("DO NOT call autonomously…"), tapi daftar alur yang diizinkan belum punya rumah | area-07§7.4 |
+| BUS-039 | Tetap terlarang: second opinion/delegasi otonom | KEEP | BELUM (aturan skill) | area-07§7.4 |
 | BUS-043 | Prompt wipe-state wajib konfirmasi ulang | KEEP | BELUM | area-07§7.4 |
-| BUS-006–015;SCAR-073 | `agent_status` SIMPLIFY jadi satu query store | SIMPLIFY | BELUM | area-07§7.5 |
-| — | Field `agent_status`: status kerja idle/sibuk | KEEP | BELUM | area-07§7.5 |
-| BUS-014 | Field: pemakaian context (%+window token) | KEEP | BELUM | area-07§7.5 |
-| — | Field: nama & id sesi aktif | KEEP | BELUM | area-07§7.5 |
-| — | Field: model, effort level, biaya | KEEP+penambahan | BELUM | area-07§7.5 |
-| BUS-014 | Kontrak: `context_used_percent` null = ~0%, bukan error | KEEP wajib | BELUM | area-07§7.5 |
-| BUS-001–005 | `agent_list`: sumber pindah ke config+store terpusat | KEEP disederhanakan | BELUM | area-07§7.6 |
-| BUS-005 | Kontrak "safe to call autonomously at any time" | KEEP | BELUM | area-07§7.6 |
-| BUS-028,045 | Antre-untuk-offline (`online:false`, error per-target) | KEEP | BELUM | area-07§7.7 |
+| BUS-006–015;SCAR-073 | `agent_status` SIMPLIFY jadi satu query store | SIMPLIFY | **SELESAI** — `summarizePeer` membaca BERKAS; tidak satu proses pun disapa | area-07§7.5 |
+| — | Field `agent_status`: status kerja idle/sibuk | KEEP | **DITUNDA (sadar)** — sengaja tidak dikembalikan; §5.4 mencabut derivasi status, dan mengarangnya di sini akan menghidupkannya lewat pintu belakang | area-07§7.5 |
+| BUS-014 | Field: pemakaian context (%+window token) | KEEP | **SEBAGIAN** — `contextUsedPercent` ada; jumlah token window tidak | area-07§7.5 |
+| — | Field: nama & id sesi aktif | KEEP | **SEBAGIAN** — `sessionName` ada; id sesi tidak | area-07§7.5 |
+| — | Field: model, effort level, biaya | KEEP+penambahan | **SEBAGIAN** — `model` ada; effort dan biaya tidak | area-07§7.5 |
+| BUS-014 | Kontrak: `context_used_percent` null = ~0%, bukan error | KEEP wajib | **DIGANTI** — `null` sekarang berarti "belum pernah menggambar statusline", BUKAN "~0%". Perubahan sadar: menyamakan tidak-ada-data dengan nol adalah kebohongan yang terlihat meyakinkan | area-07§7.5 |
+| BUS-001–005 | `agent_list`: sumber pindah ke config+store terpusat | KEEP disederhanakan | **SELESAI (bentuk berbeda)** — dibaca dari folder tetangga; store terpusat dibatalkan user 2026-08-04 | area-07§7.6 |
+| BUS-005 | Kontrak "safe to call autonomously at any time" | KEEP | **SELESAI** — tertulis di deskripsi `agent_list` | area-07§7.6 |
+| BUS-028,045 | Antre-untuk-offline (`online:false`, error per-target) | KEEP | **SELESAI** — pesan menunggu di folder `inbox/` sampai botnya hidup; `online` dari PROSES, bukan dari ada-tidaknya data | area-07§7.7 |
 | BUS-045 | Kewajiban AI beri tahu user pesan dikonsumsi saat boot | KEEP | BELUM | area-07§7.7 |
-| SCAR-070 | Asimetri `agent_send`(antre) vs `pty_send_slash`(tolak) | Keputusan(KEEP) | BELUM | area-07§7.7 |
-| BUS-019,029,044 | Broadcast/fan-out: target string atau array | KEEP | BELUM | area-07§7.8 |
-| — | Pola leader fan-out (`agent_list`→send array→ringkas→STOP) | KEEP aturan skill | BELUM | area-07§7.8 |
-| BUS-041 | Kanal satu arah, tak ada reply channel | KEEP | BELUM | area-07§7.9 |
-| BUS-046 | Nama peer tak boleh ditebak, selalu dari `agent_list` | KEEP | BELUM | area-07§7.9 |
-| BUS-047 | Jangan taruh secret di badan prompt | KEEP | BELUM | area-07§7.9 |
-| BUS-016,018 | Validasi `kind` enum `['prompt']` | KEEP | BELUM | area-07§7.10 |
-| BUS-032 | Error handler jadi `isError:true` | KEEP | BELUM | area-07§7.10 |
+| SCAR-070 | Asimetri `agent_send`(antre) vs `pty_send_slash`(tolak) | Keputusan(KEEP) | **SELESAI** — kedua perilaku ada dan dijelaskan di deskripsi masing-masing tool | area-07§7.7 |
+| BUS-019,029,044 | Broadcast/fan-out: target string atau array | KEEP | BELUM — `to: z.string()` di `server.ts`, tidak menerima array | area-07§7.8 |
+| — | Pola leader fan-out (`agent_list`→send array→ringkas→STOP) | KEEP aturan skill | BELUM (terblokir broadcast) | area-07§7.8 |
+| BUS-041 | Kanal satu arah, tak ada reply channel | KEEP | **SELESAI** — "One-way — there is NO reply channel" | area-07§7.9 |
+| BUS-046 | Nama peer tak boleh ditebak, selalu dari `agent_list` | KEEP | **SELESAI** — tertulis di deskripsi `agent_send` | area-07§7.9 |
+| BUS-047 | Jangan taruh secret di badan prompt | KEEP | BELUM (`grep secret` = 0) | area-07§7.9 |
+| BUS-016,018 | Validasi `kind` enum `['prompt']` | KEEP | **DIGANTI** — tidak ada field `kind` lagi; enumnya bubar bersama `kind:"slash"`, dan enum bernilai tunggal memang bukan validasi | area-07§7.10 |
+| BUS-032 | Error handler jadi `isError:true` | KEEP | **SELESAI** — `cc-plugin/src/server.ts` | area-07§7.10 |
 | — | Skill `using-agent-bus` ditulis ulang dari kode | MODIFY | BELUM | area-07§7.10 |
 | SKILL-009 | Mode 🚀 Now — pilih bot→tulis file→kirim | KEEP | BELUM | area-08§8.1 |
 | SKILL-010 | Mode ⏭️ After this task — designation one-shot | KEEP | BELUM | area-08§8.1 |
@@ -568,7 +568,7 @@ dua hal yang seharian ini terbukti berbeda.
 | SKILL-006,007 | Ambang trigger GANTI dari persen→angka tunggal | GANTI | BELUM | area-08§8.2 |
 | SKILL-007 | Ambang diperiksa hanya di batas selesai-task | KEEP | BELUM | area-08§8.2 |
 | SKILL-008 | Designation→full-auto; tanpa itu→tombol; anti-spam | KEEP | BELUM | area-08§8.2 |
-| — | Syarat penerima#1: context <100.000 token, mutlak | ATURAN BARU | BELUM | area-08§8.2b |
+| — | Syarat penerima#1: context <100.000 token, mutlak | ATURAN BARU | **SEBAGIAN** — ambangnya DITETAPKAN dan DIUKUR (0.25.0: sisa <100k absolut, menggantikan 35%/75% warisan yang meleset 38×), pengingatnya hidup di kanal `[from: system]`; penegakan sisi PENERIMA belum ada | area-08§8.2b |
 | — | Syarat penerima#2: tidak sedang bekerja (fakta hook) | ATURAN BARU | BELUM | area-08§8.2b |
 | — | Pengirim menyaring lewat `agent_status` sebelum tulis file | ATURAN BARU | BELUM | area-08§8.2b |
 | — | Penerima memutuskan — keputusannya mengikat | ATURAN BARU | BELUM | area-08§8.2b |
@@ -610,12 +610,36 @@ dua hal yang seharian ini terbukti berbeda.
 | SKILL-028 | Template body `agent_send`: substitusi literal, guard sibuk | KEEP | BELUM | area-08§8.6 |
 | SKILL-021 | `agent_send` offline tetap terkirim, wajib disebut | KEEP | BELUM | area-08§8.7 |
 | SKILL-030 | Legalitas `agent_send` ditulis ulang sesuai §7.4 | MODIFY | BELUM | area-08§8.7 |
-| 8.B | Ambang PENGIRIM = 50% dari total context | DITETAPKAN | BELUM | area-08§8.B |
+| 8.B | Ambang PENGIRIM = 50% dari total context | DITETAPKAN | **DIGANTI (0.25.0)** — persentase dibuang, diganti **sisa <100k token ABSOLUT**. Yang dijaga adalah "masih cukup untuk menyelesaikan dan menyerahkan", dan biaya itu TIDAK berubah saat ukuran window berubah — jadi persentase memang alat ukur yang salah untuk pertanyaan ini (diukur: biaya penyerahan median 17k, n=30) | area-08§8.B |
 | — | Alarm#4: handoff menggantung tanpa ACK lewat batas waktu | FITUR BARU | BELUM | area-12§12.5,area-08§8.3 |
 | — | Referensi playbook di template handoff: wajib→kondisional | MODIFY | BELUM | area-13§13.4 |
 | SKILL-017 | Anti-Patterns/Lessons CARRY FORWARD tetap wajib | KEEP dipertegas | BELUM | area-13§13.4 |
 
-**Tahap 5: 82 item — 82 BELUM.**
+**Tahap 5: 82 item.** Direkonsiliasi ke kode nyata **2026-08-07** oleh bot-03
+(sebelumnya "82 BELUM", tidak pernah dicek). Hasil, dihitung dari tabel:
+**14 SELESAI · 5 SEBAGIAN · 4 DIGANTI/DITUNDA-sadar · 59 BELUM**.
+
+⚠️ **Yang paling penting dari rekonsiliasi ini bukan angkanya, melainkan
+GARIS PEMISAHNYA — dan garis itu tidak terlihat sebelum tabelnya dibetulkan:**
+
+- **§7 (jalur antar-bot) hampir seluruhnya SUDAH JADI.** `agent_send`,
+  `agent_list`, `agent_status`, guard hop dua sisi, aturan anti-bounce, antre
+  offline, kanal satu arah — semuanya hidup. Sisa nyatanya cuma **dua**:
+  **broadcast/fan-out** (`to: z.string()`, belum menerima array) dan beberapa
+  **field `agent_status`** (id sesi, effort, biaya, token window).
+- **§8 (mesin handoff) memang BELUM, dan angkanya jujur.** Lima puluh sekian
+  baris tentang mode Now/After/Ping-pong, template, syarat penerima, dan alarm
+  handoff menggantung — tidak satu pun ada di sistem baru. Yang melayaninya
+  hari ini masih **skill `handoff` di sistem lama**.
+
+**Jadi "Tahap 5" sebenarnya dua proyek yang sangat berbeda ukurannya**, dan
+menyebutnya satu tahap membuat yang kecil terlihat sebesar yang besar. Kalau
+mau maju di sini, §7 tinggal dua item; §8 adalah proyek tersendiri.
+
+⚠️ **Batas metode sama dengan Tahap 4:** verdict ditegakkan lewat `grep` penanda
+konkret ke `cc-plugin/src`, `bin`, dan `hooks`, bukan membaca tiap jalur sampai
+tuntas. `SELESAI` berarti *"penandanya ada di kode dan letaknya disebutkan"*,
+bukan *"sudah diuji hidup"*.
 
 ### Tahap 6 — Sisanya (`peek_conversation`, pencarian, penyembunyian sesi remeh, penamaan otomatis, delegasi B-8)
 
