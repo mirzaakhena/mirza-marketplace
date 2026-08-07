@@ -1,9 +1,10 @@
 # Rancang Ulang Handoff Protocol — dari Filosofinya
 
-**Tanggal:** 2026-08-07 (WIB) · **Status:** DRAFT — sebagian keputusan sudah
-diketok user, sebagian masih terbuka (§7)
-**Penulis:** bot-02 · **Metode:** brainstorming bersama user, sesi
-`task-lanjutan-rekonsiliasi`
+**Tanggal:** 2026-08-07 (WIB) · **Status:** DRAFT — **E1 sudah diketok (§0.2):
+ini lahir sebagai SKILL.** Tujuh pertanyaan sisa masih terbuka (§7)
+**Penulis:** bot-02 (§0–§9) · bot-03 (§0.2 + revisi pasca-E1)
+**Metode:** brainstorming bersama user — sesi `task-lanjutan-rekonsiliasi`,
+dilanjutkan `task-rancang-ulang-handoff-protocol`
 **Menggantikan:** `plugins/handoff/skills/handoff/SKILL.md` (297 baris) +
 `template.md` (63 baris)
 **Berbeda dari:** `docs/2026-07-26-rebuild-audit/area-08-handoff.md` — lihat §0
@@ -84,23 +85,20 @@ penjawabnya.
 | D2 | Clarity check pra-berkas (3 syarat) | ✅ | §5 — dipertahankan |
 | D3 | Mandat README sebelum menulis | ✅ | §5 — dipertahankan |
 | D4 | Larangan penerima | ✅ | §5 |
-| D5 | Penegakan mekanis di titik kirim | ⬜ | T4 |
-| D6 | Pengingat `handoff-note-stale` | 🟡 | §6.3 — kondisinya jelas, belum diimplementasikan |
+| D5 | Penegakan mekanis di titik kirim | ✅ | **GUGUR** — konsekuensi E1 (§0.2); skill tidak punya titik penegakan. T4 ikut tertutup |
+| D6 | Pengingat `handoff-note-stale` | ✅ | **GUGUR sebagai mesin** — konsekuensi E1. Digantikan P4 sebagai aturan teks (§0.2) |
 
 ### E. Cakupan & peralihan
 
 | # | Topik | Status | Di mana / sisa |
 |---|---|---|---|
-| E1 | ⭐ **Ini dibangun DI MANA — mengganti skill lama, atau lahir di `cc-plugin`?** | ⬜ | **Belum dibahas, dan ini menentukan bentuk seluruh sisanya** |
-| E2 | Nasib enam bot harian | ⬜ | Mereka memakai skill lama. Kalau rancangan ini lahir di `cc-plugin`, mereka tidak kebagian |
-| E3 | Peralihan — dua protokol hidup bersamaan? | ⬜ | Sudah terjadi untuk ambang: bot harian pakai 35%, bot uji pakai <100k |
-| E4 | Apakah `SKILL.md` + `template.md` lama dihapus | ⬜ | |
+| E1 | ⭐ **Ini dibangun DI MANA — mengganti skill lama, atau lahir di `cc-plugin`?** | ✅ | **SKILL.** Diketok user 2026-08-07 20:50 WIB — §0.2 |
+| E2 | Nasib enam bot harian | ✅ | Ikut kebagian, hari itu juga — konsekuensi langsung E1 |
+| E3 | Peralihan — dua protokol hidup bersamaan? | ✅ | **Tidak ada peralihan.** Skill lama diganti di tempat; satu protokol untuk semua bot |
+| E4 | Apakah `SKILL.md` + `template.md` lama dihapus | ✅ | `SKILL.md` **diganti isinya** · `template.md` **DIHAPUS** (§3.4) |
 
-⭐ **E1 adalah keputusan terbesar yang belum diambil.** Kalau lahir di
-`cc-plugin`, ia dapat mesin (pengingat, hook, pengisian jangkar otomatis) tapi
-tidak menyentuh enam bot harian. Kalau mengganti skill lama, ia langsung dipakai
-semua bot tapi tetap murni teks — dan **seluruh bagian "mesin mengisi jangkar"
-(§2 P2) gugur**, karena skill tidak bisa menjalankan apa pun.
+⭐ **E1 sudah diketok — lihat §0.2.** Ia menutup enam pertanyaan sekaligus (E1,
+E2, E3, E4, D5, D6) dan mencabut §6.3/§6.5 sebagai mesin.
 
 ### F. Sudah dibuang — dicatat supaya tidak dihidupkan lagi
 
@@ -111,6 +109,61 @@ semua bot tapi tetap murni teks — dan **seluruh bagian "mesin mengisi jangkar"
 | Cron timeout ACK | Keputusan user — konsekuensinya C6/C7 |
 | Konvensi nama sesi sebagai status | Keputusan user |
 | Mode File only | Sudah DROP sejak `area-08` §8.A |
+
+## 0.2 E1 DIKETOK — ini lahir sebagai SKILL, bukan di `cc-plugin`
+
+**Keputusan user 2026-08-07 ~20:50 WIB** (sesi `task-rancang-ulang-handoff-protocol`, bot-03):
+
+> *"Saya tidak ingin mengikat handoff secara khusus ke system kita ini. Kita
+> jadikan skill saja sekalian. Karena saya tidak yakin kita bisa membangun
+> system handoff yang (kita pikir sudah) sangat hebat untuk kemudian kita
+> integrasikan dalam system yang sudah ada."*
+
+**Alasannya bukan yang diperkirakan bot-02.** Tawaran yang diajukan berbunyi
+*"siapa yang kebagian vs seberapa banyak yang dijamin mesin"*. Alasan user satu
+lapis di bawahnya: **handoff adalah PRAKTIK, bukan fitur.** Terikat ke
+`cc-plugin` berarti nasibnya ikut nasib rebuild — rebuild belok, protokolnya
+ikut goyah. Ditambah kecurigaan terhadap pola *bangun hebat dulu di ruang
+terpisah, integrasikan belakangan*: yang akhirnya nyambung biasanya bukan
+sistemnya, melainkan kompromi-kompromi yang membuatnya tidak hebat lagi.
+
+### Yang ikut tertutup otomatis
+
+| # | Jadi |
+|---|---|
+| E2 | Semua bot kebagian, hari itu juga |
+| E3 | Tidak ada peralihan; tidak ada dua protokol hidup bersamaan |
+| E4 | `SKILL.md` diganti isinya · `template.md` DIHAPUS |
+| D5 / T4 | **Gugur** — skill tidak punya titik penegakan |
+| D6 | **Gugur sebagai mesin**, hidup lagi sebagai aturan teks |
+
+### Yang GUGUR — didaftarkan sadar (Tingkat 24)
+
+Membuang mekanisme **tidak** membuang pertanyaan yang ia jawab. Ketiganya
+diputuskan satu per satu, bukan dibiarkan yatim:
+
+| Yang gugur | Pertanyaan yang dulu ia jawab | Penjawab barunya |
+|---|---|---|
+| 🤖 mesin mengisi jangkar (§2 P2) | "siapa menjamin repo/branch/SHA/jam benar?" | **Instruksi teks**: jalankan `git log -1`, tempel hasilnya, sebut zona waktunya. Tidak dijamin mesin — tapi murah, dan hasilnya bisa diperiksa. Catatan: jam yang meleset +7 jam di `202608070115` bukan akibat ketiadaan mesin, melainkan ketiadaan aturan *"sebut zonanya"* — dan itu aturan teks |
+| Hook penegak di titik kirim (§6.5) | "siapa memblokir handoff yang belum lengkap?" | **Tidak ada.** Diterima — bot-02 sendiri sudah menandainya kemungkinan over-engineering (T4) |
+| Pengingat `handoff-note-stale` (§6.3) | "siapa mengingatkan bot mencicil dokumennya?" | **P4** — kerangka lahir lengkap dalam keadaan kosong; kotak kosong **itu** pengingatnya. Nol hook, nol token tambahan |
+
+⚠️ **Satu yatim tersisa, belum ada penjawabnya:** *kapan file itu pertama kali
+dibuat.* P4 baru bekerja **setelah** filenya ada. Dalam bentuk skill, ini
+satu-satunya bagian yang murni bergantung pada disiplin. **Ditunda sadar,
+bukan terlupa.**
+
+### Penyeimbang untuk kata "komprehensif"
+
+User menyebut requirement inti handoff adalah *"file handoff yang
+komprehensif"*. Mode gagalnya ada persis di kata itu: kerangka 10 kotak
+mengundang **pengisian formalitas** supaya tidak ada yang kosong, dan dokumen
+jadi panjang tapi hampa. Karena itu **P6 (`—` adalah jawaban yang sah) naik
+dari catatan kaki menjadi penyeimbang wajib**:
+
+> **Komprehensif = tidak ada yang HILANG, bukan semuanya TERISI.**
+
+Handoff sesi kecil boleh 15 baris.
 
 ## 1. Filosofi — apa yang sebenarnya dijaga
 
@@ -163,7 +216,7 @@ Disetujui user eksplisit.
 | # | Prinsip | Konsekuensi |
 |---|---|---|
 | P1 | **Urutkan isi berdasarkan seberapa TIDAK TERGANTIKAN informasinya** | Yang bisa direkonstruksi dari git/README → tunjuk saja. Yang cuma hidup di kepala bot yang akan di-clear → wajib, detail |
-| P2 | **Mesin mengisi jangkar, AI mengisi penilaian** | Repo/branch/SHA/jam/file tersentuh diisi otomatis — nol beban ingatan |
+| P2 | ~~**Mesin mengisi jangkar**~~ → **Jangkar DISALIN dari perintah, bukan diingat** | ⚠️ **Direvisi oleh E1 (§0.2).** Skill tidak bisa menjalankan apa pun, jadi bukan mesin yang mengisi — tapi bebannya tetap bukan ingatan: repo/branch/SHA/jam **disalin dari keluaran `git log -1` / `git status -sb`**, tidak pernah diketik dari kepala |
 | P3 | **Dokumen menunjuk, tidak mengulang** | Ada commit SHA / file spec → sebut ID-nya, jangan salin isinya (permintaan user) |
 | P4 | **Kerangka lengkap sejak file lahir** | Kotak kosong **adalah** pengingatnya. Tanpa hook, tanpa token tambahan |
 | P5 | **Yang butuh INGATAN dicicil; yang butuh KEADAAN SEKARANG ditulis di akhir** | Menaruh tiap bagian di momen di mana model paling bisa dipercaya |
@@ -408,6 +461,17 @@ Yang wajib ada di prompt, dan hanya ini:
 
 ## 6. Mesin pengingat — bagaimana bot diingatkan mencatat
 
+⛔ **SELURUH BAGIAN INI GUGUR sebagai rancangan.** E1 (§0.2) menetapkan protokol
+ini lahir sebagai **skill**, dan skill tidak bisa menjalankan apa pun. §6.3
+(`handoff-note-stale`, `handoff-note-missing`) dan §6.5 (portal di titik kirim)
+**tidak jadi dibangun**. Penggantinya: **P4** — kerangka lahir kosong, kotak
+kosong itu pengingatnya.
+
+Bagian ini **dipertahankan sebagai catatan**, bukan sebagai rencana, karena §6.2
+(syarat masuk `reminders.ts`) dan §6.4 (pembagian peran 🤖/🧠/👤) tetap berlaku
+kalau suatu hari ada yang mengusulkan mesin lagi. **Jangan dibangun tanpa
+membalik E1 lebih dulu, dan pembalikan wajib dibuktikan (Tingkat 18).**
+
 ### 6.1 Ada DUA mesin, bukan satu
 
 | Mesin | Kapan jalan | Kekuatan |
@@ -472,7 +536,7 @@ sekali di ujung (tidak bisa ditawar). Skill lama tidak punya dua-duanya.
 | T1 | **Penyimpanan.** Folder bot **tidak punya `.git`** (diverifikasi: `bot-02`, `bot-03`). File handoff jadi keluar dari git: tanpa backup, tanpa sejarah, tidak terlihat dari MacBook | (1) terima apa adanya — rekomendasi bot-02 · (2) git lokal tanpa remote (pola vault) · (3) repo arsip khusus | Isinya pengetahuan paling mahal di seluruh protokol |
 | T2 | **Ambang ① "mulai mencatat"** | ~15–20% terpakai (150–200k pada 1M) | Menentukan berapa banyak sesi yang melahirkan file |
 | T3 | **Ambang ② "tawarkan penyerahan"** | ~35% (kebiasaan user), boleh diabaikan sampai 80% | Yang selama ini tidak ada sama sekali |
-| T4 | **Penegakan di titik kirim** (§6.5) | ya / tidak | Bisa jadi over-engineering |
+| ~~T4~~ | ~~**Penegakan di titik kirim** (§6.5)~~ | **GUGUR** | Tertutup oleh E1 (§0.2): skill tidak punya titik penegakan |
 | T5 | **Sesi bertopik yang tidak pernah handoff** meninggalkan berkas setengah jadi | Biarkan — penerima **selalu** diberi path eksplisit, jadi berkas lain tidak mengganggu siapa pun. Folder pelan-pelan jadi jurnal kerja | Nyaris bubar sendiri, tinggal dikonfirmasi |
 
 ### Tiga ambang, tiga pertanyaan berbeda
