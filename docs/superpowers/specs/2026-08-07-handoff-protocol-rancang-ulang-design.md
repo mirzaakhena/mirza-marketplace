@@ -94,8 +94,10 @@ lupakan adalah kenapa tiga jam lalu ia membuang pendekatan A.
 
 ### 3.1 Lokasi & nama — DIKETOK USER
 
-- **Lokasi:** folder bot masing-masing (`C:\Users\Mirza\workspace\bot-NN\...`),
-  **bukan** `<repo-kerja>/.handoff/`.
+- **Lokasi:** `<folder-bot>/.handoff/` (mis.
+  `C:\Users\Mirza\workspace\bot-02\.handoff\`), **bukan**
+  `<repo-kerja>/.handoff/`. Nama subfoldernya tetap `.handoff` — yang berubah
+  induknya, bukan namanya.
   Membalik SKILL-016, menyelaraskan dengan keputusan user 2026-08-04 (*"seluruh
   state pindah ke folder masing-masing bot"*) — file handoff selama ini
   satu-satunya sisa state bersama yang belum ikut pindah.
